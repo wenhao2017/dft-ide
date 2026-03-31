@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { submitJob, queryJobStatus } from './services/donauService';
 
 const VIEW_TYPE = 'dftIde.welcome';
 const GLOBAL_KEY = 'dftIde.hasShownWelcome';
@@ -30,27 +31,56 @@ async function openWelcome(context: vscode.ExtensionContext): Promise<void> {
     vscode.ViewColumn.One,
     {
       enableScripts: true,
-      retainContextWhenHidden: true
+      retainContextWhenHidden: true,
+      localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'out')],
     }
   );
 
-  panel.webview.html = getWelcomeHtml();
+  panel.webview.html = getWebviewHtml(panel.webview, context.extensionUri);
 
   panel.webview.onDidReceiveMessage(async (msg) => {
     switch (msg.command) {
       case 'createWorkspace':
         await vscode.commands.executeCommand('dftIde.createWorkspace');
         return;
+
       case 'resetWelcome':
         await context.globalState.update(GLOBAL_KEY, false);
         vscode.window.showInformationMessage('已重置欢迎页状态，下次启动会再次弹出。');
         return;
+
+      case 'submitTask': {
+        const payload = msg.payload;
+        const jobId = submitJob(payload);
+        panel.webview.postMessage({ command: 'taskSubmitted', jobId });
+
+        // 模拟每 2s 推送一次进度
+        let pollCount = 0;
+        const timer = setInterval(() => {
+          const result = queryJobStatus(jobId);
+          panel.webview.postMessage({
+            command: 'jobStatus',
+            jobId: result.jobId,
+            status: result.status,
+            progress: result.progress,
+          });
+          pollCount++;
+          if (result.status === 'SUCCESS' || pollCount > 30) {
+            clearInterval(timer);
+          }
+        }, 2000);
+        return;
+      }
+
       default:
         return;
     }
   });
 }
 
+// ============================================================
+// createWorkspace — 原有逻辑完整保留，不做任何修改
+// ============================================================
 async function createWorkspace(): Promise<void> {
   const picked = await vscode.window.showOpenDialog({
     canSelectMany: false,
@@ -139,61 +169,44 @@ async function createWorkspace(): Promise<void> {
   }
 }
 
-function getWelcomeHtml(): string {
-  return `
-<!DOCTYPE html>
+/**
+ * 生成 Webview HTML —— 加载 React 打包产物
+ * 严格处理 Content-Security-Policy，使用 asWebviewUri 转化本地路径
+ */
+function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+  const scriptUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(extensionUri, 'out', 'webview.js')
+  );
+
+  const nonce = getNonce();
+
+  return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none';
+                 style-src ${webview.cspSource} 'unsafe-inline';
+                 script-src 'nonce-${nonce}';
+                 font-src ${webview.cspSource};
+                 img-src ${webview.cspSource} data:;" />
   <title>DFT IDE</title>
-  <style>
-    body {
-      font-family: sans-serif;
-      padding: 24px;
-    }
-    .box {
-      max-width: 760px;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      padding: 24px;
-    }
-    button {
-      margin-right: 12px;
-      margin-top: 12px;
-      padding: 8px 14px;
-      cursor: pointer;
-    }
-    code {
-      background: #f3f3f3;
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
-  </style>
 </head>
 <body>
-  <div class="box">
-    <h1>欢迎使用 DFT IDE</h1>
-    <p>当前阶段先做本地最小闭环：</p>
-    <ul>
-      <li>启动自动弹欢迎页</li>
-      <li>创建本地多根工作区</li>
-      <li>生成基础配置样例</li>
-      <li>后续在当前项目中继续扩展功能</li>
-    </ul>
-
-    <button onclick="send('createWorkspace')">创建本地工程</button>
-    <button onclick="send('resetWelcome')">重置欢迎页状态</button>
-  </div>
-
-  <script>
-    const vscode = acquireVsCodeApi();
-    function send(command) {
-      vscode.postMessage({ command: command });
-    }
-  </script>
+  <div id="root"></div>
+  <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
-</html>
-`;
+</html>`;
+}
+
+function getNonce(): string {
+  let text = '';
+  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  for (let i = 0; i < 32; i++) {
+    text += possible.charAt(Math.floor(Math.random() * possible.length));
+  }
+  return text;
 }
 
 export function deactivate() {}
