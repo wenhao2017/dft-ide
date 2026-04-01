@@ -4,10 +4,23 @@ import { submitJob, queryJobStatus } from './services/donauService';
 const VIEW_TYPE = 'dftIde.welcome';
 const GLOBAL_KEY = 'dftIde.hasShownWelcome';
 
+let currentPanel: vscode.WebviewPanel | undefined = undefined;
+let activeCategory: string | undefined = undefined;
+
 export function activate(context: vscode.ExtensionContext) {
+  // 1. 注册左侧扁平化的 Tree View
+  vscode.window.registerTreeDataProvider('dftIde.views.flows', new DftFlowProvider());
+
+  // 2. 注册命令：点击左侧一级菜单时触发
+  context.subscriptions.push(
+    vscode.commands.registerCommand('dftIde.openFlow', async (category: string) => {
+      await openWebviewFlow(context, category);
+    })
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand('dftIde.openWelcome', async () => {
-      await openWelcome(context);
+      await openWebviewFlow(context);
     })
   );
 
@@ -19,13 +32,63 @@ export function activate(context: vscode.ExtensionContext) {
 
   const hasShown = context.globalState.get<boolean>(GLOBAL_KEY, false);
   if (!hasShown) {
-    void openWelcome(context);
+    void openWebviewFlow(context);
     void context.globalState.update(GLOBAL_KEY, true);
   }
 }
 
-async function openWelcome(context: vscode.ExtensionContext): Promise<void> {
-  const panel = vscode.window.createWebviewPanel(
+// ============================================================
+// 一级菜单的 Tree View 数据提供者
+// ============================================================
+class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
+  getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
+    return element;
+  }
+
+  getChildren(element?: vscode.TreeItem): Thenable<vscode.TreeItem[]> {
+    if (element) {
+      return Promise.resolve([]); // 扁平结构，没有子节点
+    }
+
+    // 核心排版美化：为不同分类配置精美的 VS Code 内置图标
+    return Promise.resolve([
+      this.createMenuItem('COMMON', 'settings-gear', 'COMMON'),
+      this.createMenuItem('Design', 'symbol-color', 'Design'),
+      this.createMenuItem('Verification', 'verified-filled', 'Verification'),
+      this.createMenuItem('Formal', 'beaker', 'Formal'),
+      this.createMenuItem('STA', 'graph', 'STA'),
+    ]);
+  }
+
+  private createMenuItem(label: string, iconId: string, category: string): vscode.TreeItem {
+    const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+    item.iconPath = new vscode.ThemeIcon(iconId);
+    item.command = {
+      command: 'dftIde.openFlow',
+      title: 'Open Flow',
+      arguments: [category] // 现在只传 category
+    };
+    return item;
+  }
+}
+
+// ============================================================
+// Webview 管理与通信逻辑
+// ============================================================
+async function openWebviewFlow(context: vscode.ExtensionContext, category?: string): Promise<void> {
+  if (category) {
+    activeCategory = category;
+  }
+
+  if (currentPanel) {
+    currentPanel.reveal(vscode.ViewColumn.One);
+    if (activeCategory) {
+      currentPanel.webview.postMessage({ command: 'loadFlow', category: activeCategory });
+    }
+    return;
+  }
+
+  currentPanel = vscode.window.createWebviewPanel(
     VIEW_TYPE,
     'DFT IDE',
     vscode.ViewColumn.One,
@@ -36,10 +99,20 @@ async function openWelcome(context: vscode.ExtensionContext): Promise<void> {
     }
   );
 
-  panel.webview.html = getWebviewHtml(panel.webview, context.extensionUri);
+  currentPanel.webview.html = getWebviewHtml(currentPanel.webview, context.extensionUri);
 
-  panel.webview.onDidReceiveMessage(async (msg) => {
+  currentPanel.onDidDispose(() => {
+    currentPanel = undefined;
+  });
+
+  currentPanel.webview.onDidReceiveMessage(async (msg) => {
     switch (msg.command) {
+      case 'webviewReady':
+        if (activeCategory) {
+          currentPanel?.webview.postMessage({ command: 'loadFlow', category: activeCategory });
+        }
+        return;
+
       case 'createWorkspace':
         await vscode.commands.executeCommand('dftIde.createWorkspace');
         return;
@@ -52,13 +125,12 @@ async function openWelcome(context: vscode.ExtensionContext): Promise<void> {
       case 'submitTask': {
         const payload = msg.payload;
         const jobId = submitJob(payload);
-        panel.webview.postMessage({ command: 'taskSubmitted', jobId });
+        currentPanel?.webview.postMessage({ command: 'taskSubmitted', jobId });
 
-        // 模拟每 2s 推送一次进度
         let pollCount = 0;
         const timer = setInterval(() => {
           const result = queryJobStatus(jobId);
-          panel.webview.postMessage({
+          currentPanel?.webview.postMessage({
             command: 'jobStatus',
             jobId: result.jobId,
             status: result.status,
@@ -71,7 +143,6 @@ async function openWelcome(context: vscode.ExtensionContext): Promise<void> {
         }, 2000);
         return;
       }
-
       default:
         return;
     }
@@ -79,7 +150,7 @@ async function openWelcome(context: vscode.ExtensionContext): Promise<void> {
 }
 
 // ============================================================
-// createWorkspace — 原有逻辑完整保留，不做任何修改
+// createWorkspace 
 // ============================================================
 async function createWorkspace(): Promise<void> {
   const picked = await vscode.window.showOpenDialog({
@@ -169,10 +240,6 @@ async function createWorkspace(): Promise<void> {
   }
 }
 
-/**
- * 生成 Webview HTML —— 加载 React 打包产物
- * 严格处理 Content-Security-Policy，使用 asWebviewUri 转化本地路径
- */
 function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   const scriptUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, 'out', 'webview.js')
@@ -193,7 +260,7 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): stri
                  img-src ${webview.cspSource} data:;" />
   <title>DFT IDE</title>
 </head>
-<body>
+<body style="padding: 0; margin: 0; background-color: var(--vscode-editor-background);">
   <div id="root"></div>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

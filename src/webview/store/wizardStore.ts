@@ -1,32 +1,33 @@
 import { create } from 'zustand';
 
+export interface FlowContext {
+  category: string;
+}
+
 export interface TaskPayload {
-  /** 步骤1: 阶段 */
   stage?: string;
-  /** 步骤1: 目标模块 */
   module?: string;
-  /** 步骤2: 确认的归一化数据 */
   normalizedData?: any[];
-  /** 步骤3: 目标工具 */
   tool?: string;
-  /** 步骤3: CPU 核数 */
   cpuCores?: number;
-  /** 步骤4: 任务 ID */
   jobId?: string;
 }
 
 interface WizardState {
   currentStep: number;
   taskPayload: TaskPayload;
+  flowContext: FlowContext | null;
   nextStep: () => void;
   prevStep: () => void;
   updatePayload: (data: Partial<TaskPayload>) => void;
+  setFlowContext: (context: FlowContext | null) => void;
   reset: () => void;
 }
 
 const useWizardStore = create<WizardState>((set) => ({
   currentStep: 0,
   taskPayload: {},
+  flowContext: null,
 
   nextStep: () =>
     set((state) => ({
@@ -41,6 +42,11 @@ const useWizardStore = create<WizardState>((set) => ({
   updatePayload: (data) =>
     set((state) => ({
       taskPayload: { ...state.taskPayload, ...data },
+    })),
+
+  setFlowContext: (context) => 
+    set(() => ({
+      flowContext: context,
     })),
 
   reset: () =>
