@@ -7,9 +7,13 @@ import useWizardStore from '../../store/wizardStore';
 import vscode from '../../utils/vscode';
 
 const configSchema = z.object({
-  tool: z.enum(['hibist', 'sailor'], { required_error: '请选择目标工具' }),
+  tool: z.enum(['hibist', 'sailor'] as const, {
+    message: '请选择目标工具',
+  }),
   cpuCores: z
-    .number({ required_error: '请输入 CPU 核数' })
+    .number({
+      message: '请输入 CPU 核数',
+    })
     .int('CPU 核数必须为整数')
     .min(1, 'CPU 核数至少为 1')
     .max(256, 'CPU 核数最多为 256'),

@@ -30,16 +30,66 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  const hasShown = context.globalState.get<boolean>(GLOBAL_KEY, false);
-  if (!hasShown) {
-    void openWebviewFlow(context);
-    void context.globalState.update(GLOBAL_KEY, true);
-  }
+  // 每次启动都强制打开欢迎Webview页
+  void openWebviewFlow(context);
 }
 
 // ============================================================
 // 一级菜单的 Tree View 数据提供者
 // ============================================================
+
+interface FlowMenuConfig {
+  label: string;
+  icon: string;
+  description: string;
+  tooltip: string;
+  category: string;
+  contextValue: string;
+}
+
+const FLOW_CONFIGS: FlowMenuConfig[] = [
+  {
+    label: 'COMMON',
+    icon: 'settings-gear',
+    description: 'Git · OBS · Paths',
+    tooltip: '公共配置\n─────────────────\n• Git 设计/验证分支管理\n• Design Tree 路径配置\n• OBS 存储与公共数据下载\n• 归一化表格路径',
+    category: 'COMMON',
+    contextValue: 'dftFlow.common',
+  },
+  {
+    label: 'Design',
+    icon: 'symbol-color',
+    description: 'hibist · sailor · DCG',
+    tooltip: 'Design Flow\n─────────────────\n• 公共配置 & 工具版本选择\n• 执行流程 (DCG / DC / TOP-DOWN)\n• 集群资源 (CPU / 内存 / 队列)\n• 宏定义 & 特殊参数\n• 执行日志 & 结果查看\n• 端云协同提交',
+    category: 'Design',
+    contextValue: 'dftFlow.design',
+  },
+  {
+    label: 'Verification',
+    icon: 'verified-filled',
+    description: 'sailor · VCS · sim',
+    tooltip: 'Verification Flow\n─────────────────\n• 验证工具配置 & 版本管理\n• 仿真执行参数\n• 覆盖率报告查看\n• Donau HPC 作业提交',
+    category: 'Verification',
+    contextValue: 'dftFlow.verification',
+  },
+  {
+    label: 'Formal',
+    icon: 'beaker',
+    description: '— Coming Soon',
+    tooltip: 'Formal Verification\n─────────────────\n形式化验证工具链（开发中）',
+    category: 'Formal',
+    contextValue: 'dftFlow.formal',
+  },
+  {
+    label: 'STA',
+    icon: 'graph',
+    description: '— Coming Soon',
+    tooltip: 'Static Timing Analysis\n─────────────────\n静态时序分析配置（开发中）',
+    category: 'STA',
+    contextValue: 'dftFlow.sta',
+  },
+];
+
 class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
   getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
     return element;
@@ -47,26 +97,23 @@ class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
 
   getChildren(element?: vscode.TreeItem): Thenable<vscode.TreeItem[]> {
     if (element) {
-      return Promise.resolve([]); // 扁平结构，没有子节点
+      return Promise.resolve([]);
     }
-
-    // 核心排版美化：为不同分类配置精美的 VS Code 内置图标
-    return Promise.resolve([
-      this.createMenuItem('COMMON', 'settings-gear', 'COMMON'),
-      this.createMenuItem('Design', 'symbol-color', 'Design'),
-      this.createMenuItem('Verification', 'verified-filled', 'Verification'),
-      this.createMenuItem('Formal', 'beaker', 'Formal'),
-      this.createMenuItem('STA', 'graph', 'STA'),
-    ]);
+    return Promise.resolve(FLOW_CONFIGS.map((cfg) => this.createMenuItem(cfg)));
   }
 
-  private createMenuItem(label: string, iconId: string, category: string): vscode.TreeItem {
-    const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
-    item.iconPath = new vscode.ThemeIcon(iconId);
+  private createMenuItem(cfg: FlowMenuConfig): vscode.TreeItem {
+    const item = new vscode.TreeItem(cfg.label, vscode.TreeItemCollapsibleState.None);
+    item.iconPath = new vscode.ThemeIcon(cfg.icon);
+    item.description = cfg.description;
+    item.tooltip = new vscode.MarkdownString(
+      `**$(${cfg.icon}) ${cfg.label}**\n\n${cfg.tooltip.replace(/\n/g, '\n\n')}`
+    );
+    item.contextValue = cfg.contextValue;
     item.command = {
       command: 'dftIde.openFlow',
-      title: 'Open Flow',
-      arguments: [category] // 现在只传 category
+      title: `Open ${cfg.label} Flow`,
+      arguments: [cfg.category],
     };
     return item;
   }
@@ -75,6 +122,15 @@ class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
 // ============================================================
 // Webview 管理与通信逻辑
 // ============================================================
+/** 每个 category 对应的 Tab 标题 */
+const CATEGORY_TITLES: Record<string, string> = {
+  COMMON: 'DFT IDE — 公共配置',
+  Design: 'DFT IDE — Design Flow',
+  Verification: 'DFT IDE — Verification Flow',
+  Formal: 'DFT IDE — Formal',
+  STA: 'DFT IDE — STA',
+};
+
 async function openWebviewFlow(context: vscode.ExtensionContext, category?: string): Promise<void> {
   if (category) {
     activeCategory = category;
@@ -82,6 +138,8 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
 
   if (currentPanel) {
     currentPanel.reveal(vscode.ViewColumn.One);
+    // 更新 Tab 标题
+    currentPanel.title = activeCategory ? (CATEGORY_TITLES[activeCategory] ?? `DFT IDE — ${activeCategory}`) : 'DFT IDE';
     if (activeCategory) {
       currentPanel.webview.postMessage({ command: 'loadFlow', category: activeCategory });
     }
@@ -90,7 +148,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
 
   currentPanel = vscode.window.createWebviewPanel(
     VIEW_TYPE,
-    'DFT IDE',
+    activeCategory ? (CATEGORY_TITLES[activeCategory] ?? `DFT IDE — ${activeCategory}`) : 'DFT IDE',
     vscode.ViewColumn.One,
     {
       enableScripts: true,
@@ -121,6 +179,46 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         await context.globalState.update(GLOBAL_KEY, false);
         vscode.window.showInformationMessage('已重置欢迎页状态，下次启动会再次弹出。');
         return;
+
+      // ── 新增：选择文件/目录路径 ──────────────────────────────
+      case 'selectPath': {
+        const requestId: string = msg.requestId;
+        const targetType = msg.targetType || 'file';
+        const picked = await vscode.window.showOpenDialog({
+          canSelectFiles: targetType === 'file',
+          canSelectFolders: targetType === 'folder',
+          canSelectMany: false,
+          openLabel: '选择',
+        });
+        const path = picked?.[0]?.fsPath ?? null;
+        currentPanel?.webview.postMessage({
+          command: 'selectPathResponse',
+          requestId,
+          path,
+        });
+        return;
+      }
+
+      // ── 新增：在 VS Code 编辑器中打开文件或文件夹 ───────────────────
+      case 'openFile': {
+        const filePath: string | undefined = msg.path;
+        if (!filePath) { return; }
+        try {
+          const uri = vscode.Uri.file(filePath);
+          const stat = await vscode.workspace.fs.stat(uri);
+          
+          if (stat.type === vscode.FileType.Directory) {
+            // 如果是目录，则在系统的文件管理器中打开
+            await vscode.commands.executeCommand('revealFileInOS', uri);
+          } else {
+            // 如果是文件，则在 VS Code 编辑器中打开
+            await vscode.commands.executeCommand('vscode.open', uri);
+          }
+        } catch (error) {
+          vscode.window.showErrorMessage(`无法打开路径: ${filePath}`);
+        }
+        return;
+      }
 
       case 'submitTask': {
         const payload = msg.payload;

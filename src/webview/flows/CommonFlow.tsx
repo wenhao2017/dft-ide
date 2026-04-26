@@ -1,19 +1,23 @@
 import React from 'react';
-import { Card, Form, Input, Button, Space, Typography, Radio, Divider, Tooltip } from 'antd';
+import { Card, Form, Button, Space, Typography, Radio, Divider, Tooltip } from 'antd';
 import {
-  FolderOpenOutlined,
-  CloudDownloadOutlined,
-  SaveOutlined,
   SyncOutlined,
+  SaveOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
   BranchesOutlined,
   DatabaseOutlined,
+  CloudDownloadOutlined,
 } from '@ant-design/icons';
+import { useVscodePath } from '../hooks/useVscodePath';
+import PathInput from '../components/shared/PathInput';
 
 const { Title } = Typography;
 
 const CommonFlow: React.FC = () => {
+  const designTree  = useVscodePath();  // Design Tree 路径
+  const normTable   = useVscodePath();  // 归一化表格路径
+
   return (
     <Card
       bordered={false}
@@ -38,22 +42,26 @@ const CommonFlow: React.FC = () => {
       <Divider style={{ margin: '16px 0 32px 0' }} />
 
       <Form layout="vertical" style={{ maxWidth: 800, margin: '0 auto' }}>
+        {/* Design Tree：支持"打开"（在编辑器查看）和"选择" */}
         <Form.Item label="Design Tree (设计树路径)">
-          <Space.Compact style={{ width: '100%' }}>
-            <Input size="large" placeholder="请输入或选择 designtree 路径" />
-            <Button size="large" type="primary" icon={<FolderOpenOutlined />}>
-              打开
-            </Button>
-          </Space.Compact>
+          <PathInput
+            state={designTree}
+            placeholder="请输入或选择 designtree 路径"
+            size="large"
+            showOpen
+            showSelectFolder
+          />
         </Form.Item>
 
+        {/* 归一化表格：JSON 文件，支持"打开"和"选择" */}
         <Form.Item label="归一化表格路径">
-          <Space.Compact style={{ width: '100%' }}>
-            <Input size="large" placeholder="请输入或选择归一化表格路径" />
-            <Button size="large" type="primary" icon={<FolderOpenOutlined />}>
-              打开
-            </Button>
-          </Space.Compact>
+          <PathInput
+            state={normTable}
+            placeholder="请输入或选择归一化表格路径"
+            size="large"
+            showOpen
+            showSelectFile
+          />
         </Form.Item>
 
         <Form.Item label="OBS 存储与公共数据" style={{ marginTop: 32 }}>

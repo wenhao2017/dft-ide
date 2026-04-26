@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { Form, Input, Button, Typography, Tabs, Alert } from 'antd';
-import { FolderOpenOutlined, LeftOutlined, RightOutlined, CodeOutlined } from '@ant-design/icons';
+import { Form, Button, Typography, Tabs, Alert } from 'antd';
+import { LeftOutlined, RightOutlined, CodeOutlined } from '@ant-design/icons';
+import { useVscodePath } from '../../hooks/useVscodePath';
+import PathInput from '../shared/PathInput';
 
 const { Text } = Typography;
 
@@ -9,7 +11,6 @@ interface Props {
   onPrev: () => void;
 }
 
-// 极客风的终端展示组件
 const TerminalUI: React.FC = () => (
   <div
     style={{
@@ -23,9 +24,7 @@ const TerminalUI: React.FC = () => (
       marginTop: 24,
     }}
   >
-    <div
-      style={{ borderBottom: '1px solid #333', paddingBottom: 8, marginBottom: 8, color: '#888' }}
-    >
+    <div style={{ borderBottom: '1px solid #333', paddingBottom: 8, marginBottom: 8, color: '#888' }}>
       <CodeOutlined style={{ marginRight: 8 }} /> 交互终端 (TERM)
     </div>
     <div>$ waiting for execution...</div>
@@ -35,41 +34,27 @@ const TerminalUI: React.FC = () => (
 
 const Step3Execution: React.FC<Props> = ({ onNext, onPrev }) => {
   const [activeTab, setActiveTab] = useState('gen');
+  // 路径状态提升至组件顶层（Rule of Hooks）
+  const gvinPath    = useVscodePath();
+  const makefilePath = useVscodePath();
+  const checkPath   = useVscodePath();
 
   const renderScriptGen = () => (
-    <Form
-      layout="horizontal"
-      labelCol={{ span: 5 }}
-      wrapperCol={{ span: 19 }}
-      style={{ padding: '16px 0' }}
-    >
+    <Form layout="horizontal" labelCol={{ span: 5 }} wrapperCol={{ span: 19 }} style={{ padding: '16px 0' }}>
       <div style={{ marginBottom: 24 }}>
-        <Alert
-          message="覆盖默认配置：点击打开，可以选择自己编写的文件"
-          type="info"
-          showIcon
-        />
+        <Alert message="覆盖默认配置：点击打开，可以选择自己编写的文件" type="info" showIcon />
       </div>
 
       <Form.Item label="gvin / make_env">
-        <Input.Group compact>
-          <Input style={{ width: 'calc(100% - 80px)' }} placeholder="路径..." />
-          <Button icon={<FolderOpenOutlined />}>打开</Button>
-        </Input.Group>
+        <PathInput state={gvinPath} placeholder="路径..." showSelectFile showOpen />
       </Form.Item>
 
-      <Form.Item label="makefile">
-        <Input.Group compact>
-          <Input style={{ width: 'calc(100% - 80px)' }} placeholder="路径..." />
-          <Button icon={<FolderOpenOutlined />}>打开</Button>
-        </Input.Group>
+      <Form.Item label="Makefile" style={{ marginBottom: 16 }}>
+        <PathInput state={makefilePath} placeholder="路径..." showSelectFile showOpen />
       </Form.Item>
 
-      <Form.Item label="check">
-        <Input.Group compact>
-          <Input style={{ width: 'calc(100% - 80px)' }} placeholder="路径..." />
-          <Button icon={<FolderOpenOutlined />}>打开</Button>
-        </Input.Group>
+      <Form.Item label="Check">
+        <PathInput state={checkPath} placeholder="路径..." showSelectFile showOpen />
       </Form.Item>
 
       <TerminalUI />

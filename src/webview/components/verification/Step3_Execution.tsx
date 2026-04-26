@@ -1,6 +1,8 @@
 import React from 'react';
-import { Tabs, Form, Input, Button, Radio, Row, Col, Space } from 'antd';
-import { LeftOutlined, RightOutlined, FolderOpenOutlined, CodeOutlined } from '@ant-design/icons';
+import { Tabs, Form, Input, Button, Radio, Row, Col } from 'antd';
+import { LeftOutlined, RightOutlined, CodeOutlined } from '@ant-design/icons';
+import { useVscodePath } from '../../hooks/useVscodePath';
+import PathInput from '../shared/PathInput';
 
 const TerminalUI: React.FC = () => (
   <div
@@ -15,9 +17,7 @@ const TerminalUI: React.FC = () => (
       border: '1px solid #333',
     }}
   >
-    <div
-      style={{ borderBottom: '1px solid #333', paddingBottom: 8, marginBottom: 8, color: '#888' }}
-    >
+    <div style={{ borderBottom: '1px solid #333', paddingBottom: 8, marginBottom: 8, color: '#888' }}>
       <CodeOutlined style={{ marginRight: 8 }} /> 交互终端 (TERM)
     </div>
     <div>$ ready...</div>
@@ -29,6 +29,12 @@ const Step3Execution: React.FC<{ onNext: () => void; onPrev: () => void }> = ({
   onNext,
   onPrev,
 }) => {
+  // 所有路径状态提升至组件顶层（Rule of Hooks）
+  const headerCfg  = useVscodePath();
+  const envCfg     = useVscodePath();
+  const testcase   = useVscodePath();
+  const ip         = useVscodePath();
+
   const renderPlan = () => (
     <Tabs
       type="card"
@@ -89,23 +95,12 @@ const Step3Execution: React.FC<{ onNext: () => void; onPrev: () => void }> = ({
           key: 'gen',
           label: '脚本生成',
           children: (
-            <Form
-              layout="horizontal"
-              labelCol={{ span: 4 }}
-              wrapperCol={{ span: 20 }}
-              style={{ marginTop: 16 }}
-            >
+            <Form layout="horizontal" labelCol={{ span: 4 }} wrapperCol={{ span: 20 }} style={{ marginTop: 16 }}>
               <Form.Item label="header cfg">
-                <Space.Compact style={{ width: '100%' }}>
-                  <Input />
-                  <Button icon={<FolderOpenOutlined />}>打开</Button>
-                </Space.Compact>
+                <PathInput state={headerCfg} placeholder="路径..." showSelectFile showOpen />
               </Form.Item>
-              <Form.Item label="env cfg">
-                <Space.Compact style={{ width: '100%' }}>
-                  <Input />
-                  <Button icon={<FolderOpenOutlined />}>打开</Button>
-                </Space.Compact>
+              <Form.Item label="env cfg" style={{ marginBottom: 16 }}>
+                <PathInput state={envCfg} placeholder="路径..." showSelectFile showOpen />
               </Form.Item>
             </Form>
           ),
@@ -123,23 +118,12 @@ const Step3Execution: React.FC<{ onNext: () => void; onPrev: () => void }> = ({
           key: 'gen',
           label: '脚本生成',
           children: (
-            <Form
-              layout="horizontal"
-              labelCol={{ span: 4 }}
-              wrapperCol={{ span: 20 }}
-              style={{ marginTop: 16 }}
-            >
+            <Form layout="horizontal" labelCol={{ span: 4 }} wrapperCol={{ span: 20 }} style={{ marginTop: 16 }}>
               <Form.Item label="testcase">
-                <Space.Compact style={{ width: '100%' }}>
-                  <Input />
-                  <Button icon={<FolderOpenOutlined />}>打开</Button>
-                </Space.Compact>
+                <PathInput state={testcase} placeholder="路径..." showSelectFile showOpen />
               </Form.Item>
-              <Form.Item label="IP">
-                <Space.Compact style={{ width: '100%' }}>
-                  <Input />
-                  <Button icon={<FolderOpenOutlined />}>打开</Button>
-                </Space.Compact>
+              <Form.Item label="IP" style={{ marginBottom: 0 }}>
+                <PathInput state={ip} placeholder="路径..." showSelectFile showOpen />
               </Form.Item>
             </Form>
           ),
