@@ -103,6 +103,17 @@ npx @vscode/vsce package
 
 The `.vscodeignore` file excludes source files, local editor config, logs, maps, and development-only files from the VSIX. The packaged extension should contain `package.json`, `README.md`, `CHANGELOG.md`, assets, and the compiled `out/` bundle.
 
+## IDE Packaging
+
+Deployment notes and an optional packaging script live in:
+
+```text
+deploy/README.zh-CN.md
+deploy/package_ide.py
+```
+
+The recommended delivery model is VS Code Portable Mode: start from an official VS Code ZIP/TAR.GZ distribution, create a portable `data/` directory, install the generated VSIX into that copy of VS Code, write the default DFT IDE settings, and deliver the whole directory as a directly launchable IDE.
+
 ## VS Code Extension Host
 
 Main file: `src/extension.ts`

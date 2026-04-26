@@ -103,6 +103,17 @@ npx @vscode/vsce package
 
 `.vscodeignore` 会从 VSIX 中排除源码、本地编辑器配置、日志、source map 和开发期文件。打包后的插件主要保留 `package.json`、`README.md`、`CHANGELOG.md`、资源文件和编译后的 `out/` 产物。
 
+## IDE 打包交付
+
+部署说明和可选自动化脚本位于：
+
+```text
+deploy/README.zh-CN.md
+deploy/package_ide.py
+```
+
+推荐交付方式是 VS Code Portable Mode：使用官方 VS Code ZIP/TAR.GZ 版本作为底座，创建 portable `data/` 目录，把当前插件打成 VSIX 后安装到这份 VS Code 中，再写入默认 DFT IDE 设置，最终把整个目录作为可直接启动的 IDE 交付。
+
 ## VS Code 扩展宿主
 
 主文件：
