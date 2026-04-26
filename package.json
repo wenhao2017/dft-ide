@@ -35,13 +35,27 @@
       },
       {
         "command": "dftIde.createWorkspace",
-        "title": "DFT IDE: Create Workspace"
+        "title": "DFT IDE: Create Project"
+      },
+      {
+        "command": "dftIde.createProject",
+        "title": "DFT IDE: Create Project"
       },
       {
         "command": "dftIde.openFlow",
         "title": "Open DFT Flow"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "DFT IDE",
+      "properties": {
+        "dftIde.apiBase": {
+          "type": "string",
+          "default": "",
+          "description": "DFT IDE backend API base URL, for example http://localhost:8080."
+        }
+      }
+    }
   },
   "scripts": {
     "build:ext": "esbuild src/extension.ts --bundle --outfile=out/extension.js --format=cjs --platform=node --external:vscode --sourcemap",
@@ -53,6 +67,7 @@
     "vscode:prepublish": "npm run compile"
   },
   "dependencies": {
+    "@ant-design/icons": "^5.6.1",
     "@hookform/resolvers": "^5.0.1",
     "@tanstack/react-query": "^5.75.5",
     "@tanstack/react-table": "^8.21.3",

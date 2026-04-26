@@ -26,7 +26,13 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('dftIde.createWorkspace', async () => {
-      await createWorkspace();
+      await createProject();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('dftIde.createProject', async () => {
+      await createProject();
     })
   );
 
@@ -172,7 +178,8 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
 
       case 'createWorkspace':
-        await vscode.commands.executeCommand('dftIde.createWorkspace');
+      case 'createProject':
+        await vscode.commands.executeCommand('dftIde.createProject');
         return;
 
       case 'resetWelcome':
@@ -241,6 +248,9 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         }, 2000);
         return;
       }
+      case 'vscodeDemo':
+        await runVscodeDemo(msg.action);
+        return;
       default:
         return;
     }
@@ -248,14 +258,14 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
 }
 
 // ============================================================
-// createWorkspace 
+// createProject
 // ============================================================
-async function createWorkspace(): Promise<void> {
+async function createProject(): Promise<void> {
   const picked = await vscode.window.showOpenDialog({
     canSelectMany: false,
     canSelectFiles: false,
     canSelectFolders: true,
-    openLabel: '选择工程根目录'
+    openLabel: '选择项目根目录'
   });
 
   if (!picked || picked.length === 0) {
@@ -329,12 +339,48 @@ async function createWorkspace(): Promise<void> {
   );
 
   const action = await vscode.window.showInformationMessage(
-    'DFT IDE 本地工程已创建，是否立即打开？',
+    'DFT IDE 本地项目已创建，是否立即打开？',
     '打开'
   );
 
   if (action === '打开') {
     await vscode.commands.executeCommand('vscode.openFolder', workspaceFile, false);
+  }
+}
+
+async function runVscodeDemo(action: unknown): Promise<void> {
+  switch (action) {
+    case 'notification':
+      await vscode.window.showInformationMessage('DFT IDE 通知示例：项目状态已刷新。');
+      return;
+    case 'quickPick': {
+      const picked = await vscode.window.showQuickPick(
+        ['COMMON 配置', 'Design 工作流', 'Verification 工作流'],
+        { placeHolder: '选择要进入的 DFT 功能区' }
+      );
+      if (picked) {
+        await vscode.window.showInformationMessage(`已选择：${picked}`);
+      }
+      return;
+    }
+    case 'clipboard':
+      await vscode.env.clipboard.writeText('DFT IDE clipboard demo');
+      await vscode.window.showInformationMessage('示例文本已写入剪贴板。');
+      return;
+    case 'terminal': {
+      const terminal = vscode.window.createTerminal('DFT IDE Demo');
+      terminal.show();
+      terminal.sendText('echo DFT IDE terminal demo');
+      return;
+    }
+    case 'settings':
+      await vscode.commands.executeCommand('workbench.action.openSettings', 'DFT IDE');
+      return;
+    case 'external':
+      await vscode.env.openExternal(vscode.Uri.parse('https://code.visualstudio.com/api'));
+      return;
+    default:
+      await vscode.window.showWarningMessage('未知的 VS Code 能力示例。');
   }
 }
 
@@ -344,6 +390,7 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): stri
   );
 
   const nonce = getNonce();
+  const apiBase = vscode.workspace.getConfiguration('dftIde').get<string>('apiBase', '');
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -352,6 +399,7 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): stri
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'none';
+                 connect-src http://localhost:* http://127.0.0.1:* https:;
                  style-src ${webview.cspSource} 'unsafe-inline';
                  script-src 'nonce-${nonce}';
                  font-src ${webview.cspSource};
@@ -360,6 +408,9 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): stri
 </head>
 <body style="padding: 0; margin: 0; background-color: var(--vscode-editor-background);">
   <div id="root"></div>
+  <script nonce="${nonce}">
+    window.DFT_IDE_API_BASE = ${JSON.stringify(apiBase)};
+  </script>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;

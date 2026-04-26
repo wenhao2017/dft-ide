@@ -2,6 +2,13 @@ import { create } from 'zustand';
 
 export interface FlowContext {
   category: string;
+  projectId?: string;
+}
+
+export interface ProjectContext {
+  id: string;
+  name: string;
+  rootPath?: string;
 }
 
 export interface TaskPayload {
@@ -17,10 +24,12 @@ interface WizardState {
   currentStep: number;
   taskPayload: TaskPayload;
   flowContext: FlowContext | null;
+  activeProject: ProjectContext | null;
   nextStep: () => void;
   prevStep: () => void;
   updatePayload: (data: Partial<TaskPayload>) => void;
   setFlowContext: (context: FlowContext | null) => void;
+  setActiveProject: (project: ProjectContext | null) => void;
   reset: () => void;
 }
 
@@ -28,6 +37,7 @@ const useWizardStore = create<WizardState>((set) => ({
   currentStep: 0,
   taskPayload: {},
   flowContext: null,
+  activeProject: null,
 
   nextStep: () =>
     set((state) => ({
@@ -47,6 +57,11 @@ const useWizardStore = create<WizardState>((set) => ({
   setFlowContext: (context) => 
     set(() => ({
       flowContext: context,
+    })),
+
+  setActiveProject: (project) =>
+    set(() => ({
+      activeProject: project,
     })),
 
   reset: () =>

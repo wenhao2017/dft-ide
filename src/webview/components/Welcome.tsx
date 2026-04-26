@@ -1,215 +1,418 @@
-import React from 'react';
-import { Space, Typography, Card, Button, Row, Col, Divider } from 'antd';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Alert, Badge, Button, Card, Col, Empty, Input, List, Row, Space, Spin, Tag, Typography } from 'antd';
 import {
-  PlusOutlined,
-  SettingOutlined,
-  RocketOutlined,
+  ApiOutlined,
+  BellOutlined,
   CheckCircleOutlined,
+  CloudSyncOutlined,
+  CodeOutlined,
+  CopyOutlined,
   ExperimentOutlined,
+  FileProtectOutlined,
   LineChartOutlined,
+  PlusOutlined,
+  RocketOutlined,
+  SettingOutlined,
+  SlidersOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import vscode from '../utils/vscode';
+import { runVscodeDemo } from '../utils/ipc';
 import useWizardStore from '../store/wizardStore';
+import {
+  DftProject,
+  fetchProjectDashboard,
+  ProjectDashboard,
+  selectProject,
+} from '../services/projectService';
 
-const { Title, Text, Paragraph } = Typography;
+const { Paragraph, Text, Title } = Typography;
 
 interface Props {
   isDark?: boolean;
 }
 
-const Welcome: React.FC<Props> = ({ isDark = true }) => {
-  const { setFlowContext } = useWizardStore();
+const flows = [
+  {
+    key: 'COMMON',
+    label: 'COMMON',
+    title: '公共配置',
+    desc: '统一管理 Git 分支、项目路径、归一化表格和 OBS 公共数据。',
+    icon: <SettingOutlined />,
+    accent: '#2563eb',
+    status: 'Ready',
+  },
+  {
+    key: 'Design',
+    label: 'Design',
+    title: '设计流程',
+    desc: '覆盖工具版本、集群资源、执行脚本和设计结果查看。',
+    icon: <RocketOutlined />,
+    accent: '#7c3aed',
+    status: 'Ready',
+  },
+  {
+    key: 'Verification',
+    label: 'Verification',
+    title: '验证流程',
+    desc: '组织验证环境、用例执行、日志定位和报告分析。',
+    icon: <CheckCircleOutlined />,
+    accent: '#059669',
+    status: 'Ready',
+  },
+  {
+    key: 'Formal',
+    label: 'Formal',
+    title: '形式验证',
+    desc: '形式化工具链配置、任务执行与结果归档。',
+    icon: <ExperimentOutlined />,
+    accent: '#d97706',
+    status: 'Planned',
+    disabled: true,
+  },
+  {
+    key: 'STA',
+    label: 'STA',
+    title: '静态时序',
+    desc: '静态时序分析配置、检查执行与报告归档。',
+    icon: <LineChartOutlined />,
+    accent: '#dc2626',
+    status: 'Planned',
+    disabled: true,
+  },
+];
 
-  const handleCreateWorkspace = () => {
-    vscode.postMessage({ command: 'createWorkspace' });
+const vscodeDemos = [
+  { key: 'notification', label: '通知', icon: <BellOutlined /> },
+  { key: 'quickPick', label: '快速选择', icon: <ThunderboltOutlined /> },
+  { key: 'clipboard', label: '剪贴板', icon: <CopyOutlined /> },
+  { key: 'terminal', label: '终端', icon: <CodeOutlined /> },
+  { key: 'settings', label: '设置页', icon: <SlidersOutlined /> },
+  { key: 'external', label: '外部链接', icon: <ApiOutlined /> },
+];
+
+const Welcome: React.FC<Props> = ({ isDark = true }) => {
+  const { setFlowContext, setActiveProject } = useWizardStore();
+  const [dashboard, setDashboard] = useState<ProjectDashboard | null>(null);
+  const [loadingProjects, setLoadingProjects] = useState(true);
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const [selectingProjectId, setSelectingProjectId] = useState<string | null>(null);
+  const [projectKeyword, setProjectKeyword] = useState('');
+
+  const cardBorder = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.12)';
+  const panelBg = isDark ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.92)';
+
+  const currentProject = useMemo(() => {
+    if (!dashboard?.currentProjectId) return null;
+    return dashboard.projects.find((item) => item.id === dashboard.currentProjectId) ?? null;
+  }, [dashboard]);
+
+  const filteredProjects = useMemo(() => {
+    const keyword = projectKeyword.trim().toLowerCase();
+    const projects = dashboard?.projects ?? [];
+    if (!keyword) return projects;
+    return projects.filter((project) => project.name.toLowerCase().includes(keyword));
+  }, [dashboard, projectKeyword]);
+
+  useEffect(() => {
+    let disposed = false;
+
+    fetchProjectDashboard()
+      .then((data) => {
+        if (disposed) return;
+        setDashboard(data);
+        setProjectError(null);
+      })
+      .catch((error) => {
+        if (disposed) return;
+        setProjectError(error instanceof Error ? error.message : '项目列表加载失败');
+      })
+      .finally(() => {
+        if (!disposed) {
+          setLoadingProjects(false);
+        }
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const activateProject = async (project: DftProject) => {
+    setSelectingProjectId(project.id);
+    try {
+      const selected = await selectProject(project.id);
+      setActiveProject({
+        id: selected.id,
+        name: selected.name,
+        rootPath: selected.rootPath,
+      });
+      setDashboard((prev) => prev ? { ...prev, currentProjectId: selected.id } : prev);
+      setFlowContext({ category: 'COMMON', projectId: selected.id });
+    } finally {
+      setSelectingProjectId(null);
+    }
   };
 
   const openFlow = (category: string) => {
-    setFlowContext({ category });
+    setFlowContext({ category, projectId: dashboard?.currentProjectId ?? undefined });
   };
-
-  const cardBase: React.CSSProperties = {
-    borderRadius: 12,
-    height: '100%',
-    transition: 'all 0.25s ease',
-    border: isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
-    background: isDark
-      ? 'linear-gradient(145deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))'
-      : 'linear-gradient(145deg, #ffffff, #f8f9ff)',
-  };
-
-  const flowCards = [
-    {
-      key: 'COMMON',
-      label: 'COMMON',
-      desc: 'Git 分支 / 路径 / OBS 公共数据配置',
-      icon: <SettingOutlined style={{ fontSize: 36, color: '#4f8ef7' }} />,
-      color: '#4f8ef7',
-    },
-    {
-      key: 'Design',
-      label: 'Design',
-      desc: '设计工具配置、执行流程与结果分析',
-      icon: <RocketOutlined style={{ fontSize: 36, color: '#a855f7' }} />,
-      color: '#a855f7',
-    },
-    {
-      key: 'Verification',
-      label: 'Verification',
-      desc: '验证工具配置、仿真执行与报告查看',
-      icon: <CheckCircleOutlined style={{ fontSize: 36, color: '#22c55e' }} />,
-      color: '#22c55e',
-    },
-    {
-      key: 'Formal',
-      label: 'Formal',
-      desc: '形式化验证工具链配置（即将推出）',
-      icon: <ExperimentOutlined style={{ fontSize: 36, color: '#f59e0b' }} />,
-      color: '#f59e0b',
-      disabled: true,
-    },
-    {
-      key: 'STA',
-      label: 'STA',
-      desc: '静态时序分析配置（即将推出）',
-      icon: <LineChartOutlined style={{ fontSize: 36, color: '#ef4444' }} />,
-      color: '#ef4444',
-      disabled: true,
-    },
-  ];
 
   return (
-    <div style={{ animation: 'fadeInUp 0.45s ease-out', padding: '8px 0' }}>
-      {/* Hero Section */}
-      <Row justify="center" style={{ marginBottom: 32 }}>
-        <Col span={24} style={{ textAlign: 'center' }}>
-          <div style={{ marginBottom: 16 }}>
-            <svg
-              width="64"
-              height="64"
-              viewBox="0 0 100 100"
-              style={{ filter: isDark ? 'drop-shadow(0 0 12px rgba(79,142,247,0.5))' : 'drop-shadow(0 2px 8px rgba(79,142,247,0.3))' }}
-            >
-              <rect x="18" y="18" width="64" height="64" rx="8" fill="none" stroke="#4f8ef7" strokeWidth="5"/>
-              <line x1="34" y1="18" x2="34" y2="6" stroke="#4f8ef7" strokeWidth="5" strokeLinecap="round"/>
-              <line x1="50" y1="18" x2="50" y2="6" stroke="#4f8ef7" strokeWidth="5" strokeLinecap="round"/>
-              <line x1="66" y1="18" x2="66" y2="6" stroke="#4f8ef7" strokeWidth="5" strokeLinecap="round"/>
-              <line x1="34" y1="82" x2="34" y2="94" stroke="#4f8ef7" strokeWidth="5" strokeLinecap="round"/>
-              <line x1="50" y1="82" x2="50" y2="94" stroke="#4f8ef7" strokeWidth="5" strokeLinecap="round"/>
-              <line x1="66" y1="82" x2="66" y2="94" stroke="#4f8ef7" strokeWidth="5" strokeLinecap="round"/>
-              <line x1="18" y1="34" x2="6" y2="34" stroke="#4f8ef7" strokeWidth="5" strokeLinecap="round"/>
-              <line x1="18" y1="50" x2="6" y2="50" stroke="#4f8ef7" strokeWidth="5" strokeLinecap="round"/>
-              <line x1="18" y1="66" x2="6" y2="66" stroke="#4f8ef7" strokeWidth="5" strokeLinecap="round"/>
-              <line x1="82" y1="34" x2="94" y2="34" stroke="#4f8ef7" strokeWidth="5" strokeLinecap="round"/>
-              <line x1="82" y1="50" x2="94" y2="50" stroke="#4f8ef7" strokeWidth="5" strokeLinecap="round"/>
-              <line x1="82" y1="66" x2="94" y2="66" stroke="#4f8ef7" strokeWidth="5" strokeLinecap="round"/>
-              <rect x="36" y="36" width="28" height="28" rx="4" fill="#4f8ef7" opacity="0.15"/>
-              <line x1="38" y1="40" x2="56" y2="40" stroke="#4f8ef7" strokeWidth="3.5" strokeLinecap="round"/>
-              <line x1="38" y1="40" x2="38" y2="60" stroke="#4f8ef7" strokeWidth="3.5" strokeLinecap="round"/>
-              <line x1="38" y1="60" x2="56" y2="60" stroke="#4f8ef7" strokeWidth="3.5" strokeLinecap="round"/>
-              <polyline points="56,40 62,44 62,56 56,60" fill="none" stroke="#4f8ef7" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </div>
-          <Title
-            key={String(isDark)}
-            level={1}
-            style={{
-              fontSize: 42,
-              marginBottom: 8,
-              lineHeight: 1.2,
-              background: isDark
-                ? 'linear-gradient(90deg, #4f8ef7, #a855f7, #22c55e)'
-                : 'linear-gradient(90deg, #1677ff, #722ed1)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-              display: 'inline-block',
-            }}
-          >
-            DFT IDE
-          </Title>
-          <Paragraph
-            type="secondary"
-            style={{ fontSize: 15, maxWidth: 560, margin: '0 auto', lineHeight: 1.7 }}
-          >
-            专业的 Design-for-Testability 智能编排环境，覆盖设计、验证、形式化与时序分析全流程。
-          </Paragraph>
-        </Col>
-      </Row>
+    <div>
+      <div
+        className="welcome-hero-grid"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1.15fr) minmax(340px, 0.85fr)',
+          gap: 18,
+          marginBottom: 18,
+        }}
+      >
+        <div
+          style={{
+            borderRadius: 8,
+            padding: '28px 28px 24px',
+            border: `1px solid ${cardBorder}`,
+            background: isDark
+              ? 'linear-gradient(135deg, rgba(37,99,235,0.20), rgba(5,150,105,0.10) 48%, rgba(255,255,255,0.04))'
+              : 'linear-gradient(135deg, rgba(37,99,235,0.12), rgba(5,150,105,0.08) 48%, #ffffff)',
+            boxShadow: isDark
+              ? '0 18px 52px rgba(0,0,0,0.34)'
+              : '0 18px 44px rgba(15,23,42,0.10)',
+          }}
+        >
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Tag color="blue" icon={<ApiOutlined />}>
+              DFT Project Console
+            </Tag>
+            <div>
+              <Title level={1} style={{ margin: 0, fontSize: 42, lineHeight: 1.12 }}>
+                DFT IDE
+              </Title>
+              <Paragraph
+                type="secondary"
+                style={{ margin: '12px 0 0', maxWidth: 680, fontSize: 15, lineHeight: 1.8 }}
+              >
+                面向 Design-for-Testability 的本地工作台：选择项目后，公共配置、设计流程和验证流程会按项目加载对应上下文。
+              </Paragraph>
+            </div>
+            <Space size={12} wrap>
+              <Button
+                type="primary"
+                size="large"
+                icon={<PlusOutlined />}
+                onClick={() => vscode.postMessage({ command: 'createProject' })}
+              >
+                新建项目
+              </Button>
+              {currentProject && (
+                <Button
+                  size="large"
+                  icon={<CloudSyncOutlined />}
+                  onClick={() => activateProject(currentProject)}
+                  loading={selectingProjectId === currentProject.id}
+                >
+                  进入上次项目
+                </Button>
+              )}
+            </Space>
+          </Space>
+        </div>
 
-      {/* Create Workspace CTA */}
-      <Row justify="center" style={{ marginBottom: 32 }}>
-        <Col xs={24} sm={16} md={12}>
+        <div
+          style={{
+            borderRadius: 8,
+            padding: 18,
+            border: `1px solid ${cardBorder}`,
+            background: panelBg,
+          }}
+        >
+          <Space direction="vertical" size={14} style={{ width: '100%' }}>
+            <Text strong>VS Code 能力示例</Text>
+            <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.7 }}>
+              这些能力由扩展宿主执行，可用于项目提醒、环境选择、脚本调试和配置入口。
+            </Text>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+              {vscodeDemos.map((item) => (
+                <Button
+                  key={item.key}
+                  icon={item.icon}
+                  onClick={() => runVscodeDemo(item.key)}
+                  style={{ justifyContent: 'flex-start' }}
+                >
+                  {item.label}
+                </Button>
+              ))}
+            </div>
+          </Space>
+        </div>
+      </div>
+
+      <Row gutter={[14, 14]} style={{ marginBottom: 18 }}>
+        <Col xs={24} lg={14}>
           <Card
-            hoverable
-            onClick={handleCreateWorkspace}
-            style={{
-              ...cardBase,
-              background: isDark
-                ? 'linear-gradient(135deg, rgba(79,142,247,0.15), rgba(168,85,247,0.1))'
-                : 'linear-gradient(135deg, rgba(79,142,247,0.08), rgba(168,85,247,0.06))',
-              border: '1px solid rgba(79,142,247,0.3)',
-              cursor: 'pointer',
-            }}
-            bodyStyle={{ padding: '24px 20px' }}
+            title="项目列表"
+            extra={currentProject ? <Tag color="blue">上次：{currentProject.name}</Tag> : null}
+            style={{ height: '100%', borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
+            bodyStyle={{ padding: 0 }}
           >
-            <Space direction="vertical" size={8} style={{ width: '100%', textAlign: 'center' }}>
-              <PlusOutlined style={{ fontSize: 40, color: '#4f8ef7' }} />
-              <Title level={4} style={{ margin: 0 }}>新建工程</Title>
-              <Text type="secondary" style={{ fontSize: 13 }}>
-                创建本地 DFT IDE 工作区，自动生成标准目录结构与配置文件
-              </Text>
+            <div style={{ padding: '14px 18px', borderBottom: `1px solid ${cardBorder}` }}>
+              <Input.Search
+                allowClear
+                placeholder="搜索项目"
+                value={projectKeyword}
+                onChange={(event) => setProjectKeyword(event.target.value)}
+              />
+            </div>
+            {projectError && (
+              <Alert
+                type="warning"
+                showIcon
+                message="项目服务暂不可用"
+                description={projectError}
+                style={{ margin: 16 }}
+              />
+            )}
+            {loadingProjects ? (
+              <div style={{ padding: 36, textAlign: 'center' }}>
+                <Spin />
+              </div>
+            ) : filteredProjects.length ? (
+              <List
+                dataSource={filteredProjects}
+                renderItem={(project) => (
+                  <List.Item
+                    actions={[
+                      <Button
+                        key="select"
+                        type={project.id === dashboard?.currentProjectId ? 'primary' : 'default'}
+                        loading={selectingProjectId === project.id}
+                        onClick={() => activateProject(project)}
+                      >
+                        选择项目
+                      </Button>,
+                    ]}
+                    style={{ padding: '14px 18px' }}
+                  >
+                    <List.Item.Meta
+                      avatar={<FileProtectOutlined style={{ color: '#2563eb', fontSize: 22 }} />}
+                      title={
+                        <Space wrap>
+                          <Text strong>{project.name}</Text>
+                          {project.id === dashboard?.currentProjectId && <Tag color="green">上次项目</Tag>}
+                        </Space>
+                      }
+                    />
+                  </List.Item>
+                )}
+              />
+            ) : (
+              <Empty description={projectKeyword ? '未找到匹配项目' : '暂无项目'} style={{ padding: 36 }} />
+            )}
+          </Card>
+        </Col>
+
+        <Col xs={24} lg={10}>
+          <Card
+            title="当前能力"
+            style={{ height: '100%', borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
+          >
+            <Space direction="vertical" size={14} style={{ width: '100%' }}>
+              {[
+                ['Project', '项目列表、上次项目和项目选择入口', <FileProtectOutlined key="project" />],
+                ['Flow', '公共、设计、验证三条流程入口', <CloudSyncOutlined key="flow" />],
+                ['Roadmap', 'Formal / STA 工作流规划中', <ExperimentOutlined key="roadmap" />],
+              ].map(([name, desc, icon]) => (
+                <div
+                  key={String(name)}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '32px 1fr',
+                    gap: 10,
+                    alignItems: 'center',
+                    padding: '10px 0',
+                    borderTop: `1px solid ${cardBorder}`,
+                  }}
+                >
+                  <span style={{ color: '#2563eb', fontSize: 20 }}>{icon}</span>
+                  <div>
+                    <Text strong>{name}</Text>
+                    <div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {desc}
+                      </Text>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </Space>
           </Card>
         </Col>
       </Row>
 
-      <Divider plain style={{ margin: '0 0 24px 0' }}>
-        <Text type="secondary" style={{ fontSize: 13 }}>快速进入工作流</Text>
-      </Divider>
-
-      {/* Flow Cards Grid */}
-      <Row gutter={[16, 16]}>
-        {flowCards.map((fc) => (
-          <Col key={fc.key} xs={24} sm={12} md={8} lg={fc.disabled ? 12 : 8}
-               style={{ display: 'flex' }}>
-            <Card
-              hoverable={!fc.disabled}
-              onClick={fc.disabled ? undefined : () => openFlow(fc.key)}
-              style={{
-                ...cardBase,
-                width: '100%',
-                opacity: fc.disabled ? 0.55 : 1,
-                cursor: fc.disabled ? 'not-allowed' : 'pointer',
-                borderColor: fc.disabled ? undefined : `${fc.color}33`,
-              }}
-              bodyStyle={{ padding: '20px 16px' }}
-            >
-              <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  {fc.icon}
-                  <div>
-                    <Title level={5} style={{ margin: 0, color: fc.color }}>
-                      {fc.label}
-                    </Title>
-                    {fc.disabled && (
-                      <Text style={{ fontSize: 11, color: '#f59e0b' }}>即将推出</Text>
-                    )}
-                  </div>
-                </div>
-                <Text type="secondary" style={{ fontSize: 13, lineHeight: 1.6 }}>
-                  {fc.desc}
-                </Text>
-              </Space>
-            </Card>
+      <Row gutter={[14, 14]}>
+        {flows.map((flow) => (
+          <Col
+            key={flow.key}
+            xs={24}
+            sm={12}
+            lg={flow.disabled ? 12 : 8}
+            style={{ display: 'flex' }}
+          >
+            <div style={{ width: '100%', height: '100%' }}>
+              <Badge.Ribbon
+                text={flow.status}
+                color={flow.disabled ? 'default' : flow.accent}
+                style={{ display: flow.disabled ? 'block' : 'none' }}
+              >
+                <Card
+                  hoverable={!flow.disabled}
+                  onClick={flow.disabled ? undefined : () => openFlow(flow.key)}
+                  style={{
+                    height: '100%',
+                    minHeight: 220,
+                    width: '100%',
+                    borderRadius: 8,
+                    border: `1px solid ${flow.disabled ? cardBorder : `${flow.accent}45`}`,
+                    background: panelBg,
+                    opacity: flow.disabled ? 0.66 : 1,
+                    cursor: flow.disabled ? 'not-allowed' : 'pointer',
+                  }}
+                  bodyStyle={{ padding: 18, height: '100%' }}
+                >
+                  <Space
+                    direction="vertical"
+                    size={12}
+                    style={{ width: '100%', height: '100%', justifyContent: 'space-between' }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                      <span style={{ color: flow.accent, fontSize: 28 }}>{flow.icon}</span>
+                      {!flow.disabled && <Tag color={flow.accent}>{flow.status}</Tag>}
+                    </div>
+                    <div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {flow.label}
+                      </Text>
+                      <Title level={4} style={{ margin: '2px 0 6px', fontSize: 18 }}>
+                        {flow.title}
+                      </Title>
+                      <Text type="secondary" style={{ lineHeight: 1.7 }}>
+                        {flow.desc}
+                      </Text>
+                    </div>
+                  </Space>
+                </Card>
+              </Badge.Ribbon>
+            </div>
           </Col>
         ))}
       </Row>
-
       <style>{`
-        @keyframes fadeInUp {
-          from { opacity: 0; transform: translateY(16px); }
-          to   { opacity: 1; transform: translateY(0); }
+        @media (max-width: 760px) {
+          .welcome-hero-grid {
+            grid-template-columns: 1fr !important;
+          }
         }
       `}</style>
     </div>

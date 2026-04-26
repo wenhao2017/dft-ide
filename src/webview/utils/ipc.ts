@@ -70,3 +70,7 @@ export async function selectPath(targetType: 'file' | 'folder' = 'file'): Promis
 export function openFileInEditor(path: string): void {
   vscode.postMessage({ command: 'openFile', path });
 }
+
+export function runVscodeDemo(action: string): void {
+  vscode.postMessage({ command: 'vscodeDemo', action });
+}

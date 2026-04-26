@@ -31,7 +31,7 @@ const Step1Context: React.FC = () => {
   };
 
   const handleCreateWorkspace = () => {
-    vscode.postMessage({ command: 'createWorkspace' });
+    vscode.postMessage({ command: 'createProject' });
   };
 
   return (
@@ -57,7 +57,7 @@ const Step1Context: React.FC = () => {
       <Divider />
 
       <Space>
-        <Button onClick={handleCreateWorkspace}>创建本地工程</Button>
+        <Button onClick={handleCreateWorkspace}>创建本地项目</Button>
         <Button type="primary" onClick={handleNext}>
           下一步
         </Button>

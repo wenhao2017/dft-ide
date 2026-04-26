@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ConfigProvider, Layout, theme, Button, Card } from 'antd';
-import { HomeOutlined } from '@ant-design/icons';
+import { Button, ConfigProvider, Layout, Tag, theme, Typography } from 'antd';
+import { HomeOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import CommonFlow from './flows/CommonFlow';
 import DesignFlow from './flows/DesignFlow';
 import VerificationFlow from './flows/VerificationFlow';
@@ -10,8 +10,8 @@ import useWizardStore from './store/wizardStore';
 import vscode from './utils/vscode';
 
 const { Content } = Layout;
+const { Text, Title } = Typography;
 
-/** Detect VS Code color theme from body class list */
 function detectVscodeTheme(): 'dark' | 'light' | 'hc' {
   const body = document.body;
   if (body.classList.contains('vscode-light')) return 'light';
@@ -19,11 +19,28 @@ function detectVscodeTheme(): 'dark' | 'light' | 'hc' {
   return 'dark';
 }
 
+const flowMeta: Record<string, { title: string; subtitle: string; accent: string }> = {
+  COMMON: {
+    title: '公共配置中心',
+    subtitle: '维护设计、验证与共享数据都会复用的基础路径和同步动作。',
+    accent: '#2563eb',
+  },
+  Design: {
+    title: 'Design 工作流配置',
+    subtitle: '把设计任务从环境准备、工具配置、执行到结果查看串成稳定闭环。',
+    accent: '#7c3aed',
+  },
+  Verification: {
+    title: 'Verification 工作流配置',
+    subtitle: '围绕验证工具链、用例执行和报告分析沉淀标准化验证流程。',
+    accent: '#059669',
+  },
+};
+
 const App: React.FC = () => {
-  const { flowContext, setFlowContext, reset } = useWizardStore();
+  const { flowContext, activeProject, setFlowContext, reset } = useWizardStore();
   const [vscTheme, setVscTheme] = useState<'dark' | 'light' | 'hc'>(detectVscodeTheme);
 
-  // Listen for VS Code theme changes (body class mutation)
   useEffect(() => {
     const observer = new MutationObserver(() => {
       setVscTheme(detectVscodeTheme());
@@ -33,42 +50,25 @@ const App: React.FC = () => {
   }, []);
 
   const isDark = vscTheme === 'dark' || vscTheme === 'hc';
+  const activeMeta = flowContext ? flowMeta[flowContext.category] : undefined;
 
-  // Ant Design token overrides that harmonize with VS Code
   const antdTheme = {
     algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
     token: {
-      colorPrimary: '#4f8ef7',
+      colorPrimary: '#2563eb',
       borderRadius: 8,
-      // Use transparent backgrounds so VS Code background shows through
-      colorBgContainer: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
-      colorBgElevated: isDark ? '#252526' : '#ffffff',
-      colorBorder: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.12)',
+      colorBgLayout: 'transparent',
+      colorBgContainer: isDark ? 'rgba(255,255,255,0.045)' : '#ffffff',
+      colorBgElevated: isDark ? '#1f1f22' : '#ffffff',
+      colorBorder: isDark ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.12)',
       fontFamily:
         "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', Roboto, sans-serif",
     },
-  };
-
-  const cardStyle: React.CSSProperties = {
-    boxShadow: isDark
-      ? '0 8px 32px rgba(0,0,0,0.4)'
-      : '0 4px 24px rgba(0,0,0,0.08)',
-    borderRadius: 12,
-    border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.08)',
-  };
-
-  const titleGradient: React.CSSProperties = {
-    marginBottom: 0,
-    textAlign: 'center' as const,
-    background: isDark
-      ? 'linear-gradient(90deg, #4f8ef7, #a855f7)'
-      : 'linear-gradient(90deg, #1677ff, #722ed1)',
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-    backgroundClip: 'text',
-    fontSize: 20,
-    fontWeight: 700,
-    letterSpacing: 0.5,
+    components: {
+      Card: { borderRadiusLG: 8 },
+      Button: { borderRadius: 7, controlHeight: 34 },
+      Steps: { colorPrimary: activeMeta?.accent ?? '#2563eb' },
+    },
   };
 
   const renderFlowContent = (category: string) => {
@@ -85,9 +85,7 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (vscode) {
-      vscode.postMessage({ command: 'webviewReady' });
-    }
+    vscode.postMessage({ command: 'webviewReady' });
 
     const handleMessage = (event: MessageEvent) => {
       const msg = event.data;
@@ -106,46 +104,64 @@ const App: React.FC = () => {
       <Layout
         style={{
           minHeight: '100vh',
-          background: 'transparent',
-          padding: '32px 20px',
+          padding: '24px 18px',
+          background: isDark
+            ? 'linear-gradient(180deg, rgba(37,99,235,0.08), transparent 220px)'
+            : 'linear-gradient(180deg, rgba(37,99,235,0.07), transparent 240px)',
         }}
       >
-        <Content
-          style={{
-            maxWidth: 1080,
-            margin: '0 auto',
-            width: '100%',
-          }}
-        >
+        <Content style={{ maxWidth: 1180, margin: '0 auto', width: '100%' }}>
           {!flowContext ? (
             <Welcome isDark={isDark} />
           ) : (
-            <Card
-              bordered={false}
-              style={cardStyle}
-              title={
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <Button
-                    type="text"
-                    icon={<HomeOutlined />}
-                    onClick={() => setFlowContext(null)}
-                    size="small"
-                    style={{ color: 'inherit' }}
-                  />
-                  {/* key={vscTheme} 强制 webkit 重绘渐变文字 */}
-                  <span
-                    key={vscTheme}
-                    style={titleGradient}
-                  >
-                    {flowContext.category} 工作流配置
-                  </span>
-                </div>
-              }
+            <div
+              style={{
+                borderRadius: 8,
+                overflow: 'hidden',
+                border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.24))',
+                background: isDark ? 'rgba(18,18,20,0.72)' : 'rgba(255,255,255,0.88)',
+                boxShadow: isDark
+                  ? '0 18px 48px rgba(0,0,0,0.36)'
+                  : '0 18px 42px rgba(15,23,42,0.10)',
+              }}
             >
-              <div style={{ padding: '8px 0' }}>
-                {renderFlowContent(flowContext.category)}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 16,
+                  padding: '18px 20px',
+                  borderBottom: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
+                  background: activeMeta
+                    ? `linear-gradient(135deg, ${activeMeta.accent}1f, transparent 58%)`
+                    : undefined,
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <Tag color={activeMeta?.accent ?? 'blue'} icon={<ThunderboltOutlined />}>
+                    DFT IDE
+                  </Tag>
+                  {activeProject && (
+                    <Tag color="green" style={{ marginLeft: 8 }}>
+                      {activeProject.name}
+                    </Tag>
+                  )}
+                  <Title level={2} style={{ margin: '8px 0 2px', fontSize: 24 }}>
+                    {activeMeta?.title ?? `${flowContext.category} 工作流配置`}
+                  </Title>
+                  <Text type="secondary">{activeMeta?.subtitle}</Text>
+                </div>
+                <Button
+                  icon={<HomeOutlined />}
+                  onClick={() => setFlowContext(null)}
+                  style={{ flex: '0 0 auto' }}
+                >
+                  返回首页
+                </Button>
               </div>
-            </Card>
+              <div style={{ padding: 20 }}>{renderFlowContent(flowContext.category)}</div>
+            </div>
           )}
         </Content>
       </Layout>

@@ -22,7 +22,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
   const workPath   = useVscodePath();   // WORK_PATH
   const sailorCfg  = useVscodePath();   // common sailor cfg
   const defaultCfg = useVscodePath();  // 默认配置设置
-  // 本版本暂不考虑的出口配置项（disabled，状态保留以备后续激活）
+  // 暂不开放的出口配置项。
   const atpgCfg = useVscodePath();
   const staCfg  = useVscodePath();
   const fmlCfg  = useVscodePath();

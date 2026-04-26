@@ -1,103 +1,136 @@
 import React from 'react';
-import { Card, Form, Button, Space, Typography, Radio, Divider, Tooltip } from 'antd';
+import { Alert, Button, Divider, Form, Radio, Space, Tooltip, Typography } from 'antd';
 import {
-  SyncOutlined,
-  SaveOutlined,
-  ArrowUpOutlined,
   ArrowDownOutlined,
+  ArrowUpOutlined,
   BranchesOutlined,
-  DatabaseOutlined,
   CloudDownloadOutlined,
+  DatabaseOutlined,
+  SaveOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import { useVscodePath } from '../hooks/useVscodePath';
 import PathInput from '../components/shared/PathInput';
 
-const { Title } = Typography;
+const { Text, Title } = Typography;
 
 const CommonFlow: React.FC = () => {
-  const designTree  = useVscodePath();  // Design Tree 路径
-  const normTable   = useVscodePath();  // 归一化表格路径
+  const designTree = useVscodePath();
+  const normTable = useVscodePath();
 
   return (
-    <Card
-      bordered={false}
-      style={{ boxShadow: '0 8px 24px rgba(0,0,0,0.1)', borderRadius: 12, padding: '8px' }}
-    >
-      <div style={{ marginBottom: 24, textAlign: 'center' }}>
-        <Title level={3} style={{ marginBottom: 24, fontWeight: 600 }}>
-          公共配置 (COMMON)
+    <div>
+      <div
+        style={{
+          border: '1px solid rgba(37,99,235,0.22)',
+          borderRadius: 8,
+          padding: '18px 20px',
+          marginBottom: 20,
+          background: 'linear-gradient(135deg, rgba(37,99,235,0.14), transparent 60%)',
+        }}
+      >
+        <Text style={{ color: '#2563eb', fontSize: 12, fontWeight: 700 }}>
+          COMMON
+        </Text>
+        <Title level={3} style={{ margin: '6px 0 6px', fontSize: 22 }}>
+          公共数据与分支同步
         </Title>
-        <Radio.Group defaultValue="design" buttonStyle="solid" size="large">
-          <Radio.Button value="design">
-            <BranchesOutlined style={{ marginRight: 8 }} />
-            设计 Git 分支
-          </Radio.Button>
-          <Radio.Button value="verification">
-            <BranchesOutlined style={{ marginRight: 8 }} />
-            验证 Git 分支
-          </Radio.Button>
-        </Radio.Group>
+        <Text type="secondary">
+          这里集中维护各流程都会复用的路径、分支和公共数据动作。
+        </Text>
       </div>
 
-      <Divider style={{ margin: '16px 0 32px 0' }} />
+      <Alert
+        showIcon
+        type="info"
+        message="COMMON 是公共配置入口，可避免各流程重复维护同一份路径配置。"
+        style={{ marginBottom: 20, borderRadius: 8 }}
+      />
 
-      <Form layout="vertical" style={{ maxWidth: 800, margin: '0 auto' }}>
-        {/* Design Tree：支持"打开"（在编辑器查看）和"选择" */}
-        <Form.Item label="Design Tree (设计树路径)">
-          <PathInput
-            state={designTree}
-            placeholder="请输入或选择 designtree 路径"
-            size="large"
-            showOpen
-            showSelectFolder
-          />
-        </Form.Item>
+      <div
+        style={{
+          border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
+          borderRadius: 8,
+          padding: 20,
+          background: 'var(--vscode-editor-background)',
+        }}
+      >
+        <div style={{ marginBottom: 24, textAlign: 'center' }}>
+          <Radio.Group defaultValue="design" buttonStyle="solid" size="large">
+            <Radio.Button value="design">
+              <BranchesOutlined style={{ marginRight: 8 }} />
+              设计 Git 分支
+            </Radio.Button>
+            <Radio.Button value="verification">
+              <BranchesOutlined style={{ marginRight: 8 }} />
+              验证 Git 分支
+            </Radio.Button>
+          </Radio.Group>
+        </div>
 
-        {/* 归一化表格：JSON 文件，支持"打开"和"选择" */}
-        <Form.Item label="归一化表格路径">
-          <PathInput
-            state={normTable}
-            placeholder="请输入或选择归一化表格路径"
-            size="large"
-            showOpen
-            showSelectFile
-          />
-        </Form.Item>
+        <Form layout="vertical" style={{ maxWidth: 840, margin: '0 auto' }}>
+          <Form.Item label="Design Tree 路径">
+            <PathInput
+              state={designTree}
+              placeholder="请输入或选择 designtree 路径"
+              size="large"
+              showOpen
+              showSelectFolder
+            />
+          </Form.Item>
 
-        <Form.Item label="OBS 存储与公共数据" style={{ marginTop: 32 }}>
-          <Space size="middle">
+          <Form.Item label="归一化表格路径">
+            <PathInput
+              state={normTable}
+              placeholder="请输入或选择归一化表格路径"
+              size="large"
+              showOpen
+              showSelectFile
+            />
+          </Form.Item>
+
+          <Divider orientation="left">OBS 存储与公共数据</Divider>
+          <Space size="middle" wrap>
             <Button size="large" icon={<DatabaseOutlined />}>
               打开 OBS 查看器
             </Button>
             <Button size="large" icon={<CloudDownloadOutlined />}>
-              下载公共数据 (IP Model, ECO 脚本)
+              下载公共数据
             </Button>
           </Space>
-        </Form.Item>
-      </Form>
+        </Form>
 
-      <Divider style={{ margin: '32px 0 24px 0' }} />
+        <Divider style={{ margin: '30px 0 22px' }} />
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Space>
-          <Tooltip title="Git Pull">
-            <Button icon={<ArrowDownOutlined />} />
-          </Tooltip>
-          <Tooltip title="Git Push">
-            <Button icon={<ArrowUpOutlined />} />
-          </Tooltip>
-          <Button icon={<BranchesOutlined />}>Git 详细操作</Button>
-        </Space>
-        <Space size="middle">
-          <Button size="large" icon={<SaveOutlined />}>
-            保存配置
-          </Button>
-          <Button size="large" type="primary" icon={<SyncOutlined />}>
-            立即同步
-          </Button>
-        </Space>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <Space wrap>
+            <Tooltip title="Git Pull">
+              <Button icon={<ArrowDownOutlined />} />
+            </Tooltip>
+            <Tooltip title="Git Push">
+              <Button icon={<ArrowUpOutlined />} />
+            </Tooltip>
+            <Button icon={<BranchesOutlined />}>Git 详细操作</Button>
+          </Space>
+          <Space size="middle" wrap>
+            <Button size="large" icon={<SaveOutlined />}>
+              保存配置
+            </Button>
+            <Button size="large" type="primary" icon={<SyncOutlined />}>
+              立即同步
+            </Button>
+          </Space>
+        </div>
       </div>
-    </Card>
+    </div>
   );
 };
 
