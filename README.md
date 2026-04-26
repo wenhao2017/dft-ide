@@ -74,7 +74,7 @@ npm run watch
 Type-check:
 
 ```bash
-npx tsc --noEmit
+npm run check
 ```
 
 Run in VS Code:
@@ -94,6 +94,14 @@ The extension uses two esbuild bundles:
 - `out/webview.js`: browser bundle for the React webview.
 
 `vscode:prepublish` runs `npm run compile`, so packaging should build both bundles.
+
+Package as VSIX:
+
+```bash
+npx @vscode/vsce package
+```
+
+The `.vscodeignore` file excludes source files, local editor config, logs, maps, and development-only files from the VSIX. The packaged extension should contain `package.json`, `README.md`, `CHANGELOG.md`, assets, and the compiled `out/` bundle.
 
 ## VS Code Extension Host
 

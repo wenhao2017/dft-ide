@@ -74,7 +74,7 @@ npm run watch
 类型检查：
 
 ```bash
-npx tsc --noEmit
+npm run check
 ```
 
 在 VS Code 中调试：
@@ -94,6 +94,14 @@ npx tsc --noEmit
 - `out/webview.js`：React webview 浏览器端 bundle。
 
 `vscode:prepublish` 会执行 `npm run compile`，打包插件前会自动生成这两个产物。
+
+打包 VSIX：
+
+```bash
+npx @vscode/vsce package
+```
+
+`.vscodeignore` 会从 VSIX 中排除源码、本地编辑器配置、日志、source map 和开发期文件。打包后的插件主要保留 `package.json`、`README.md`、`CHANGELOG.md`、资源文件和编译后的 `out/` 产物。
 
 ## VS Code 扩展宿主
 
