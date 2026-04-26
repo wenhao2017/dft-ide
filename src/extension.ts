@@ -3,9 +3,11 @@ import { submitJob, queryJobStatus } from './services/donauService';
 
 const VIEW_TYPE = 'dftIde.welcome';
 const GLOBAL_KEY = 'dftIde.hasShownWelcome';
+const LAYOUT_BACKUP_KEY = 'dftIde.layout.previousSettings';
 
 let currentPanel: vscode.WebviewPanel | undefined = undefined;
 let activeCategory: string | undefined = undefined;
+let pendingWebviewCommand: { command: 'showWelcome' } | { command: 'loadFlow'; category: string } | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
   // 1. 注册左侧扁平化的 Tree View
@@ -36,8 +38,126 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // 每次启动都强制打开欢迎Webview页
-  void openWebviewFlow(context);
+  context.subscriptions.push(
+    vscode.commands.registerCommand('dftIde.applyLayout', async () => {
+      await applyDftIdeLayout(context, false);
+      await showDftWorkbench(context);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('dftIde.restoreLayout', async () => {
+      await restoreVscodeLayout(context);
+    })
+  );
+
+  void initializeDftWorkbench(context);
+}
+
+async function initializeDftWorkbench(context: vscode.ExtensionContext): Promise<void> {
+  const config = vscode.workspace.getConfiguration('dftIde');
+  if (config.get<boolean>('layout.autoApply', true)) {
+    await applyDftIdeLayout(context, true);
+  }
+  await focusDftView();
+}
+
+async function showDftWorkbench(context: vscode.ExtensionContext): Promise<void> {
+  await focusDftView();
+  await vscode.commands.executeCommand('dftIde.openWelcome');
+}
+
+async function focusDftView(): Promise<void> {
+  try {
+    await vscode.commands.executeCommand('workbench.view.extension.dftIdeExplorer');
+  } catch {
+    // The view container can be unavailable very early in startup; opening home is still useful.
+  }
+}
+
+async function applyDftIdeLayout(context: vscode.ExtensionContext, silent: boolean): Promise<void> {
+  const config = vscode.workspace.getConfiguration('dftIde');
+  const hideMenuBar = config.get<boolean>('layout.hideMenuBar', true);
+  const hideActivityBar = config.get<boolean>('layout.hideActivityBar', true);
+
+  const updates: Array<[string, unknown]> = [
+    ['window.commandCenter', false],
+    ['workbench.layoutControl.enabled', false],
+    ['workbench.startupEditor', 'none'],
+    ['workbench.editor.showTabs', true],
+    ['breadcrumbs.enabled', false],
+  ];
+
+  if (hideMenuBar) {
+    updates.push(['window.menuBarVisibility', 'hidden']);
+  }
+
+  if (hideActivityBar) {
+    updates.push(['workbench.activityBar.visible', false]);
+    updates.push(['workbench.activityBar.location', 'hidden']);
+  }
+
+  await backupLayoutSettings(context, updates.map(([key]) => key));
+  await updateUserSettings(updates);
+
+  if (!silent) {
+    vscode.window.showInformationMessage('DFT IDE 布局已应用。');
+  }
+}
+
+async function restoreVscodeLayout(context: vscode.ExtensionContext): Promise<void> {
+  const backup = context.globalState.get<Array<{ key: string; hasValue: boolean; value: unknown }>>(
+    LAYOUT_BACKUP_KEY,
+    []
+  );
+
+  if (backup.length > 0) {
+    await updateUserSettings(
+      backup.map((item) => [item.key, item.hasValue ? item.value : undefined])
+    );
+    await context.globalState.update(LAYOUT_BACKUP_KEY, undefined);
+  } else {
+    await updateUserSettings([
+      ['window.menuBarVisibility', undefined],
+      ['window.commandCenter', undefined],
+      ['workbench.activityBar.visible', undefined],
+      ['workbench.activityBar.location', undefined],
+      ['workbench.layoutControl.enabled', undefined],
+      ['workbench.startupEditor', undefined],
+      ['workbench.editor.showTabs', undefined],
+      ['breadcrumbs.enabled', undefined],
+    ]);
+  }
+
+  vscode.window.showInformationMessage('已恢复 VS Code 默认布局设置。');
+}
+
+async function backupLayoutSettings(context: vscode.ExtensionContext, keys: string[]): Promise<void> {
+  const existing = context.globalState.get<Array<{ key: string; hasValue: boolean; value: unknown }>>(
+    LAYOUT_BACKUP_KEY
+  );
+  if (existing) {
+    return;
+  }
+
+  const backup = keys.map((key) => {
+    const inspected = vscode.workspace.getConfiguration().inspect(key);
+    return {
+      key,
+      hasValue: inspected?.globalValue !== undefined,
+      value: inspected?.globalValue,
+    };
+  });
+
+  await context.globalState.update(LAYOUT_BACKUP_KEY, backup);
+}
+
+async function updateUserSettings(updates: Array<[string, unknown]>): Promise<void> {
+  await Promise.all(
+    updates.map(([key, value]) =>
+      vscode.workspace.getConfiguration().update(key, value, vscode.ConfigurationTarget.Global)
+    )
+  );
 }
 
 // ============================================================
@@ -54,6 +174,14 @@ interface FlowMenuConfig {
 }
 
 const FLOW_CONFIGS: FlowMenuConfig[] = [
+  {
+    label: '主页',
+    icon: 'home',
+    description: 'Project Console',
+    tooltip: 'DFT IDE 项目主页',
+    category: 'HOME',
+    contextValue: 'dftFlow.home',
+  },
   {
     label: 'COMMON',
     icon: 'settings-gear',
@@ -116,11 +244,16 @@ class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
       `**$(${cfg.icon}) ${cfg.label}**\n\n${cfg.tooltip.replace(/\n/g, '\n\n')}`
     );
     item.contextValue = cfg.contextValue;
-    item.command = {
-      command: 'dftIde.openFlow',
-      title: `Open ${cfg.label} Flow`,
-      arguments: [cfg.category],
-    };
+    item.command = cfg.category === 'HOME'
+      ? {
+          command: 'dftIde.openWelcome',
+          title: 'Open DFT IDE Home',
+        }
+      : {
+          command: 'dftIde.openFlow',
+          title: `Open ${cfg.label} Flow`,
+          arguments: [cfg.category],
+        };
     return item;
   }
 }
@@ -130,6 +263,7 @@ class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
 // ============================================================
 /** 每个 category 对应的 Tab 标题 */
 const CATEGORY_TITLES: Record<string, string> = {
+  HOME: 'DFT IDE — 主页',
   COMMON: 'DFT IDE — 公共配置',
   Design: 'DFT IDE — Design Flow',
   Verification: 'DFT IDE — Verification Flow',
@@ -138,23 +272,22 @@ const CATEGORY_TITLES: Record<string, string> = {
 };
 
 async function openWebviewFlow(context: vscode.ExtensionContext, category?: string): Promise<void> {
-  if (category) {
-    activeCategory = category;
-  }
+  activeCategory = category;
+  pendingWebviewCommand = activeCategory
+    ? { command: 'loadFlow', category: activeCategory }
+    : { command: 'showWelcome' };
 
   if (currentPanel) {
     currentPanel.reveal(vscode.ViewColumn.One);
     // 更新 Tab 标题
-    currentPanel.title = activeCategory ? (CATEGORY_TITLES[activeCategory] ?? `DFT IDE — ${activeCategory}`) : 'DFT IDE';
-    if (activeCategory) {
-      currentPanel.webview.postMessage({ command: 'loadFlow', category: activeCategory });
-    }
+    currentPanel.title = activeCategory ? (CATEGORY_TITLES[activeCategory] ?? `DFT IDE — ${activeCategory}`) : CATEGORY_TITLES.HOME;
+    currentPanel.webview.postMessage(pendingWebviewCommand);
     return;
   }
 
   currentPanel = vscode.window.createWebviewPanel(
     VIEW_TYPE,
-    activeCategory ? (CATEGORY_TITLES[activeCategory] ?? `DFT IDE — ${activeCategory}`) : 'DFT IDE',
+    activeCategory ? (CATEGORY_TITLES[activeCategory] ?? `DFT IDE — ${activeCategory}`) : CATEGORY_TITLES.HOME,
     vscode.ViewColumn.One,
     {
       enableScripts: true,
@@ -163,7 +296,11 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
     }
   );
 
-  currentPanel.webview.html = getWebviewHtml(currentPanel.webview, context.extensionUri);
+  currentPanel.webview.html = getWebviewHtml(
+    currentPanel.webview,
+    context.extensionUri,
+    pendingWebviewCommand ?? { command: 'showWelcome' }
+  );
 
   currentPanel.onDidDispose(() => {
     currentPanel = undefined;
@@ -172,9 +309,8 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
   currentPanel.webview.onDidReceiveMessage(async (msg) => {
     switch (msg.command) {
       case 'webviewReady':
-        if (activeCategory) {
-          currentPanel?.webview.postMessage({ command: 'loadFlow', category: activeCategory });
-        }
+        currentPanel?.webview.postMessage(pendingWebviewCommand ?? { command: 'showWelcome' });
+        pendingWebviewCommand = undefined;
         return;
 
       case 'createWorkspace':
@@ -218,8 +354,11 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             // 如果是目录，则在系统的文件管理器中打开
             await vscode.commands.executeCommand('revealFileInOS', uri);
           } else {
-            // 如果是文件，则在 VS Code 编辑器中打开
-            await vscode.commands.executeCommand('vscode.open', uri);
+            // 如果是文件，则在当前编辑器组中新开 tab，保留 DFT IDE tab
+            await vscode.window.showTextDocument(uri, {
+              viewColumn: vscode.ViewColumn.Active,
+              preview: false,
+            });
           }
         } catch (error) {
           vscode.window.showErrorMessage(`无法打开路径: ${filePath}`);
@@ -384,7 +523,11 @@ async function runVscodeDemo(action: unknown): Promise<void> {
   }
 }
 
-function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+function getWebviewHtml(
+  webview: vscode.Webview,
+  extensionUri: vscode.Uri,
+  initialView: { command: 'showWelcome' } | { command: 'loadFlow'; category: string }
+): string {
   const scriptUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, 'out', 'webview.js')
   );
@@ -410,6 +553,7 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): stri
   <div id="root"></div>
   <script nonce="${nonce}">
     window.DFT_IDE_API_BASE = ${JSON.stringify(apiBase)};
+    window.DFT_IDE_INITIAL_VIEW = ${JSON.stringify(initialView)};
   </script>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

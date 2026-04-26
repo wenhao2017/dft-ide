@@ -12,6 +12,8 @@ import vscode from './utils/vscode';
 const { Content } = Layout;
 const { Text, Title } = Typography;
 
+type InitialView = { command: 'showWelcome' } | { command: 'loadFlow'; category: string };
+
 function detectVscodeTheme(): 'dark' | 'light' | 'hc' {
   const body = document.body;
   if (body.classList.contains('vscode-light')) return 'light';
@@ -85,17 +87,29 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    vscode.postMessage({ command: 'webviewReady' });
-
-    const handleMessage = (event: MessageEvent) => {
-      const msg = event.data;
+    const applyViewMessage = (msg: InitialView) => {
       if (msg.command === 'loadFlow') {
         setFlowContext({ category: msg.category });
         reset();
       }
+      if (msg.command === 'showWelcome') {
+        setFlowContext(null);
+        reset();
+      }
+    };
+
+    const initialView = (window as unknown as { DFT_IDE_INITIAL_VIEW?: InitialView }).DFT_IDE_INITIAL_VIEW;
+    if (initialView) {
+      applyViewMessage(initialView);
+    }
+
+    const handleMessage = (event: MessageEvent) => {
+      const msg = event.data as InitialView;
+      applyViewMessage(msg);
     };
 
     window.addEventListener('message', handleMessage);
+    vscode.postMessage({ command: 'webviewReady' });
     return () => window.removeEventListener('message', handleMessage);
   }, [setFlowContext, reset]);
 

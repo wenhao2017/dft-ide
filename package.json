@@ -31,7 +31,7 @@
     "commands": [
       {
         "command": "dftIde.openWelcome",
-        "title": "DFT IDE: Open Welcome"
+        "title": "DFT IDE: Open Home"
       },
       {
         "command": "dftIde.createWorkspace",
@@ -44,6 +44,14 @@
       {
         "command": "dftIde.openFlow",
         "title": "Open DFT Flow"
+      },
+      {
+        "command": "dftIde.applyLayout",
+        "title": "DFT IDE: Apply Layout"
+      },
+      {
+        "command": "dftIde.restoreLayout",
+        "title": "DFT IDE: Restore VS Code Layout"
       }
     ],
     "configuration": {
@@ -53,6 +61,21 @@
           "type": "string",
           "default": "",
           "description": "DFT IDE backend API base URL, for example http://localhost:8080."
+        },
+        "dftIde.layout.autoApply": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically apply the DFT IDE focused workbench layout on startup."
+        },
+        "dftIde.layout.hideMenuBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Hide the VS Code menu bar while using the DFT IDE layout."
+        },
+        "dftIde.layout.hideActivityBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Hide the VS Code Activity Bar while using the DFT IDE layout."
         }
       }
     }
