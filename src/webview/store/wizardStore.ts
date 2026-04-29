@@ -18,6 +18,7 @@ export interface TaskPayload {
   tool?: string;
   cpuCores?: number;
   jobId?: string;
+  gitBranch?: string;
 }
 
 interface WizardState {
