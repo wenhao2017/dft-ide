@@ -1,7 +1,5 @@
 # DFT IDE
 
-[中文文档](README.zh-CN.md)
-
 DFT IDE is a VS Code extension that turns VS Code into a DFT workflow console. It provides a project home page, DFT flow navigation, common configuration, design flow, verification flow, project creation, VS Code integration demos, and reserved backend API integration points.
 
 The current codebase is a demo foundation. It is intended to be extended into a project-oriented IDE where different projects load different COMMON, Design, Verification, Formal, and STA configurations.
