@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react'; // 修正：补充 useState 和 useEffect
 import { Form, Button, Space, Card, Radio, Typography, Badge } from 'antd';
 import {
   SettingOutlined,
@@ -9,6 +9,8 @@ import {
 } from '@ant-design/icons';
 import { useVscodePath } from '../../hooks/useVscodePath';
 import PathInput from '../shared/PathInput';
+import { getGitInfo } from '../../utils/ipc';
+import useWizardStore from '../../store/wizardStore';
 
 const { Text } = Typography;
 
@@ -27,6 +29,25 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
   const staCfg  = useVscodePath();
   const fmlCfg  = useVscodePath();
 
+  const [currentBranch, setCurrentBranch] = useState<string>('');
+  const updatePayload = useWizardStore((state) => state.updatePayload);
+
+  useEffect(() => {
+    getGitInfo()
+      .then((res) => {
+        if (res && res.branch) {
+          const branchName = res.branch as string;
+          setCurrentBranch(branchName);
+          updatePayload({ gitBranch: branchName }); // 将分支信息存入 store 供后续使用
+        } else {
+          setCurrentBranch('Not in a git repo');
+        }
+      })
+      .catch(() => {
+        setCurrentBranch('Git Error');
+      });
+  }, [updatePayload]);
+
 
   return (
     <div style={{ padding: '8px 0' }}>
@@ -35,8 +56,10 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
           <Radio.Button value="hibist">hibist</Radio.Button>
           <Radio.Button value="sailor">sailor</Radio.Button>
         </Radio.Group>
-        <Button shape="round" icon={<BranchesOutlined />}>
-          git 分支
+        
+        {/* 修正：绑定 currentBranch 状态，动态显示分支名 */}
+        <Button shape="round" icon={<BranchesOutlined />} style={{ cursor: 'default' }}>
+          {currentBranch || '获取分支中...'}
         </Button>
       </div>
 
