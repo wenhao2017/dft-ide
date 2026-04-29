@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react'; // 补充：引入 useState 和 useEffect
 import { Form, Button, Radio, Typography, Divider } from 'antd';
 import {
   SaveOutlined,
@@ -8,6 +8,8 @@ import {
 } from '@ant-design/icons';
 import { useVscodePath } from '../../hooks/useVscodePath';
 import PathInput from '../shared/PathInput';
+import { getGitInfo } from '../../utils/ipc'; // 补充：引入 IPC 获取 git 信息的接口
+import useWizardStore from '../../store/wizardStore'; // 补充：引入全局状态
 
 const { Text } = Typography;
 
@@ -20,11 +22,32 @@ const Step1CommonConfig: React.FC<{ onNext: () => void }> = ({ onNext }) => {
   const staCfg    = useVscodePath();  // common sta cfg
   const fmlCfg    = useVscodePath();  // common fml cfg
 
+  // 新增：Git 分支状态与 Store 更新
+  const [currentBranch, setCurrentBranch] = useState<string>('');
+  const updatePayload = useWizardStore((state) => state.updatePayload);
+
+  useEffect(() => {
+    getGitInfo()
+      .then((res) => {
+        if (res && res.branch) {
+          const branchName = res.branch as string;
+          setCurrentBranch(branchName);
+          updatePayload({ gitBranch: branchName }); // 将分支信息存入 store 供后续使用
+        } else {
+          setCurrentBranch('Not in a git repo');
+        }
+      })
+      .catch(() => {
+        setCurrentBranch('Git Error');
+      });
+  }, [updatePayload]);
+
   return (
     <div style={{ padding: '8px 0' }}>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
-        <Button shape="round" icon={<BranchesOutlined />}>
-          git 分支
+        {/* 修改：绑定 currentBranch 状态，动态显示分支名 */}
+        <Button shape="round" icon={<BranchesOutlined />} style={{ cursor: 'default' }}>
+          {currentBranch || '获取分支中...'}
         </Button>
       </div>
 
