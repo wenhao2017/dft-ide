@@ -82,12 +82,12 @@
         },
         "dftIde.layout.hideMenuBar": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Hide the VS Code menu bar while using the DFT IDE layout."
         },
         "dftIde.layout.hideActivityBar": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Hide the VS Code Activity Bar while using the DFT IDE layout."
         }
       }
