@@ -55,6 +55,13 @@ function ipcRequest(
 // ─── 公开 API ──────────────────────────────────────────────
 
 /**
+ * 获取当前环境的 Git 信息 (分支、修改状态等)
+ */
+export async function getGitInfo(): Promise<Record<string, unknown>> {
+  return await ipcRequest('getGitInfo');
+}
+
+/**
  * 弹出 VS Code 文件/目录 选择器。
  * 返回选中的路径字符串，用户取消则返回 null。
  */
