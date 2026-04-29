@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { submitJob, queryJobStatus } from './services/donauService';
+import { gitService } from './services/gitService';
 
 const VIEW_TYPE = 'dftIde.welcome';
 const GLOBAL_KEY = 'dftIde.hasShownWelcome';
@@ -308,6 +309,27 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
 
   currentPanel.webview.onDidReceiveMessage(async (msg) => {
     switch (msg.command) {
+      case 'getGitInfo': {
+        const requestId: string = msg.requestId;
+        try {
+          const gitInfo = await gitService.getCurrentGitInfo();
+          currentPanel?.webview.postMessage({
+            command: 'getGitInfoResponse',
+            requestId,
+            branch: gitInfo?.branch,
+            repoRoot: gitInfo?.repoRoot,
+            hasChanges: gitInfo?.hasChanges
+          });
+        } catch (error) {
+          currentPanel?.webview.postMessage({
+            command: 'getGitInfoResponse',
+            requestId,
+            error: 'Failed to get git info'
+          });
+        }
+        return;
+      }
+      
       case 'webviewReady':
         currentPanel?.webview.postMessage(pendingWebviewCommand ?? { command: 'showWelcome' });
         pendingWebviewCommand = undefined;
