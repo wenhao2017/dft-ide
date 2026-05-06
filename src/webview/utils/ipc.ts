@@ -81,3 +81,43 @@ export function openFileInEditor(path: string): void {
 export function runVscodeDemo(action: string): void {
   vscode.postMessage({ command: 'vscodeDemo', action });
 }
+
+/**
+ * 保存配置数据到本地工作区文件。
+ * @param flow  配置所属的流程，决定写入哪个子目录和文件名
+ * @param data  要持久化的配置对象（会被序列化为 JSON）
+ */
+export async function saveConfig(
+  flow: 'common' | 'design' | 'verification',
+  data: Record<string, unknown>
+): Promise<{ success: boolean; filePath?: string; error?: string }> {
+  const res = await ipcRequest('saveConfig', { flow, data });
+  return res as { success: boolean; filePath?: string; error?: string };
+}
+
+/**
+ * 从本地工作区文件读取配置数据，用于表单回显。
+ * @param flow  要读取的流程配置文件
+ */
+export async function readConfig(
+  flow: 'common' | 'design' | 'verification'
+): Promise<Record<string, unknown> | null> {
+  const res = await ipcRequest('readConfig', { flow });
+  if (res.error) return null;
+  return res.data as Record<string, unknown> ?? null;
+}
+
+/**
+ * 将指定 flow 的配置文件提交到 Git，可选是否同时 push 到远端。
+ * @param flow        要提交的流程
+ * @param message     commit message（可选，不填则自动生成）
+ * @param push        是否在 commit 后执行 git push（默认 false）
+ */
+export async function syncGit(
+  flow: 'common' | 'design' | 'verification',
+  message?: string,
+  push = false
+): Promise<{ success: boolean; commitMessage?: string; error?: string }> {
+  const res = await ipcRequest('syncGit', { flow, message, push });
+  return res as { success: boolean; commitMessage?: string; error?: string };
+}

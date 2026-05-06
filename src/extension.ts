@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { submitJob, queryJobStatus } from './services/donauService';
 import { gitService } from './services/gitService';
 
@@ -412,6 +413,108 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'vscodeDemo':
         await runVscodeDemo(msg.action);
         return;
+
+      // ── 配置保存 ───────────────────────────────────────────────
+      case 'saveConfig': {
+        const requestId: string = msg.requestId;
+        const flow = msg.flow as 'common' | 'design' | 'verification';
+        const data = msg.data as Record<string, unknown>;
+        try {
+          const filePath = resolveConfigPath(flow);
+          if (!filePath) {
+            currentPanel?.webview.postMessage({
+              command: 'saveConfigResponse', requestId,
+              success: false, error: '未找到工作区路径，请先打开 DFT 项目工作区'
+            });
+            return;
+          }
+          const merged = await mergeConfigFile(filePath, data);
+          const encoded = Buffer.from(JSON.stringify(merged, null, 2));
+          await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), encoded);
+          const relative = vscode.workspace.asRelativePath(filePath);
+          currentPanel?.webview.postMessage({
+            command: 'saveConfigResponse', requestId,
+            success: true, filePath: relative
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'saveConfigResponse', requestId,
+            success: false, error: String(err)
+          });
+        }
+        return;
+      }
+
+      // ── 配置读取 ───────────────────────────────────────────────
+      case 'readConfig': {
+        const requestId: string = msg.requestId;
+        const flow = msg.flow as 'common' | 'design' | 'verification';
+        try {
+          const filePath = resolveConfigPath(flow);
+          if (!filePath) {
+            currentPanel?.webview.postMessage({
+              command: 'readConfigResponse', requestId, data: null
+            });
+            return;
+          }
+          try {
+            const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
+            const data = JSON.parse(Buffer.from(bytes).toString('utf-8'));
+            currentPanel?.webview.postMessage({
+              command: 'readConfigResponse', requestId, data
+            });
+          } catch {
+            // 文件不存在或解析失败，返回 null（首次使用时正常）
+            currentPanel?.webview.postMessage({
+              command: 'readConfigResponse', requestId, data: null
+            });
+          }
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'readConfigResponse', requestId,
+            error: String(err), data: null
+          });
+        }
+        return;
+      }
+
+      // ── Git 同步 ────────────────────────────────────────────────
+      case 'syncGit': {
+        const requestId: string = msg.requestId;
+        const flow    = msg.flow as 'common' | 'design' | 'verification';
+        const push    = Boolean(msg.push);
+        const customMsg = typeof msg.message === 'string' ? msg.message : undefined;
+        try {
+          const filePath = resolveConfigPath(flow);
+          if (!filePath) {
+            currentPanel?.webview.postMessage({
+              command: 'syncGitResponse', requestId,
+              success: false, error: '未找到工作区路径'
+            });
+            return;
+          }
+          const fileUri = vscode.Uri.file(filePath);
+          const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+          const commitMessage = customMsg ?? `feat(dft-ide): update ${flow} config [${now}]`;
+
+          await gitService.addFiles([fileUri]);
+          await gitService.commit(commitMessage);
+          if (push) {
+            await gitService.push();
+          }
+          currentPanel?.webview.postMessage({
+            command: 'syncGitResponse', requestId,
+            success: true, commitMessage
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'syncGitResponse', requestId,
+            success: false, error: String(err)
+          });
+        }
+        return;
+      }
+
       default:
         return;
     }
@@ -591,4 +694,78 @@ function getNonce(): string {
   return text;
 }
 
+// ============================================================
+// 配置文件路径解析 & 合并写入工具
+// ============================================================
+
+/**
+ * 根据 flow 类型，解析对应配置文件的绝对路径。
+ *
+ * 路径策略：
+ *   - common       → <workspaceRoot>/main/common.cfg.json
+ *   - design       → <workspaceRoot>/design/design.cfg.json
+ *   - verification → <workspaceRoot>/verification/verification.cfg.json
+ *
+ * 如果工作区有多个根目录（Multi-root），优先查找名称匹配的根；
+ * 否则回退到第一个根目录。
+ *
+ * 返回 undefined 表示没有打开任何工作区。
+ */
+function resolveConfigPath(flow: 'common' | 'design' | 'verification'): string | undefined {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) {
+    return undefined;
+  }
+
+  const dirMap: Record<typeof flow, string> = {
+    common:       'main',
+    design:       'design',
+    verification: 'verification',
+  };
+  const fileMap: Record<typeof flow, string> = {
+    common:       'common.cfg.json',
+    design:       'design.cfg.json',
+    verification: 'verification.cfg.json',
+  };
+
+  const targetDir  = dirMap[flow];
+  const targetFile = fileMap[flow];
+
+  // 优先找名称匹配的根目录（例如名为 "design" 的工作区根）
+  const matchedFolder = folders.find(
+    (f) => f.name.toLowerCase() === targetDir.toLowerCase()
+  );
+
+  if (matchedFolder) {
+    return path.join(matchedFolder.uri.fsPath, targetFile);
+  }
+
+  // 回退：在第一个工作区根的对应子目录下
+  const rootPath = folders[0].uri.fsPath;
+  return path.join(rootPath, targetDir, targetFile);
+}
+
+/**
+ * 读取已存在的配置文件，与新数据深合并后返回合并结果。
+ * 这样做可以保证同一文件中来自不同 Step 的字段互不覆盖。
+ *
+ * 例如：Step1 保存了 { project, commonPath }
+ *       Step2 保存了 { step2Task, step2Design }
+ *       最终文件中两部分都会保留。
+ */
+async function mergeConfigFile(
+  filePath: string,
+  newData: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  try {
+    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
+    const existing = JSON.parse(Buffer.from(bytes).toString('utf-8')) as Record<string, unknown>;
+    return { ...existing, ...newData };
+  } catch {
+    // 文件不存在（首次保存）或解析失败，直接使用新数据
+    return newData;
+  }
+}
+
 export function deactivate() {}
+

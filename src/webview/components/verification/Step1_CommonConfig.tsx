@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'; // 补充：引入 useState 和 useEffect
-import { Form, Button, Radio, Typography, Divider } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Form, Button, Radio, Typography, Divider, Badge, Spin } from 'antd';
 import {
   SaveOutlined,
   RightOutlined,
@@ -7,106 +7,139 @@ import {
   BranchesOutlined,
 } from '@ant-design/icons';
 import { useVscodePath } from '../../hooks/useVscodePath';
+import { useFlowConfig } from '../../hooks/useFlowConfig';
 import PathInput from '../shared/PathInput';
-import { getGitInfo } from '../../utils/ipc'; // 补充：引入 IPC 获取 git 信息的接口
-import useWizardStore from '../../store/wizardStore'; // 补充：引入全局状态
+import { getGitInfo } from '../../utils/ipc';
+import useWizardStore from '../../store/wizardStore';
 
 const { Text } = Typography;
 
 const Step1CommonConfig: React.FC<{ onNext: () => void }> = ({ onNext }) => {
-  const project   = useVscodePath();  // 所需项目 (project.cshrc)
-  const commonPath = useVscodePath(); // COMMON_PATH
-  const workPath  = useVscodePath();  // WORK_PATH
-  const sailorCfg = useVscodePath();  // common sailor cfg
-  const atpgCfg   = useVscodePath();  // common atpg cfg
-  const staCfg    = useVscodePath();  // common sta cfg
-  const fmlCfg    = useVscodePath();  // common fml cfg
+  const project    = useVscodePath();
+  const commonPath = useVscodePath();
+  const workPath   = useVscodePath();
+  const sailorCfg  = useVscodePath();
+  const atpgCfg    = useVscodePath();
+  const staCfg     = useVscodePath();
+  const fmlCfg     = useVscodePath();
 
-  // 新增：Git 分支状态与 Store 更新
   const [currentBranch, setCurrentBranch] = useState<string>('');
+  const [exitType, setExitType] = useState<string>('sim');
   const updatePayload = useWizardStore((state) => state.updatePayload);
 
+  // ── 配置持久化 Hook ─────────────────────────────────
+  const { savedData, loading, saving, hasUnsaved, handleSave } = useFlowConfig('verification');
+
+  // 获取 Git 分支
   useEffect(() => {
     getGitInfo()
       .then((res) => {
         if (res && res.branch) {
           const branchName = res.branch as string;
           setCurrentBranch(branchName);
-          updatePayload({ gitBranch: branchName }); // 将分支信息存入 store 供后续使用
+          updatePayload({ gitBranch: branchName });
         } else {
           setCurrentBranch('Not in a git repo');
         }
       })
-      .catch(() => {
-        setCurrentBranch('Git Error');
-      });
+      .catch(() => setCurrentBranch('Git Error'));
   }, [updatePayload]);
 
+  // 回填配置
+  useEffect(() => {
+    if (!savedData) return;
+    if (savedData.project)    project.setValue(String(savedData.project));
+    if (savedData.commonPath) commonPath.setValue(String(savedData.commonPath));
+    if (savedData.workPath)   workPath.setValue(String(savedData.workPath));
+    if (savedData.sailorCfg)  sailorCfg.setValue(String(savedData.sailorCfg));
+    if (savedData.atpgCfg)    atpgCfg.setValue(String(savedData.atpgCfg));
+    if (savedData.staCfg)     staCfg.setValue(String(savedData.staCfg));
+    if (savedData.fmlCfg)     fmlCfg.setValue(String(savedData.fmlCfg));
+    if (savedData.exitType)   setExitType(String(savedData.exitType));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedData]);
+
+  const collectFormData = () => ({
+    project:    project.value,
+    commonPath: commonPath.value,
+    workPath:   workPath.value,
+    sailorCfg:  sailorCfg.value,
+    atpgCfg:    atpgCfg.value,
+    staCfg:     staCfg.value,
+    fmlCfg:     fmlCfg.value,
+    exitType,
+  });
+
+  const onSave = () => handleSave(collectFormData());
+
   return (
-    <div style={{ padding: '8px 0' }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
-        {/* 修改：绑定 currentBranch 状态，动态显示分支名 */}
-        <Button shape="round" icon={<BranchesOutlined />} style={{ cursor: 'default' }}>
-          {currentBranch || '获取分支中...'}
-        </Button>
-      </div>
-
-      <Form layout="horizontal" labelCol={{ span: 5 }} wrapperCol={{ span: 19 }}>
-        {/* 配置文件：支持"打开"和"选择" */}
-        <Form.Item label="所需项目">
-          <PathInput
-            state={project}
-            placeholder="project.cshrc 路径"
-            showOpen
-            showSelectFile
-          />
-        </Form.Item>
-
-        {/* 目录路径：只需"选择" */}
-        <Form.Item label="COMMON_PATH">
-          <PathInput state={commonPath} placeholder="请选择 COMMON_PATH 目录" showSelectFolder showOpen />
-        </Form.Item>
-
-        <Form.Item label="WORK_PATH">
-          <PathInput state={workPath} placeholder="请选择 WORK_PATH 目录" showSelectFolder showOpen />
-        </Form.Item>
-
-        <Form.Item label="common sailor cfg">
-          <PathInput state={sailorCfg} placeholder="请输入或选择 common sailor cfg 路径" showSelectFile showOpen />
-        </Form.Item>
-
-        <Divider orientation="left" plain>出口配置</Divider>
-
-        <Form.Item label="验证出口">
-          <Radio.Group defaultValue="sim">
-            <Radio value="ATPG">ATPG</Radio>
-            <Radio value="sim">sim</Radio>
-            <Radio value="STA">STA</Radio>
-            <Radio value="formal">formal</Radio>
-          </Radio.Group>
-        </Form.Item>
-
-        <Form.Item label="common atpg cfg">
-          <PathInput state={atpgCfg} placeholder="请输入或选择 common atpg cfg 路径" showSelectFile showOpen />
-        </Form.Item>
-
-        <Form.Item label="common sta cfg">
-          <PathInput state={staCfg} placeholder="请输入或选择 common sta cfg 路径" showSelectFile showOpen />
-        </Form.Item>
-
-        <Form.Item label="common fml cfg">
-          <PathInput state={fmlCfg} placeholder="请输入或选择 common fml cfg 路径" showSelectFile showOpen />
-        </Form.Item>
-
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 32 }}>
-          <Button icon={<FileAddOutlined />}>产生默认配置</Button>
-          <Button icon={<SaveOutlined />}>保存</Button>
-          <Button type="primary" onClick={onNext}>
-            下一页 <RightOutlined />
+    <Spin spinning={loading} tip="读取配置中...">
+      <div style={{ padding: '8px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
+          <Button shape="round" icon={<BranchesOutlined />} style={{ cursor: 'default' }}>
+            {currentBranch || '获取分支中...'}
           </Button>
         </div>
-      </Form>
-    </div>
+
+        <Form layout="horizontal" labelCol={{ span: 5 }} wrapperCol={{ span: 19 }}>
+          <Form.Item label="所需项目">
+            <PathInput
+              state={project}
+              placeholder="project.cshrc 路径"
+              showOpen
+              showSelectFile
+            />
+          </Form.Item>
+
+          <Form.Item label="COMMON_PATH">
+            <PathInput state={commonPath} placeholder="请选择 COMMON_PATH 目录" showSelectFolder showOpen />
+          </Form.Item>
+
+          <Form.Item label="WORK_PATH">
+            <PathInput state={workPath} placeholder="请选择 WORK_PATH 目录" showSelectFolder showOpen />
+          </Form.Item>
+
+          <Form.Item label="common sailor cfg">
+            <PathInput state={sailorCfg} placeholder="请输入或选择 common sailor cfg 路径" showSelectFile showOpen />
+          </Form.Item>
+
+          <Divider orientation="left" plain>出口配置</Divider>
+
+          <Form.Item label="验证出口">
+            <Radio.Group value={exitType} onChange={(e) => setExitType(e.target.value)}>
+              <Radio value="ATPG">ATPG</Radio>
+              <Radio value="sim">sim</Radio>
+              <Radio value="STA">STA</Radio>
+              <Radio value="formal">formal</Radio>
+            </Radio.Group>
+          </Form.Item>
+
+          <Form.Item label="common atpg cfg">
+            <PathInput state={atpgCfg} placeholder="请输入或选择 common atpg cfg 路径" showSelectFile showOpen />
+          </Form.Item>
+
+          <Form.Item label="common sta cfg">
+            <PathInput state={staCfg} placeholder="请输入或选择 common sta cfg 路径" showSelectFile showOpen />
+          </Form.Item>
+
+          <Form.Item label="common fml cfg">
+            <PathInput state={fmlCfg} placeholder="请输入或选择 common fml cfg 路径" showSelectFile showOpen />
+          </Form.Item>
+
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 32 }}>
+            <Button icon={<FileAddOutlined />}>产生默认配置</Button>
+            <Badge dot={hasUnsaved} offset={[-4, 4]}>
+              <Button icon={<SaveOutlined />} loading={saving} onClick={onSave}>
+                保存
+              </Button>
+            </Badge>
+            <Button type="primary" onClick={onNext}>
+              下一页 <RightOutlined />
+            </Button>
+          </div>
+        </Form>
+      </div>
+    </Spin>
   );
 };
 
