@@ -23,7 +23,9 @@ import {
   EditOutlined,
   ExpandAltOutlined,
   FileAddOutlined,
+  LeftOutlined,
   NodeIndexOutlined,
+  RightOutlined,
   SaveOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
@@ -238,6 +240,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   const [fullscreen, setFullscreen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  const [collapsed, setCollapsed] = useState(false);
   const selectedModule = findModule(modules, selectedKey) ?? modules[0];
 
   useEffect(() => {
@@ -528,25 +531,86 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     </>
   );
 
+  /* ── Collapsed: slim full-height strip ── */
+  if (collapsed) {
+    return (
+      <div
+        onClick={() => setCollapsed(false)}
+        title="展开设计树"
+        style={{
+          /* flex:1 fills the <aside> column → same height as right side */
+          flex: 1,
+          width: 32,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          cursor: 'pointer',
+          userSelect: 'none',
+          /* Matches the expanded panel border, left border is accent */
+          borderRadius: 8,
+          border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
+          borderLeft: `3px solid ${accent}`,
+          background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))',
+          overflow: 'hidden',
+          transition: 'border-color 0.2s',
+        }}
+      >
+        {/* Expand chevron */}
+        <Tooltip title="展开设计树" placement="right">
+          <div
+            style={{
+              marginTop: 10,
+              marginBottom: 6,
+              width: 22,
+              height: 22,
+              borderRadius: 5,
+              background: `${accent}18`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: accent,
+              fontSize: 11,
+              flexShrink: 0,
+            }}
+          >
+            <RightOutlined />
+          </div>
+        </Tooltip>
+
+      </div>
+    );
+  }
+
+  /* ── Expanded panel ── */
   return (
     <div
       style={{
-        height: '100%',
-        minHeight: 400,
+        /* flex:1 fills the <aside> column → same height as right side */
+        flex: 1,
+        width: 300,
+        minWidth: 280,
         borderRadius: 8,
         border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
         background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))',
+        display: 'flex',
+        flexDirection: 'column',
         overflow: 'hidden',
       }}
     >
+      {/* ── Header ── */}
       <div
         style={{
-          padding: '14px 14px 12px',
+          padding: '12px 12px 10px 14px',
           borderBottom: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
           background: `${accent}14`,
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 8,
+          flexShrink: 0,
         }}
       >
-        <Space direction="vertical" size={4} style={{ width: '100%' }}>
+        <Space direction="vertical" size={2} style={{ minWidth: 0, flex: 1 }}>
           <Text style={{ color: accent, fontSize: 12, fontWeight: 700 }}>
             设计树
           </Text>
@@ -561,10 +625,37 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
             {designTreePath || '模拟设计树'}
           </Text>
         </Space>
+
+        {/* Collapse toggle – integrated in header */}
+        <Tooltip title="收起设计树" placement="right">
+          <Button
+            type="text"
+            size="small"
+            icon={<LeftOutlined />}
+            onClick={() => setCollapsed(true)}
+            style={{
+              flexShrink: 0,
+              marginTop: 2,
+              color: accent,
+              border: `1px solid ${accent}44`,
+              borderRadius: 6,
+              width: 26,
+              height: 26,
+              padding: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          />
+        </Tooltip>
       </div>
 
-      <div style={{ padding: 12 }}>{renderTree()}</div>
+      {/* Tree list – scrollable, grows to fill */}
+      <div style={{ padding: 12, flex: 1, overflow: 'auto', minHeight: 0 }}>
+        {renderTree()}
+      </div>
 
+      {/* Module info footer */}
       <div
         style={{
           margin: '0 12px 12px',
@@ -572,6 +663,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
           borderRadius: 8,
           border: `1px solid ${accent}33`,
           background: 'var(--vscode-editor-background)',
+          flexShrink: 0,
         }}
       >
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
