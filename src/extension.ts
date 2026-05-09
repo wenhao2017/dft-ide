@@ -478,6 +478,31 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       }
 
       // ── 配置保存 ───────────────────────────────────────────────
+      case 'openProjectWorkspace': {
+        const requestId: string = msg.requestId;
+        const rootPath = typeof msg.rootPath === 'string' ? msg.rootPath.trim() : '';
+        try {
+          if (!rootPath) {
+            throw new Error('Project root path is empty.');
+          }
+          const result = await openProjectWorkspace(rootPath);
+          currentPanel?.webview.postMessage({
+            command: 'openProjectWorkspaceResponse',
+            requestId,
+            success: true,
+            ...result,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'openProjectWorkspaceResponse',
+            requestId,
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
       case 'saveConfig': {
         const requestId: string = msg.requestId;
         const flow = String(msg.flow ?? 'default');
@@ -884,13 +909,13 @@ function toConfigFileName(flow: string): string {
 
 function resolveLocalConfigDirectory(): string | undefined {
   const configured = vscode.workspace.getConfiguration('dftIde').get<string>('localConfigPath', '').trim();
-  if (configured) {
-    return path.resolve(configured);
-  }
-
   const projectRoot = resolveProjectRoot();
   if (!projectRoot) {
     return undefined;
+  }
+
+  if (configured) {
+    return path.join(path.resolve(configured), toProjectStateDirectoryName(projectRoot), LOCAL_STATE_SUBDIR);
   }
 
   return path.join(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR);
@@ -922,6 +947,81 @@ function resolveDefaultProjectName(): string | undefined {
 
   const workspaceName = vscode.workspace.name?.trim();
   return workspaceName || undefined;
+}
+
+function toProjectStateDirectoryName(projectRoot: string): string {
+  const normalizedRoot = path.resolve(projectRoot);
+  const basename = path.basename(normalizedRoot).trim() || 'project';
+  const safeName = basename.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
+  return `${safeName}-${hashString(normalizedRoot.toLowerCase())}`;
+}
+
+function hashString(value: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+async function openProjectWorkspace(rootPath: string): Promise<{ opened: boolean; targetPath: string; alreadyOpen: boolean }> {
+  const targetUri = await resolveProjectWorkspaceUri(rootPath);
+  const targetRoot = targetUri.fsPath.toLowerCase().endsWith('.code-workspace')
+    ? path.dirname(targetUri.fsPath)
+    : targetUri.fsPath;
+
+  if (isProjectCurrentlyOpen(targetRoot)) {
+    await vscode.commands.executeCommand('dftIde.openFlow', 'COMMON');
+    return {
+      opened: false,
+      targetPath: targetUri.fsPath,
+      alreadyOpen: true,
+    };
+  }
+
+  await vscode.commands.executeCommand('vscode.openFolder', targetUri, false);
+  return {
+    opened: true,
+    targetPath: targetUri.fsPath,
+    alreadyOpen: false,
+  };
+}
+
+async function resolveProjectWorkspaceUri(rootPath: string): Promise<vscode.Uri> {
+  const normalized = path.resolve(rootPath);
+  const uri = vscode.Uri.file(normalized);
+
+  if (normalized.toLowerCase().endsWith('.code-workspace')) {
+    await vscode.workspace.fs.stat(uri);
+    return uri;
+  }
+
+  const stat = await vscode.workspace.fs.stat(uri);
+  if (stat.type !== vscode.FileType.Directory) {
+    throw new Error(`Project path is not a directory: ${rootPath}`);
+  }
+
+  const workspaceUri = vscode.Uri.file(path.join(normalized, 'dft-ide.code-workspace'));
+  try {
+    await vscode.workspace.fs.stat(workspaceUri);
+    return workspaceUri;
+  } catch {
+    return uri;
+  }
+}
+
+function isProjectCurrentlyOpen(projectRoot: string): boolean {
+  const currentRoot = resolveProjectRoot();
+  if (!currentRoot) {
+    return false;
+  }
+
+  return normalizeFsPath(currentRoot) === normalizeFsPath(projectRoot);
+}
+
+function normalizeFsPath(value: string): string {
+  return path.resolve(value).replace(/[\\/]+$/, '').toLowerCase();
 }
 
 async function getLocalConfigInfo(): Promise<{

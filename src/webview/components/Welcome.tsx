@@ -19,7 +19,14 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import vscode from '../utils/vscode';
-import { getLocalConfigInfo, runVscodeDemo, selectPath, setLocalConfigPath, type LocalConfigInfo } from '../utils/ipc';
+import {
+  getLocalConfigInfo,
+  openProjectWorkspace,
+  runVscodeDemo,
+  selectPath,
+  setLocalConfigPath,
+  type LocalConfigInfo,
+} from '../utils/ipc';
 import useWizardStore from '../store/wizardStore';
 import {
   DftProject,
@@ -167,6 +174,11 @@ const Welcome: React.FC<Props> = ({ isDark = true }) => {
     setSelectingProjectId(project.id);
     try {
       const selected = await selectProject(project.id);
+      const openResult = await openProjectWorkspace(selected.rootPath);
+      if (!openResult.success) {
+        message.error(openResult.error ?? '项目工作区打开失败');
+        return;
+      }
       setActiveProject({
         id: selected.id,
         name: selected.name,
@@ -213,6 +225,7 @@ const Welcome: React.FC<Props> = ({ isDark = true }) => {
         style={{
           display: 'grid',
           gridTemplateColumns: 'minmax(0, 1.15fr) minmax(340px, 0.85fr)',
+          alignItems: 'stretch',
           gap: 18,
           marginBottom: 18,
         }}
@@ -274,6 +287,7 @@ const Welcome: React.FC<Props> = ({ isDark = true }) => {
             padding: 18,
             border: `1px solid ${cardBorder}`,
             background: panelBg,
+            height: '100%',
           }}
         >
           <Space direction="vertical" size={14} style={{ width: '100%' }}>
@@ -361,14 +375,15 @@ const Welcome: React.FC<Props> = ({ isDark = true }) => {
           </Card>
         </Col>
 
-        <Col xs={24} lg={10}>
+        <Col xs={24} lg={10} style={{ display: 'flex' }}>
+          <div style={{ display: 'grid', gridTemplateRows: 'auto 1fr', gap: 14, width: '100%' }}>
           <Card
             title="本地配置存储"
-            style={{ marginBottom: 14, borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
+            style={{ borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
           >
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
               <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.7 }}>
-                页面配置只保存在本地目录，不参与 Git 管控。留空时使用默认目录。
+                页面配置只保存在本地目录，不参与 Git 管控。自定义路径会作为基目录，并按当前项目自动隔离。
               </Text>
               <Space.Compact style={{ width: '100%' }}>
                 <Input
@@ -441,6 +456,7 @@ const Welcome: React.FC<Props> = ({ isDark = true }) => {
               ))}
             </Space>
           </Card>
+          </div>
         </Col>
       </Row>
 
@@ -450,7 +466,7 @@ const Welcome: React.FC<Props> = ({ isDark = true }) => {
             key={flow.key}
             xs={24}
             sm={12}
-            lg={flow.disabled ? 12 : 8}
+            lg={8}
             style={{ display: 'flex' }}
           >
             <div style={{ width: '100%', height: '100%' }}>

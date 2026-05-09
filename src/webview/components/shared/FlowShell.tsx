@@ -60,16 +60,18 @@ const FlowShell: React.FC<FlowShellProps> = ({
         </Text>
       </div>
 
-      <Steps
-        current={current}
-        onChange={onStepChange}
-        responsive
-        items={steps.map((step) => ({
-          title: step.title,
-          description: step.description,
-        }))}
-        style={{ marginBottom: 24 }}
-      />
+      <div style={{ overflowX: 'auto', paddingBottom: 4, marginBottom: 20 }}>
+        <Steps
+          current={current}
+          onChange={onStepChange}
+          responsive={false}
+          items={steps.map((step) => ({
+            title: step.title,
+            description: step.description,
+          }))}
+          style={{ minWidth: Math.max(900, steps.length * 180) }}
+        />
+      </div>
 
       <div
         style={{
@@ -78,9 +80,10 @@ const FlowShell: React.FC<FlowShellProps> = ({
           border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
           padding: 20,
           background: 'var(--vscode-editor-background)',
+          overflowX: 'auto',
         }}
       >
-        {activeStep.content}
+        <div style={{ minWidth: 760 }}>{activeStep.content}</div>
       </div>
     </div>
   );

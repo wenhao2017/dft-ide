@@ -94,6 +94,13 @@ export async function openObsViewer(
   return res as { success: boolean; url?: string; spaceName?: string; error?: string };
 }
 
+export async function openProjectWorkspace(
+  rootPath: string
+): Promise<{ success: boolean; opened?: boolean; alreadyOpen?: boolean; targetPath?: string; error?: string }> {
+  const res = await ipcRequest('openProjectWorkspace', { rootPath });
+  return res as { success: boolean; opened?: boolean; alreadyOpen?: boolean; targetPath?: string; error?: string };
+}
+
 /**
  * 保存配置数据到本地工作区文件。
  * @param flow  配置所属的流程，决定写入哪个子目录和文件名

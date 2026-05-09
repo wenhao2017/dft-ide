@@ -78,7 +78,7 @@
         "dftIde.localConfigPath": {
           "type": "string",
           "default": "",
-          "description": "Directory for DFT IDE local page state. Leave empty to use the workspace default .dft-ide/local-state directory."
+          "description": "Base directory for DFT IDE local page state. Leave empty to use the workspace default .dft-ide/local-state directory. Custom bases are automatically scoped by project."
         },
         "dftIde.obs.page": {
           "type": "string",

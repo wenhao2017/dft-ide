@@ -63,6 +63,7 @@ const PathInput: React.FC<PathInputProps> = ({
         loading={state.loading}
         disabled={disabled}
         size={size}
+        style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }}
       >
         {target === 'folder' ? '选择目录' : '选择文件'}
         <DownOutlined style={{ fontSize: 10, marginLeft: 4 }} />
@@ -80,6 +81,7 @@ const PathInput: React.FC<PathInputProps> = ({
           disabled={disabled}
           size={size}
           allowClear
+          style={{ minWidth: 0 }}
         />
         {canSelectFolder && makeSelectButton('folder')}
         {canSelectFile && makeSelectButton('file')}
@@ -91,6 +93,7 @@ const PathInput: React.FC<PathInputProps> = ({
             size={size}
             onClick={() => state.handleOpen()}
             title={state.value ? '在编辑器或资源管理器中打开' : '选择并打开'}
+            style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }}
           >
             打开
           </Button>

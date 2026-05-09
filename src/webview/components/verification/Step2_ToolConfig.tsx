@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Form, Input, Button, Select, Badge, Spin } from 'antd';
+import { Form, Input, Button, Select, Badge, Spin, Space } from 'antd';
 import { FolderOpenOutlined, LeftOutlined, RightOutlined, SaveOutlined } from '@ant-design/icons';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 
@@ -32,21 +32,17 @@ const Step2ToolConfig: React.FC<{ onNext: () => void; onPrev: () => void }> = ({
         style={{ padding: '16px 0' }}
       >
         <Form.Item label="common tessent cfg" name="tessentCfg">
-          <Input.Group compact>
-            <Form.Item name="tessentCfg" noStyle>
-              <Input style={{ width: 'calc(100% - 80px)' }} />
-            </Form.Item>
+          <Space.Compact style={{ width: '100%' }}>
+            <Input />
             <Button icon={<FolderOpenOutlined />}>打开</Button>
-          </Input.Group>
+          </Space.Compact>
         </Form.Item>
 
         <Form.Item label="common mbist cfg" name="mbistCfg">
-          <Input.Group compact>
-            <Form.Item name="mbistCfg" noStyle>
-              <Input style={{ width: 'calc(100% - 80px)' }} />
-            </Form.Item>
+          <Space.Compact style={{ width: '100%' }}>
+            <Input />
             <Button icon={<FolderOpenOutlined />}>打开</Button>
-          </Input.Group>
+          </Space.Compact>
         </Form.Item>
 
         <Form.Item label="IP 选择" name="selectedIp">
