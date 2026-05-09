@@ -1,7 +1,5 @@
 import React from 'react';
-import { Steps, Typography } from 'antd';
-
-const { Text, Title } = Typography;
+import { Steps } from 'antd';
 
 export interface FlowStep {
   title: string;
@@ -17,73 +15,54 @@ interface FlowShellProps {
   steps: FlowStep[];
   current: number;
   onStepChange: (step: number) => void;
+  sidebar?: React.ReactNode;
 }
 
 const FlowShell: React.FC<FlowShellProps> = ({
-  accent,
-  eyebrow,
-  title,
-  description,
   steps,
   current,
   onStepChange,
+  sidebar,
 }) => {
   const activeStep = steps[current];
 
   return (
     <div>
-      <div
-        style={{
-          border: `1px solid ${accent}33`,
-          borderRadius: 8,
-          padding: '18px 20px',
-          marginBottom: 20,
-          background: `linear-gradient(135deg, ${accent}1f, transparent 62%)`,
-        }}
-      >
-        <Text
-          style={{
-            color: accent,
-            fontSize: 12,
-            fontWeight: 700,
-            letterSpacing: 0,
-            textTransform: 'uppercase',
-          }}
-        >
-          {eyebrow}
-        </Text>
-        <Title level={3} style={{ margin: '6px 0 4px', fontSize: 22 }}>
-          {title}
-        </Title>
-        <Text type="secondary" style={{ lineHeight: 1.7 }}>
-          {description}
-        </Text>
-      </div>
+      <div style={{ display: 'flex', alignItems: 'stretch', gap: 16 }}>
+        {sidebar && (
+          <aside style={{ flex: '0 0 300px', minWidth: 280 }}>
+            {sidebar}
+          </aside>
+        )}
 
-      <div style={{ overflowX: 'auto', paddingBottom: 4, marginBottom: 20 }}>
-        <Steps
-          current={current}
-          onChange={onStepChange}
-          responsive={false}
-          items={steps.map((step) => ({
-            title: step.title,
-            description: step.description,
-          }))}
-          style={{ minWidth: Math.max(900, steps.length * 180) }}
-        />
-      </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ overflow: 'hidden', paddingBottom: 4, marginBottom: 20 }}>
+            <Steps
+              current={current}
+              onChange={onStepChange}
+              responsive
+              items={steps.map((step) => ({
+                title: step.title,
+                description: step.description,
+              }))}
+              style={{ width: '100%' }}
+            />
+          </div>
 
-      <div
-        style={{
-          minHeight: 400,
-          borderRadius: 8,
-          border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
-          padding: 20,
-          background: 'var(--vscode-editor-background)',
-          overflowX: 'auto',
-        }}
-      >
-        <div style={{ minWidth: 760 }}>{activeStep.content}</div>
+          <div
+            style={{
+              minHeight: 400,
+              minWidth: 0,
+              borderRadius: 8,
+              border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
+              padding: 20,
+              background: 'var(--vscode-editor-background)',
+              overflowX: 'hidden',
+            }}
+          >
+            <div style={{ width: '100%', minWidth: 0 }}>{activeStep.content}</div>
+          </div>
+        </div>
       </div>
     </div>
   );

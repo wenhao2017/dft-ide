@@ -126,6 +126,20 @@ export async function readConfig(
   return res.data as Record<string, unknown> ?? null;
 }
 
+export async function readDesignTree(): Promise<Record<string, unknown> | null> {
+  const res = await ipcRequest('readDesignTree');
+  if (res.error) return null;
+  return res.data as Record<string, unknown> ?? null;
+}
+
+export async function saveDesignTree(
+  flow: string,
+  data: Record<string, unknown>
+): Promise<{ success: boolean; filePath?: string; mode?: string; error?: string }> {
+  const res = await ipcRequest('saveDesignTree', { flow, data });
+  return res as { success: boolean; filePath?: string; mode?: string; error?: string };
+}
+
 export interface LocalConfigInfo {
   configuredPath: string;
   effectivePath: string | null;

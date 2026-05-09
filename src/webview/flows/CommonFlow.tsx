@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Badge, Button, Divider, Form, Radio, Space, Spin, Tooltip, Typography } from 'antd';
+import { Alert, Badge, Button, Divider, Form, Radio, Space, Spin, Tooltip } from 'antd';
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -14,8 +14,6 @@ import { useFlowConfig } from '../hooks/useFlowConfig';
 import PathInput from '../components/shared/PathInput';
 import useWizardStore from '../store/wizardStore';
 import ObsViewer from '../components/shared/ObsViewer';
-
-const { Text, Title } = Typography;
 
 const CommonFlow: React.FC = () => {
   const designTree = useVscodePath();
@@ -48,26 +46,6 @@ const CommonFlow: React.FC = () => {
   return (
     <Spin spinning={loading} tip="读取配置中...">
       <div>
-        <div
-          style={{
-            border: '1px solid rgba(37,99,235,0.22)',
-            borderRadius: 8,
-            padding: '18px 20px',
-            marginBottom: 20,
-            background: 'linear-gradient(135deg, rgba(37,99,235,0.14), transparent 60%)',
-          }}
-        >
-          <Text style={{ color: '#2563eb', fontSize: 12, fontWeight: 700 }}>
-            COMMON
-          </Text>
-          <Title level={3} style={{ margin: '6px 0 6px', fontSize: 22 }}>
-            公共数据与分支同步
-          </Title>
-          <Text type="secondary">
-            这里集中维护各流程都会复用的路径、分支和公共数据动作。
-          </Text>
-        </div>
-
         <Alert
           showIcon
           type="info"
@@ -106,10 +84,10 @@ const CommonFlow: React.FC = () => {
           </div>
 
           <Form layout="vertical" style={{ maxWidth: 840, margin: '0 auto' }}>
-            <Form.Item label="Design Tree 路径">
+            <Form.Item label="设计树路径">
               <PathInput
                 state={designTree}
-                placeholder="请输入或选择 designtree 路径"
+                placeholder="请输入或选择设计树路径"
                 size="large"
                 showOpen
                 showSelectFolder

@@ -5,15 +5,17 @@ import Step3Execution from '../components/design/Step3_Execution';
 import Step4Result from '../components/design/Step4_Result';
 import Step5Cloud from '../components/design/Step5_Cloud';
 import FlowShell from '../components/shared/FlowShell';
+import DesignTreePanel from '../components/shared/DesignTreePanel';
 
 const DesignFlow: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(0);
+  const [selectedModule, setSelectedModule] = useState('top_abc');
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
 
   const steps = [
-    { title: '公共配置', description: '路径与模板', content: <Step1CommonConfig onNext={nextStep} /> },
-    { title: '工具配置', description: '版本与集群', content: <Step2ToolConfig onNext={nextStep} onPrev={prevStep} /> },
+    { title: '公共配置', description: '路径与模板', content: <Step1CommonConfig moduleKey={selectedModule} onNext={nextStep} /> },
+    { title: '工具配置', description: '版本与集群', content: <Step2ToolConfig moduleKey={selectedModule} onNext={nextStep} onPrev={prevStep} /> },
     { title: '执行页', description: '脚本与任务', content: <Step3Execution onNext={nextStep} onPrev={prevStep} /> },
     { title: '结果页', description: '报告与定位', content: <Step4Result onNext={nextStep} onPrev={prevStep} /> },
     { title: '端云协同', description: '同步与归档', content: <Step5Cloud onPrev={prevStep} /> },
@@ -28,6 +30,15 @@ const DesignFlow: React.FC = () => {
       steps={steps}
       current={currentStep}
       onStepChange={setCurrentStep}
+      sidebar={
+        <DesignTreePanel
+          accent="#7c3aed"
+          flow="design"
+          flowLabel="Design"
+          selectedKey={selectedModule}
+          onSelect={setSelectedModule}
+        />
+      }
     />
   );
 };

@@ -3,23 +3,33 @@ import { Form, Input, Button, Select, Badge, Spin, Space } from 'antd';
 import { FolderOpenOutlined, LeftOutlined, RightOutlined, SaveOutlined } from '@ant-design/icons';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 
-const Step2ToolConfig: React.FC<{ onNext: () => void; onPrev: () => void }> = ({
+const Step2ToolConfig: React.FC<{ onNext: () => void; onPrev: () => void; moduleKey?: string }> = ({
   onNext,
   onPrev,
+  moduleKey,
 }) => {
   const [form] = Form.useForm();
 
   // ── 配置持久化 Hook ─────────────────────────────────
-  const { savedData, loading, saving, hasUnsaved, handleSave } = useFlowConfig('verification');
+  const { savedData, loading, saving, hasUnsaved, handleSave } =
+    useFlowConfig(moduleKey ? `verification/${moduleKey}/config` : 'verification');
 
   // 回填
   useEffect(() => {
-    if (!savedData?.step2) return;
-    form.setFieldsValue(savedData.step2);
-  }, [savedData, form]);
+    if (!savedData) return;
+    const source = (savedData.step2 as Record<string, unknown> | undefined) ?? savedData;
+    if (source) {
+      form.setFieldsValue(source);
+    }
+  }, [savedData, form, moduleKey]);
 
   const onSave = () => {
-    handleSave({ step2: form.getFieldsValue(true) });
+    const data = form.getFieldsValue(true);
+    if (!moduleKey) {
+      handleSave({ step2: data });
+      return;
+    }
+    handleSave({ moduleKey, step2: data });
   };
 
   return (

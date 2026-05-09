@@ -29,9 +29,10 @@ const { Text } = Typography;
 interface Props {
   onNext: () => void;
   onPrev: () => void;
+  moduleKey?: string;
 }
 
-const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev }) => {
+const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey }) => {
   const [activeTab, setActiveTab] = useState('task');
   const [taskForm] = Form.useForm();
   const [designForm] = Form.useForm();
@@ -39,20 +40,22 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev }) => {
   // ── 配置持久化 Hook ─────────────────────────────────
   // 注意：Step2 与 Step1 同属 design flow，但字段不同，合并到同一个文件中
   // 这里使用独立 key 区分：step2_task / step2_design
-  const { savedData, loading, saving, hasUnsaved, handleSave } = useFlowConfig('design');
+  const { savedData, loading, saving, hasUnsaved, handleSave } =
+    useFlowConfig(moduleKey ? `design/${moduleKey}/config` : 'design');
 
   // 回填：从文件读到 savedData 后填入表单
   useEffect(() => {
     if (!savedData) return;
+    const source = (savedData.step2 as Record<string, unknown> | undefined) ?? savedData;
     // 任务配置子表单
-    if (savedData.step2Task) {
-      taskForm.setFieldsValue(savedData.step2Task);
+    if (source.step2Task) {
+      taskForm.setFieldsValue(source.step2Task);
     }
     // 设计配置子表单
-    if (savedData.step2Design) {
-      designForm.setFieldsValue(savedData.step2Design);
+    if (source.step2Design) {
+      designForm.setFieldsValue(source.step2Design);
     }
-  }, [savedData, taskForm, designForm]);
+  }, [savedData, taskForm, designForm, moduleKey]);
 
   const collectFormData = (): Record<string, unknown> => ({
     // 只写 step2 字段，保留 step1 字段（merge 在 extension 侧）
@@ -60,7 +63,14 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev }) => {
     step2Design: designForm.getFieldsValue(true),
   });
 
-  const onSave = () => handleSave(collectFormData());
+  const onSave = () => {
+    const data = collectFormData();
+    if (!moduleKey) {
+      handleSave(data);
+      return;
+    }
+    handleSave({ moduleKey, step2: data });
+  };
 
   // ── 任务配置 Tab ──────────────────────────────────
   const renderTaskConfig = () => (

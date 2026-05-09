@@ -14,7 +14,7 @@ import useWizardStore from '../../store/wizardStore';
 
 const { Text } = Typography;
 
-const Step1CommonConfig: React.FC<{ onNext: () => void }> = ({ onNext }) => {
+const Step1CommonConfig: React.FC<{ onNext: () => void; moduleKey?: string }> = ({ onNext, moduleKey }) => {
   const project    = useVscodePath();
   const commonPath = useVscodePath();
   const workPath   = useVscodePath();
@@ -28,7 +28,8 @@ const Step1CommonConfig: React.FC<{ onNext: () => void }> = ({ onNext }) => {
   const updatePayload = useWizardStore((state) => state.updatePayload);
 
   // ── 配置持久化 Hook ─────────────────────────────────
-  const { savedData, loading, saving, hasUnsaved, handleSave } = useFlowConfig('verification');
+  const { savedData, loading, saving, hasUnsaved, handleSave } =
+    useFlowConfig(moduleKey ? `verification/${moduleKey}/config` : 'verification');
 
   // 获取 Git 分支
   useEffect(() => {
@@ -48,16 +49,17 @@ const Step1CommonConfig: React.FC<{ onNext: () => void }> = ({ onNext }) => {
   // 回填配置
   useEffect(() => {
     if (!savedData) return;
-    if (savedData.project)    project.setValue(String(savedData.project));
-    if (savedData.commonPath) commonPath.setValue(String(savedData.commonPath));
-    if (savedData.workPath)   workPath.setValue(String(savedData.workPath));
-    if (savedData.sailorCfg)  sailorCfg.setValue(String(savedData.sailorCfg));
-    if (savedData.atpgCfg)    atpgCfg.setValue(String(savedData.atpgCfg));
-    if (savedData.staCfg)     staCfg.setValue(String(savedData.staCfg));
-    if (savedData.fmlCfg)     fmlCfg.setValue(String(savedData.fmlCfg));
-    if (savedData.exitType)   setExitType(String(savedData.exitType));
+    const source = (savedData.step1 as Record<string, unknown> | undefined) ?? savedData;
+    if (source.project)    project.setValue(String(source.project));
+    if (source.commonPath) commonPath.setValue(String(source.commonPath));
+    if (source.workPath)   workPath.setValue(String(source.workPath));
+    if (source.sailorCfg)  sailorCfg.setValue(String(source.sailorCfg));
+    if (source.atpgCfg)    atpgCfg.setValue(String(source.atpgCfg));
+    if (source.staCfg)     staCfg.setValue(String(source.staCfg));
+    if (source.fmlCfg)     fmlCfg.setValue(String(source.fmlCfg));
+    if (source.exitType)   setExitType(String(source.exitType));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedData]);
+  }, [savedData, moduleKey]);
 
   const collectFormData = () => ({
     project:    project.value,
@@ -70,7 +72,14 @@ const Step1CommonConfig: React.FC<{ onNext: () => void }> = ({ onNext }) => {
     exitType,
   });
 
-  const onSave = () => handleSave(collectFormData());
+  const onSave = () => {
+    const data = collectFormData();
+    if (!moduleKey) {
+      handleSave(data);
+      return;
+    }
+    handleSave({ moduleKey, step1: data });
+  };
 
   return (
     <Spin spinning={loading} tip="读取配置中...">

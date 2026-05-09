@@ -572,6 +572,49 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       }
 
       // ── Git 同步 ────────────────────────────────────────────────
+      case 'readDesignTree': {
+        const requestId: string = msg.requestId;
+        try {
+          const data = await readDesignTreeState();
+          currentPanel?.webview.postMessage({
+            command: 'readDesignTreeResponse',
+            requestId,
+            data
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'readDesignTreeResponse',
+            requestId,
+            error: String(err),
+            data: null
+          });
+        }
+        return;
+      }
+
+      case 'saveDesignTree': {
+        const requestId: string = msg.requestId;
+        const flow = String(msg.flow ?? 'design');
+        const data = msg.data as Record<string, unknown>;
+        try {
+          const result = await saveDesignTreeState(flow, data);
+          currentPanel?.webview.postMessage({
+            command: 'saveDesignTreeResponse',
+            requestId,
+            success: true,
+            ...result
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'saveDesignTreeResponse',
+            requestId,
+            success: false,
+            error: String(err)
+          });
+        }
+        return;
+      }
+
       case 'getLocalConfigInfo': {
         const requestId: string = msg.requestId;
         try {
@@ -899,11 +942,16 @@ function resolveConfigPath(flow: string): string | undefined {
   if (!dirPath) {
     return undefined;
   }
-  return path.join(dirPath, `${toConfigFileName(flow)}.json`);
+  const segments = flow.split(/[\\/]+/).map(toConfigPathSegment).filter(Boolean);
+  if (segments.length === 0) {
+    return path.join(dirPath, 'default.json');
+  }
+  const fileName = `${segments[segments.length - 1]}.json`;
+  return path.join(dirPath, ...segments.slice(0, -1), fileName);
 }
 
-function toConfigFileName(flow: string): string {
-  const normalized = flow.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+function toConfigPathSegment(flow: string): string {
+  const normalized = flow.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
   return normalized || 'default';
 }
 
@@ -1124,6 +1172,172 @@ async function mergeConfigFile(
     // 文件不存在（首次保存）或解析失败，直接使用新数据
     return newData;
   }
+}
+
+async function readDesignTreeState(): Promise<Record<string, unknown> | null> {
+  const commonPath = resolveConfigPath('common');
+  if (!commonPath) {
+    return null;
+  }
+
+  const common = await readJsonFile(commonPath);
+  const designTreeFilePath = resolveDesignTreeFilePath(common);
+  if (designTreeFilePath) {
+    const fileData = await readJsonFile(designTreeFilePath);
+    if (fileData) {
+      return {
+        ...fileData,
+        sourcePath: designTreeFilePath,
+        sourceMode: 'designTreeFile'
+      };
+    }
+  }
+
+  const draft = common?.designTreeDraft;
+  return isRecord(draft) ? { ...draft, sourceMode: 'commonMock' } : null;
+}
+
+async function saveDesignTreeState(
+  flow: string,
+  data: Record<string, unknown>
+): Promise<{ filePath: string; mode: string }> {
+  const commonPath = resolveConfigPath('common');
+  if (!commonPath) {
+    throw new Error('Workspace local-state path is not available.');
+  }
+
+  await ensureLocalConfigDirectory(path.dirname(commonPath));
+  const common = await readJsonFile(commonPath);
+  const designTreeFilePath = resolveDesignTreeFilePath(common);
+  const encoded = Buffer.from(JSON.stringify(data, null, 2), 'utf-8');
+
+  if (designTreeFilePath) {
+    await ensureLocalConfigDirectory(path.dirname(designTreeFilePath));
+    await vscode.workspace.fs.writeFile(vscode.Uri.file(designTreeFilePath), encoded);
+    await updateModuleConfigSkeleton(flow, data);
+    return {
+      filePath: vscode.workspace.asRelativePath(designTreeFilePath),
+      mode: 'designTreeFile'
+    };
+  }
+
+  const mergedCommon = await mergeConfigFile(commonPath, {
+    designTreeDraft: data,
+    designTreeUpdatedAt: new Date().toISOString()
+  });
+  await vscode.workspace.fs.writeFile(
+    vscode.Uri.file(commonPath),
+    Buffer.from(JSON.stringify(mergedCommon, null, 2), 'utf-8')
+  );
+  await updateModuleConfigSkeleton(flow, data);
+  return {
+    filePath: vscode.workspace.asRelativePath(commonPath),
+    mode: 'commonMock'
+  };
+}
+
+async function updateModuleConfigSkeleton(flow: string, treeState: Record<string, unknown>): Promise<void> {
+  const flowPath = resolveConfigPath(flow);
+  if (!flowPath) {
+    return;
+  }
+
+  await ensureLocalConfigDirectory(path.dirname(flowPath));
+  const existing = await readJsonFile(flowPath) ?? {};
+  const { moduleConfigs: _legacyModuleConfigs, ...flowState } = existing;
+  const modules = collectDesignTreeModules(treeState.nodes);
+
+  await vscode.workspace.fs.writeFile(
+    vscode.Uri.file(flowPath),
+    Buffer.from(JSON.stringify({
+      ...flowState,
+      activeModuleKey: typeof existing.activeModuleKey === 'string' ? existing.activeModuleKey : modules[0]?.key,
+      modules: modules.map((module) => ({
+        key: module.key,
+        title: module.title,
+        type: module.type
+      }))
+    }, null, 2), 'utf-8')
+  );
+
+  for (const module of modules) {
+    const modulePath = resolveConfigPath(`${flow}/${module.key}/config`);
+    if (!modulePath) {
+      continue;
+    }
+    await ensureLocalConfigDirectory(path.dirname(modulePath));
+    const previous = await readJsonFile(modulePath) ?? {};
+    const merged = {
+      ...previous,
+      moduleKey: module.key,
+      title: module.title,
+      type: module.type,
+      updatedFromDesignTreeAt: new Date().toISOString()
+    };
+    await vscode.workspace.fs.writeFile(
+      vscode.Uri.file(modulePath),
+      Buffer.from(JSON.stringify(merged, null, 2), 'utf-8')
+    );
+  }
+}
+
+function resolveDesignTreeFilePath(common: Record<string, unknown> | null): string | undefined {
+  const rawPath = typeof common?.designTree === 'string' ? common.designTree.trim() : '';
+  if (!rawPath) {
+    return undefined;
+  }
+
+  const projectRoot = resolveProjectRoot();
+  const resolved = path.isAbsolute(rawPath)
+    ? rawPath
+    : projectRoot ? path.resolve(projectRoot, rawPath) : undefined;
+
+  if (!resolved) {
+    return undefined;
+  }
+
+  return path.extname(resolved) ? resolved : path.join(resolved, 'design_tree.mock.json');
+}
+
+async function readJsonFile(filePath: string): Promise<Record<string, unknown> | null> {
+  try {
+    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
+    const parsed = JSON.parse(Buffer.from(bytes).toString('utf-8'));
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function collectDesignTreeModules(value: unknown): Array<{ key: string; title: string; type: string }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const modules: Array<{ key: string; title: string; type: string }> = [];
+  const visit = (items: unknown[]) => {
+    for (const item of items) {
+      if (!isRecord(item)) {
+        continue;
+      }
+      const key = typeof item.key === 'string' ? item.key : '';
+      const title = typeof item.title === 'string' ? item.title : key;
+      const type = typeof item.type === 'string' ? item.type : 'module';
+      if (key) {
+        modules.push({ key, title, type });
+      }
+      if (Array.isArray(item.children)) {
+        visit(item.children);
+      }
+    }
+  };
+
+  visit(value);
+  return modules;
 }
 
 export function deactivate() {}
