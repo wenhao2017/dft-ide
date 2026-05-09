@@ -88,7 +88,7 @@ export function runVscodeDemo(action: string): void {
  * @param data  要持久化的配置对象（会被序列化为 JSON）
  */
 export async function saveConfig(
-  flow: 'common' | 'design' | 'verification',
+  flow: string,
   data: Record<string, unknown>
 ): Promise<{ success: boolean; filePath?: string; error?: string }> {
   const res = await ipcRequest('saveConfig', { flow, data });
@@ -100,11 +100,31 @@ export async function saveConfig(
  * @param flow  要读取的流程配置文件
  */
 export async function readConfig(
-  flow: 'common' | 'design' | 'verification'
+  flow: string
 ): Promise<Record<string, unknown> | null> {
   const res = await ipcRequest('readConfig', { flow });
   if (res.error) return null;
   return res.data as Record<string, unknown> ?? null;
+}
+
+export interface LocalConfigInfo {
+  configuredPath: string;
+  effectivePath: string | null;
+  defaultPath: string | null;
+  isDefault: boolean;
+  error?: string;
+}
+
+export async function getLocalConfigInfo(): Promise<LocalConfigInfo> {
+  const res = await ipcRequest('getLocalConfigInfo');
+  return res as unknown as LocalConfigInfo;
+}
+
+export async function setLocalConfigPath(
+  path: string
+): Promise<{ success: boolean; error?: string } & LocalConfigInfo> {
+  const res = await ipcRequest('setLocalConfigPath', { path });
+  return res as unknown as { success: boolean; error?: string } & LocalConfigInfo;
 }
 
 /**
@@ -114,7 +134,7 @@ export async function readConfig(
  * @param push        是否在 commit 后执行 git push（默认 false）
  */
 export async function syncGit(
-  flow: 'common' | 'design' | 'verification',
+  flow: string,
   message?: string,
   push = false
 ): Promise<{ success: boolean; commitMessage?: string; error?: string }> {

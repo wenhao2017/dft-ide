@@ -6,6 +6,8 @@ import { gitService } from './services/gitService';
 const VIEW_TYPE = 'dftIde.welcome';
 const GLOBAL_KEY = 'dftIde.hasShownWelcome';
 const LAYOUT_BACKUP_KEY = 'dftIde.layout.previousSettings';
+const LOCAL_STATE_DIR_NAME = '.dft-ide';
+const LOCAL_STATE_SUBDIR = 'local-state';
 
 let currentPanel: vscode.WebviewPanel | undefined = undefined;
 let activeCategory: string | undefined = undefined;
@@ -417,7 +419,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       // ── 配置保存 ───────────────────────────────────────────────
       case 'saveConfig': {
         const requestId: string = msg.requestId;
-        const flow = msg.flow as 'common' | 'design' | 'verification';
+        const flow = String(msg.flow ?? 'default');
         const data = msg.data as Record<string, unknown>;
         try {
           const filePath = resolveConfigPath(flow);
@@ -427,6 +429,11 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
               success: false, error: '未找到工作区路径，请先打开 DFT 项目工作区'
             });
             return;
+          }
+          await ensureLocalConfigDirectory(path.dirname(filePath));
+          const projectRoot = resolveProjectRoot();
+          if (projectRoot) {
+            await ensureLocalStateIgnored(projectRoot, path.dirname(filePath));
           }
           const merged = await mergeConfigFile(filePath, data);
           const encoded = Buffer.from(JSON.stringify(merged, null, 2));
@@ -448,7 +455,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       // ── 配置读取 ───────────────────────────────────────────────
       case 'readConfig': {
         const requestId: string = msg.requestId;
-        const flow = msg.flow as 'common' | 'design' | 'verification';
+        const flow = String(msg.flow ?? 'default');
         try {
           const filePath = resolveConfigPath(flow);
           if (!filePath) {
@@ -479,6 +486,46 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       }
 
       // ── Git 同步 ────────────────────────────────────────────────
+      case 'getLocalConfigInfo': {
+        const requestId: string = msg.requestId;
+        try {
+          currentPanel?.webview.postMessage({
+            command: 'getLocalConfigInfoResponse',
+            requestId,
+            ...(await getLocalConfigInfo())
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'getLocalConfigInfoResponse',
+            requestId,
+            error: String(err)
+          });
+        }
+        return;
+      }
+
+      case 'setLocalConfigPath': {
+        const requestId: string = msg.requestId;
+        const localPath = typeof msg.path === 'string' ? msg.path.trim() : '';
+        try {
+          await updateLocalConfigPath(localPath);
+          currentPanel?.webview.postMessage({
+            command: 'setLocalConfigPathResponse',
+            requestId,
+            success: true,
+            ...(await getLocalConfigInfo())
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'setLocalConfigPathResponse',
+            requestId,
+            success: false,
+            error: String(err)
+          });
+        }
+        return;
+      }
+
       case 'syncGit': {
         const requestId: string = msg.requestId;
         const flow    = msg.flow as 'common' | 'design' | 'verification';
@@ -699,50 +746,135 @@ function getNonce(): string {
 // ============================================================
 
 /**
- * 根据 flow 类型，解析对应配置文件的绝对路径。
+ * Resolve a page-state file from a stable page key.
  *
- * 路径策略：
- *   - common       → <workspaceRoot>/main/common.cfg.json
- *   - design       → <workspaceRoot>/design/design.cfg.json
- *   - verification → <workspaceRoot>/verification/verification.cfg.json
- *
- * 如果工作区有多个根目录（Multi-root），优先查找名称匹配的根；
- * 否则回退到第一个根目录。
- *
- * 返回 undefined 表示没有打开任何工作区。
+ * Page layouts can change freely; the extension only owns the storage root.
+ * Each page/flow persists into one JSON file under the configured local
+ * state directory.
  */
-function resolveConfigPath(flow: 'common' | 'design' | 'verification'): string | undefined {
+function resolveConfigPath(flow: string): string | undefined {
+  const dirPath = resolveLocalConfigDirectory();
+  if (!dirPath) {
+    return undefined;
+  }
+  return path.join(dirPath, `${toConfigFileName(flow)}.json`);
+}
+
+function toConfigFileName(flow: string): string {
+  const normalized = flow.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  return normalized || 'default';
+}
+
+function resolveLocalConfigDirectory(): string | undefined {
+  const configured = vscode.workspace.getConfiguration('dftIde').get<string>('localConfigPath', '').trim();
+  if (configured) {
+    return path.resolve(configured);
+  }
+
+  const projectRoot = resolveProjectRoot();
+  if (!projectRoot) {
+    return undefined;
+  }
+
+  return path.join(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR);
+}
+
+function resolveProjectRoot(): string | undefined {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
     return undefined;
   }
 
-  const dirMap: Record<typeof flow, string> = {
-    common:       'main',
-    design:       'design',
-    verification: 'verification',
-  };
-  const fileMap: Record<typeof flow, string> = {
-    common:       'common.cfg.json',
-    design:       'design.cfg.json',
-    verification: 'verification.cfg.json',
-  };
-
-  const targetDir  = dirMap[flow];
-  const targetFile = fileMap[flow];
-
-  // 优先找名称匹配的根目录（例如名为 "design" 的工作区根）
-  const matchedFolder = folders.find(
-    (f) => f.name.toLowerCase() === targetDir.toLowerCase()
-  );
-
-  if (matchedFolder) {
-    return path.join(matchedFolder.uri.fsPath, targetFile);
+  const expectedRoots = ['main', 'design', 'verification'];
+  const matched = expectedRoots
+    .map((name) => folders.find((folder) => folder.name.toLowerCase() === name))
+    .filter((folder): folder is vscode.WorkspaceFolder => Boolean(folder));
+  const parents = new Set(matched.map((folder) => path.dirname(folder.uri.fsPath)));
+  if (matched.length >= 2 && parents.size === 1) {
+    return [...parents][0];
   }
 
-  // 回退：在第一个工作区根的对应子目录下
-  const rootPath = folders[0].uri.fsPath;
-  return path.join(rootPath, targetDir, targetFile);
+  return folders[0].uri.fsPath;
+}
+
+async function getLocalConfigInfo(): Promise<{
+  configuredPath: string;
+  effectivePath: string | null;
+  defaultPath: string | null;
+  isDefault: boolean;
+}> {
+  const configuredPath = vscode.workspace.getConfiguration('dftIde').get<string>('localConfigPath', '').trim();
+  const projectRoot = resolveProjectRoot();
+  const defaultPath = projectRoot ? path.join(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR) : null;
+  const effectivePath = resolveLocalConfigDirectory() ?? null;
+
+  if (effectivePath) {
+    await ensureLocalConfigDirectory(effectivePath);
+  }
+  if (projectRoot) {
+    await ensureLocalStateIgnored(projectRoot, effectivePath ?? undefined);
+  }
+
+  return {
+    configuredPath,
+    effectivePath,
+    defaultPath,
+    isDefault: !configuredPath,
+  };
+}
+
+async function updateLocalConfigPath(localPath: string): Promise<void> {
+  const target = vscode.workspace.workspaceFolders
+    ? vscode.ConfigurationTarget.Workspace
+    : vscode.ConfigurationTarget.Global;
+  await vscode.workspace.getConfiguration('dftIde').update(
+    'localConfigPath',
+    localPath || undefined,
+    target
+  );
+
+  const effectivePath = resolveLocalConfigDirectory();
+  if (effectivePath) {
+    await ensureLocalConfigDirectory(effectivePath);
+  }
+
+  const projectRoot = resolveProjectRoot();
+  if (projectRoot) {
+    await ensureLocalStateIgnored(projectRoot, effectivePath ?? undefined);
+  }
+}
+
+async function ensureLocalConfigDirectory(dirPath: string): Promise<void> {
+  await vscode.workspace.fs.createDirectory(vscode.Uri.file(dirPath));
+}
+
+async function ensureLocalStateIgnored(projectRoot: string, effectivePath?: string): Promise<void> {
+  const ignoreEntries = new Set<string>([`${LOCAL_STATE_DIR_NAME}/`]);
+  if (effectivePath) {
+    const relative = path.relative(projectRoot, effectivePath).replace(/\\/g, '/');
+    if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+      ignoreEntries.add(relative.endsWith('/') ? relative : `${relative}/`);
+    }
+  }
+
+  const gitignoreUri = vscode.Uri.file(path.join(projectRoot, '.gitignore'));
+  let content = '';
+  try {
+    const bytes = await vscode.workspace.fs.readFile(gitignoreUri);
+    content = Buffer.from(bytes).toString('utf-8');
+  } catch {
+    content = '';
+  }
+
+  const lines = new Set(content.split(/\r?\n/).map((line) => line.trim()));
+  const missing = [...ignoreEntries].filter((entry) => !lines.has(entry));
+  if (missing.length === 0) {
+    return;
+  }
+
+  const prefix = content && !content.endsWith('\n') ? '\n' : '';
+  const nextContent = `${content}${prefix}\n# DFT IDE local user state\n${missing.join('\n')}\n`;
+  await vscode.workspace.fs.writeFile(gitignoreUri, Buffer.from(nextContent, 'utf-8'));
 }
 
 /**

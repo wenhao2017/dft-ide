@@ -75,6 +75,11 @@
           "default": "",
           "description": "DFT IDE backend API base URL, for example http://localhost:8080."
         },
+        "dftIde.localConfigPath": {
+          "type": "string",
+          "default": "",
+          "description": "Directory for DFT IDE local page state. Leave empty to use the workspace default .dft-ide/local-state directory."
+        },
         "dftIde.layout.autoApply": {
           "type": "boolean",
           "default": true,

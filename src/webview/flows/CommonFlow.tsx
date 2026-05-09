@@ -74,7 +74,7 @@ const CommonFlow: React.FC = () => {
           <Alert
             showIcon
             type="warning"
-            message="有未同步到 Git 的本地配置，请点击「立即同步」提交。"
+            message="有尚未保存的本地配置，请先保存到本地状态目录。"
             style={{ marginBottom: 16, borderRadius: 8 }}
           />
         )}
@@ -170,7 +170,7 @@ const CommonFlow: React.FC = () => {
                 loading={syncing}
                 onClick={onSync}
               >
-                立即同步
+                保存本地状态
               </Button>
             </Space>
           </div>

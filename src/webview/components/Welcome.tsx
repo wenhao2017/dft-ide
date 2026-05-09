@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Badge, Button, Card, Col, Empty, Input, List, Row, Space, Spin, Tag, Typography } from 'antd';
+import { Alert, Badge, Button, Card, Col, Empty, Input, List, Row, Space, Spin, Tag, Typography, message } from 'antd';
 import {
   ApiOutlined,
   BellOutlined,
@@ -9,15 +9,17 @@ import {
   CopyOutlined,
   ExperimentOutlined,
   FileProtectOutlined,
+  FolderOpenOutlined,
   LineChartOutlined,
   PlusOutlined,
   RocketOutlined,
+  SaveOutlined,
   SettingOutlined,
   SlidersOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import vscode from '../utils/vscode';
-import { runVscodeDemo } from '../utils/ipc';
+import { getLocalConfigInfo, runVscodeDemo, selectPath, setLocalConfigPath, type LocalConfigInfo } from '../utils/ipc';
 import useWizardStore from '../store/wizardStore';
 import {
   DftProject,
@@ -98,6 +100,9 @@ const Welcome: React.FC<Props> = ({ isDark = true }) => {
   const [projectError, setProjectError] = useState<string | null>(null);
   const [selectingProjectId, setSelectingProjectId] = useState<string | null>(null);
   const [projectKeyword, setProjectKeyword] = useState('');
+  const [localConfigInfo, setLocalConfigInfo] = useState<LocalConfigInfo | null>(null);
+  const [localConfigPath, setLocalConfigPathValue] = useState('');
+  const [savingLocalConfigPath, setSavingLocalConfigPath] = useState(false);
 
   const cardBorder = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.12)';
   const panelBg = isDark ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.92)';
@@ -138,6 +143,26 @@ const Welcome: React.FC<Props> = ({ isDark = true }) => {
     };
   }, []);
 
+  useEffect(() => {
+    let disposed = false;
+
+    getLocalConfigInfo()
+      .then((info) => {
+        if (disposed) return;
+        setLocalConfigInfo(info);
+        setLocalConfigPathValue(info.configuredPath);
+      })
+      .catch((error) => {
+        if (!disposed) {
+          message.warning(error instanceof Error ? error.message : '本地配置路径读取失败');
+        }
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
   const activateProject = async (project: DftProject) => {
     setSelectingProjectId(project.id);
     try {
@@ -156,6 +181,29 @@ const Welcome: React.FC<Props> = ({ isDark = true }) => {
 
   const openFlow = (category: string) => {
     setFlowContext({ category, projectId: dashboard?.currentProjectId ?? undefined });
+  };
+
+  const chooseLocalConfigPath = async () => {
+    const selected = await selectPath('folder');
+    if (selected) {
+      setLocalConfigPathValue(selected);
+    }
+  };
+
+  const saveLocalConfigPath = async (nextPath = localConfigPath) => {
+    setSavingLocalConfigPath(true);
+    try {
+      const result = await setLocalConfigPath(nextPath.trim());
+      if (result.success) {
+        setLocalConfigInfo(result);
+        setLocalConfigPathValue(result.configuredPath);
+        message.success(result.isDefault ? '已恢复默认本地配置目录' : '本地配置目录已保存');
+      } else {
+        message.error(result.error ?? '本地配置目录保存失败');
+      }
+    } finally {
+      setSavingLocalConfigPath(false);
+    }
   };
 
   return (
@@ -314,6 +362,51 @@ const Welcome: React.FC<Props> = ({ isDark = true }) => {
         </Col>
 
         <Col xs={24} lg={10}>
+          <Card
+            title="本地配置存储"
+            style={{ marginBottom: 14, borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
+          >
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.7 }}>
+                页面配置只保存在本地目录，不参与 Git 管控。留空时使用默认目录。
+              </Text>
+              <Space.Compact style={{ width: '100%' }}>
+                <Input
+                  value={localConfigPath}
+                  onChange={(event) => setLocalConfigPathValue(event.target.value)}
+                  placeholder={localConfigInfo?.defaultPath ?? '默认本地配置目录'}
+                  allowClear
+                />
+                <Button icon={<FolderOpenOutlined />} onClick={chooseLocalConfigPath}>
+                  选择
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  loading={savingLocalConfigPath}
+                  onClick={() => saveLocalConfigPath()}
+                >
+                  保存
+                </Button>
+              </Space.Compact>
+              <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  当前：{localConfigInfo?.effectivePath ?? '未找到工作区'}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  默认：{localConfigInfo?.defaultPath ?? '打开工作区后自动生成'}
+                </Text>
+              </Space>
+              <Button
+                size="small"
+                onClick={() => saveLocalConfigPath('')}
+                loading={savingLocalConfigPath}
+              >
+                恢复默认
+              </Button>
+            </Space>
+          </Card>
+
           <Card
             title="当前能力"
             style={{ height: '100%', borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}

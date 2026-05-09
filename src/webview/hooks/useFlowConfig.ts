@@ -14,9 +14,9 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { message } from 'antd';
-import { saveConfig, readConfig, syncGit } from '../utils/ipc';
+import { saveConfig, readConfig } from '../utils/ipc';
 
-type FlowType = 'common' | 'design' | 'verification';
+type FlowType = string;
 
 export interface FlowConfigState {
   /** 上次从文件系统读取到的配置，可用于表单的初始回填 */
@@ -88,7 +88,7 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
       if (result.success) {
         message.success(`配置已保存${result.filePath ? `（${result.filePath}）` : ''}`);
         setSavedData(data);
-        setHasUnsaved(true);
+        setHasUnsaved(false);
         return true;
       } else {
         message.error(`保存失败：${result.error ?? '未知错误'}`);
@@ -110,29 +110,17 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
   ): Promise<boolean> => {
     setSyncing(true);
     try {
-      // 先落盘
       const saveResult = await saveConfig(flow, data);
       if (!saveResult.success) {
-        message.error(`同步前保存失败：${saveResult.error ?? '未知错误'}`);
+        message.error(`保存失败：${saveResult.error ?? '未知错误'}`);
         return false;
       }
       setSavedData(data);
-
-      // 再 Git commit（可选 push）
-      const gitResult = await syncGit(flow, commitMessage, push);
-      if (gitResult.success) {
-        message.success(
-          `已提交 Git${push ? ' 并推送到远端' : ''}：${gitResult.commitMessage ?? ''}`
-        );
-        setHasUnsaved(false);
-        return true;
-      } else {
-        message.warning(`Git 提交失败（本地文件已保存）：${gitResult.error ?? '未知错误'}`);
-        setHasUnsaved(true); // 文件已保存但 Git 未提交
-        return false;
-      }
+      message.success(`配置已保存${saveResult.filePath ? `（${saveResult.filePath}）` : ''}`);
+      setHasUnsaved(false);
+      return true;
     } catch (e) {
-      message.error('同步 Git 时发生异常');
+      message.error('保存本地状态时发生异常');
       return false;
     } finally {
       if (mountedRef.current) setSyncing(false);
