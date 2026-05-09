@@ -2,19 +2,35 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { submitJob, queryJobStatus } from './services/donauService';
 import { gitService } from './services/gitService';
+import { obsService } from './services/obsService';
 
 const VIEW_TYPE = 'dftIde.welcome';
 const GLOBAL_KEY = 'dftIde.hasShownWelcome';
 const LAYOUT_BACKUP_KEY = 'dftIde.layout.previousSettings';
 const LOCAL_STATE_DIR_NAME = '.dft-ide';
 const LOCAL_STATE_SUBDIR = 'local-state';
+const OBS_READONLY_SCHEME = 'dft-obs-readonly';
 
 let currentPanel: vscode.WebviewPanel | undefined = undefined;
 let activeCategory: string | undefined = undefined;
 let pendingWebviewCommand: { command: 'showWelcome' } | { command: 'loadFlow'; category: string } | undefined;
+const obsReadonlyDocuments = new Map<string, string>();
 
 export function activate(context: vscode.ExtensionContext) {
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(OBS_READONLY_SCHEME, {
+      provideTextDocumentContent: (uri) =>
+        obsReadonlyDocuments.get(uri.toString()) ?? 'OBS readonly preview is unavailable.',
+    })
+  );
   // 1. 注册左侧扁平化的 Tree View
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseTextDocument((document) => {
+      if (document.uri.scheme === OBS_READONLY_SCHEME) {
+        void cleanupObsReadonlyDocument(document.uri);
+      }
+    })
+  );
   vscode.window.registerTreeDataProvider('dftIde.views.flows', new DftFlowProvider());
 
   // 2. 注册命令：点击左侧一级菜单时触发
@@ -391,6 +407,27 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
+      case 'openObsFileReadOnly': {
+        const requestId: string = msg.requestId;
+        const obsPath = typeof msg.path === 'string' ? msg.path : '';
+        try {
+          await openObsReadonlyDocument(context, obsPath);
+          currentPanel?.webview.postMessage({
+            command: 'openObsFileReadOnlyResponse',
+            requestId,
+            success: true,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'openObsFileReadOnlyResponse',
+            requestId,
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
       case 'submitTask': {
         const payload = msg.payload;
         const jobId = submitJob(payload);
@@ -415,6 +452,30 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'vscodeDemo':
         await runVscodeDemo(msg.action);
         return;
+
+      case 'openObsViewer': {
+        const requestId: string = msg.requestId;
+        try {
+          const result = await obsService.openViewer({
+            spaceName: typeof msg.spaceName === 'string' ? msg.spaceName : undefined,
+            fallbackSpaceName: resolveDefaultProjectName(),
+          });
+          currentPanel?.webview.postMessage({
+            command: 'openObsViewerResponse',
+            requestId,
+            success: true,
+            ...result,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'openObsViewerResponse',
+            requestId,
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
 
       // ── 配置保存 ───────────────────────────────────────────────
       case 'saveConfig': {
@@ -695,6 +756,62 @@ async function runVscodeDemo(action: unknown): Promise<void> {
   }
 }
 
+async function openObsReadonlyDocument(
+  context: vscode.ExtensionContext,
+  obsPath: string
+): Promise<void> {
+  if (!obsPath.startsWith('obs://')) {
+    throw new Error('Invalid OBS path.');
+  }
+
+  const fileName = decodeURIComponent(obsPath.split('/').pop() || 'obs-object.txt');
+  const safeFileName = fileName.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_') || 'obs-object.txt';
+  const cacheDir = vscode.Uri.joinPath(context.globalStorageUri, 'obs-cache');
+  await vscode.workspace.fs.createDirectory(cacheDir);
+
+  const cacheUri = vscode.Uri.joinPath(cacheDir, safeFileName);
+  const content = [
+    `OBS readonly preview`,
+    ``,
+    `Source: ${obsPath}`,
+    `Cached: ${cacheUri.fsPath}`,
+    `Mode: read-only`,
+    ``,
+    `This mock represents an OBS object that was downloaded to a local cache before opening.`,
+    `Direct edits are disabled for OBS files in the current workflow.`,
+    ``,
+  ].join('\n');
+  await vscode.workspace.fs.writeFile(cacheUri, Buffer.from(content, 'utf-8'));
+
+  const readonlyUri = vscode.Uri.from({
+    scheme: OBS_READONLY_SCHEME,
+    path: `/${safeFileName}`,
+    query: `source=${encodeURIComponent(obsPath)}&cache=${encodeURIComponent(cacheUri.fsPath)}`,
+  });
+  obsReadonlyDocuments.set(readonlyUri.toString(), content);
+
+  const document = await vscode.workspace.openTextDocument(readonlyUri);
+  await vscode.window.showTextDocument(document, {
+    viewColumn: vscode.ViewColumn.Active,
+    preview: false,
+  });
+}
+
+async function cleanupObsReadonlyDocument(uri: vscode.Uri): Promise<void> {
+  obsReadonlyDocuments.delete(uri.toString());
+
+  const cachePath = new URLSearchParams(uri.query).get('cache');
+  if (!cachePath) {
+    return;
+  }
+
+  try {
+    await vscode.workspace.fs.delete(vscode.Uri.file(cachePath));
+  } catch {
+    // Cache cleanup is best-effort; the file may have already been removed.
+  }
+}
+
 function getWebviewHtml(
   webview: vscode.Webview,
   extensionUri: vscode.Uri,
@@ -795,6 +912,16 @@ function resolveProjectRoot(): string | undefined {
   }
 
   return folders[0].uri.fsPath;
+}
+
+function resolveDefaultProjectName(): string | undefined {
+  const projectRoot = resolveProjectRoot();
+  if (projectRoot) {
+    return path.basename(projectRoot);
+  }
+
+  const workspaceName = vscode.workspace.name?.trim();
+  return workspaceName || undefined;
 }
 
 async function getLocalConfigInfo(): Promise<{

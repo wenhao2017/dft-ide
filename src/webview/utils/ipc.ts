@@ -78,8 +78,20 @@ export function openFileInEditor(path: string): void {
   vscode.postMessage({ command: 'openFile', path });
 }
 
+export async function openObsFileReadOnly(path: string): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('openObsFileReadOnly', { path });
+  return res as { success: boolean; error?: string };
+}
+
 export function runVscodeDemo(action: string): void {
   vscode.postMessage({ command: 'vscodeDemo', action });
+}
+
+export async function openObsViewer(
+  spaceName?: string
+): Promise<{ success: boolean; url?: string; spaceName?: string; error?: string }> {
+  const res = await ipcRequest('openObsViewer', { spaceName });
+  return res as { success: boolean; url?: string; spaceName?: string; error?: string };
 }
 
 /**

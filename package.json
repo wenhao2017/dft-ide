@@ -80,6 +80,46 @@
           "default": "",
           "description": "Directory for DFT IDE local page state. Leave empty to use the workspace default .dft-ide/local-state directory."
         },
+        "dftIde.obs.page": {
+          "type": "string",
+          "default": "",
+          "description": "OBS service base URL, for example https://obs.example.com."
+        },
+        "dftIde.obs.groupName": {
+          "type": "string",
+          "default": "",
+          "description": "OBS group name used when generating fs-signature and requesting SpaceToken."
+        },
+        "dftIde.obs.aesKey": {
+          "type": "string",
+          "default": "",
+          "description": "OBS AES-128-CBC signature key. It must be 16 bytes when encoded as UTF-8."
+        },
+        "dftIde.obs.aesIv": {
+          "type": "string",
+          "default": "",
+          "description": "OBS AES-128-CBC signature IV. It must be 16 bytes when encoded as UTF-8."
+        },
+        "dftIde.obs.getSpaceTokenPath": {
+          "type": "string",
+          "default": "",
+          "description": "OBS_GET_SPACE_TOKEN endpoint path appended to dftIde.obs.page."
+        },
+        "dftIde.obs.viewerUrlTemplate": {
+          "type": "string",
+          "default": "{obsPage}?spaceName={spaceName}&spaceToken={spaceToken}&w3id={w3id}",
+          "description": "OBS viewer URL template. Supported placeholders: {obsPage}, {spaceName}, {spaceToken}, {token}, {w3id}, {groupName}."
+        },
+        "dftIde.obs.w3id": {
+          "type": "string",
+          "default": "",
+          "description": "User W3ID passed to OBS viewer URL template when needed."
+        },
+        "dftIde.obs.spaceName": {
+          "type": "string",
+          "default": "",
+          "description": "Optional OBS space name override. Leave empty to use the active project name or workspace name."
+        },
         "dftIde.layout.autoApply": {
           "type": "boolean",
           "default": true,

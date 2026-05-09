@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Divider, Form, Radio, Space, Spin, Tooltip, Typography } from 'antd';
 import {
   ArrowDownOutlined,
@@ -12,12 +12,16 @@ import {
 import { useVscodePath } from '../hooks/useVscodePath';
 import { useFlowConfig } from '../hooks/useFlowConfig';
 import PathInput from '../components/shared/PathInput';
+import useWizardStore from '../store/wizardStore';
+import ObsViewer from '../components/shared/ObsViewer';
 
 const { Text, Title } = Typography;
 
 const CommonFlow: React.FC = () => {
   const designTree = useVscodePath();
   const normTable  = useVscodePath();
+  const [obsViewerOpen, setObsViewerOpen] = useState(false);
+  const activeProject = useWizardStore((state) => state.activeProject);
 
   // ── 配置持久化 Hook ─────────────────────────────────
   const { savedData, loading, saving, syncing, hasUnsaved, handleSave, handleSync } =
@@ -39,6 +43,7 @@ const CommonFlow: React.FC = () => {
 
   const onSave = () => handleSave(collectFormData());
   const onSync = () => handleSync(collectFormData());
+  const obsSpaceName = activeProject?.name ?? 'dft-ide-workspace';
 
   return (
     <Spin spinning={loading} tip="读取配置中...">
@@ -123,7 +128,11 @@ const CommonFlow: React.FC = () => {
 
             <Divider orientation="left">OBS 存储与公共数据</Divider>
             <Space size="middle" wrap>
-              <Button size="large" icon={<DatabaseOutlined />}>
+              <Button
+                size="large"
+                icon={<DatabaseOutlined />}
+                onClick={() => setObsViewerOpen(true)}
+              >
                 打开 OBS 查看器
               </Button>
               <Button size="large" icon={<CloudDownloadOutlined />}>
@@ -175,6 +184,11 @@ const CommonFlow: React.FC = () => {
             </Space>
           </div>
         </div>
+        <ObsViewer
+          open={obsViewerOpen}
+          spaceName={obsSpaceName}
+          onCancel={() => setObsViewerOpen(false)}
+        />
       </div>
     </Spin>
   );
