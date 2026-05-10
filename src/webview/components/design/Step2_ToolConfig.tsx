@@ -10,12 +10,10 @@ import {
   Row,
   Col,
   Tabs,
-  Divider,
   Badge,
   Spin,
 } from 'antd';
 import {
-  FolderOpenOutlined,
   PlusOutlined,
   MinusCircleOutlined,
   LeftOutlined,
@@ -24,6 +22,7 @@ import {
 } from '@ant-design/icons';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 import ControlledPathInput from '../shared/ControlledPathInput';
+import CollapsibleSection from '../shared/CollapsibleSection';
 
 const { Text } = Typography;
 
@@ -109,42 +108,43 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey }) => {
         </Text>
       </div>
 
-      <Divider orientation="left">集群配置</Divider>
-      <Row gutter={16}>
-        <Col span={12}>
-          <Form.Item label="群组" name="clusterGroup">
-            <Select
-              placeholder="下拉选择群组"
-              options={[{ value: 'g1', label: 'Group_A' }]}
-            />
-          </Form.Item>
-        </Col>
-        <Col span={12}>
-          <Form.Item label="队列" name="clusterQueue">
-            <Select
-              placeholder="下拉选择队列"
-              options={[{ value: 'q1', label: 'Queue_Fast' }]}
-            />
-          </Form.Item>
-        </Col>
-      </Row>
-      <Row gutter={16}>
-        <Col span={8}>
-          <Form.Item label="CPU" name="cpu">
-            <Input placeholder="输入核心数" />
-          </Form.Item>
-        </Col>
-        <Col span={8}>
-          <Form.Item label="内存 (MB)" name="memory">
-            <Input placeholder="输入内存大小" />
-          </Form.Item>
-        </Col>
-        <Col span={8}>
-          <Form.Item label="其他" name="clusterExtra">
-            <Input placeholder="其他参数" />
-          </Form.Item>
-        </Col>
-      </Row>
+      <CollapsibleSection title="集群配置">
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.Item label="群组" name="clusterGroup">
+              <Select
+                placeholder="下拉选择群组"
+                options={[{ value: 'g1', label: 'Group_A' }]}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="队列" name="clusterQueue">
+              <Select
+                placeholder="下拉选择队列"
+                options={[{ value: 'q1', label: 'Queue_Fast' }]}
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col span={8}>
+            <Form.Item label="CPU" name="cpu">
+              <Input placeholder="输入核心数" />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item label="内存 (MB)" name="memory">
+              <Input placeholder="输入内存大小" />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item label="其他" name="clusterExtra">
+              <Input placeholder="其他参数" />
+            </Form.Item>
+          </Col>
+        </Row>
+      </CollapsibleSection>
     </Form>
   );
 
@@ -170,56 +170,58 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey }) => {
         </div>
       </Form.Item>
 
-      <Divider orientation="left">宏定义配置</Divider>
-      <div style={{ marginBottom: 16 }}>
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          宏定义配置：（点击 + 按钮，可配置对应宏定义）
-        </Text>
-      </div>
+      <CollapsibleSection title="宏定义配置">
+        <Form.Item label="宏定义配置" colon={false}>
+          <div style={{ marginBottom: 12 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              宏定义配置：（点击 + 按钮，可配置对应宏定义）
+            </Text>
+          </div>
 
-      <Form.List name="macros" initialValue={[{ name: '', path: '' }]}>
-        {(fields, { add, remove }) => (
-          <>
-            {fields.map(({ key, name, ...restField }) => (
-              <Row key={key} gutter={8} style={{ marginBottom: 16 }}>
-                <Col span={8}>
-                  <Form.Item {...restField} name={[name, 'name']} noStyle>
-                    <Input placeholder="宏定义名字" />
-                  </Form.Item>
-                </Col>
-                <Col span={14}>
-                  <Form.Item {...restField} name={[name, 'path']} noStyle>
-                    <ControlledPathInput placeholder="宏定义路径或具体配置修改" showSelectFile showOpen />
-                  </Form.Item>
-                </Col>
-                <Col span={2}>
-                  <Button
-                    type="text"
-                    danger
-                    icon={<MinusCircleOutlined />}
-                    onClick={() => remove(name)}
-                  />
-                </Col>
-              </Row>
-            ))}
-            <Form.Item>
-              <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-                添加宏定义行
-              </Button>
-            </Form.Item>
-          </>
-        )}
-      </Form.List>
+          <Form.List name="macros" initialValue={[{ name: '', path: '' }]}>
+            {(fields, { add, remove }) => (
+              <>
+                {fields.map(({ key, name, ...restField }) => (
+                  <Row key={key} gutter={8} align="middle" style={{ marginBottom: 12 }}>
+                    <Col flex="0 0 28%">
+                      <Form.Item {...restField} name={[name, 'name']} noStyle>
+                        <Input placeholder="宏定义名字" />
+                      </Form.Item>
+                    </Col>
+                    <Col flex="auto">
+                      <Form.Item {...restField} name={[name, 'path']} noStyle>
+                        <ControlledPathInput placeholder="宏定义路径或具体配置修改" showSelectFile showOpen />
+                      </Form.Item>
+                    </Col>
+                    <Col flex="0 0 40px">
+                      <Button
+                        type="text"
+                        danger
+                        icon={<MinusCircleOutlined />}
+                        onClick={() => remove(name)}
+                      />
+                    </Col>
+                  </Row>
+                ))}
+                <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+                  添加宏定义行
+                </Button>
+              </>
+            )}
+          </Form.List>
+        </Form.Item>
+      </CollapsibleSection>
 
-      <Divider orientation="left">特殊参数配置</Divider>
-      <Form.Item label="特殊参数" name="specialParam">
-        <ControlledPathInput placeholder="特殊参数路径或值" showSelectFile showOpen />
-        <div style={{ marginTop: 4 }}>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            特殊参数配置（可由 COMMON 传出可配置修改）
-          </Text>
-        </div>
-      </Form.Item>
+      <CollapsibleSection title="特殊参数配置">
+        <Form.Item label="特殊参数" name="specialParam">
+          <ControlledPathInput placeholder="特殊参数路径或值" showSelectFile showOpen />
+          <div style={{ marginTop: 4 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              特殊参数配置（可由 COMMON 传出可配置修改）
+            </Text>
+          </div>
+        </Form.Item>
+      </CollapsibleSection>
     </Form>
   );
 

@@ -16,6 +16,7 @@ import { useFlowConfig } from '../hooks/useFlowConfig';
 import PathInput from '../components/shared/PathInput';
 import useWizardStore from '../store/wizardStore';
 import ObsViewer from '../components/shared/ObsViewer';
+import CollapsibleSection from '../components/shared/CollapsibleSection';
 import { getGitChangedFiles, openSourceControl, type GitChangedFileInfo } from '../utils/ipc';
 
 const { Text } = Typography;
@@ -155,18 +156,19 @@ const CommonFlow: React.FC = () => {
               />
             </Form.Item>
 
-            <Divider orientation="left">OBS 存储与公共数据</Divider>
-            <Space size="small" wrap>
-              <Button
-                icon={<DatabaseOutlined />}
-                onClick={() => setObsViewerOpen(true)}
-              >
-                打开 OBS 查看器
-              </Button>
-              <Button icon={<CloudDownloadOutlined />}>
-                下载公共数据
-              </Button>
-            </Space>
+            <CollapsibleSection title="OBS 存储与公共数据">
+              <Space size="small" wrap>
+                <Button
+                  icon={<DatabaseOutlined />}
+                  onClick={() => setObsViewerOpen(true)}
+                >
+                  打开 OBS 查看器
+                </Button>
+                <Button icon={<CloudDownloadOutlined />}>
+                  下载公共数据
+                </Button>
+              </Space>
+            </CollapsibleSection>
           </Form>
 
           <Divider style={{ margin: '18px 0 14px' }} />

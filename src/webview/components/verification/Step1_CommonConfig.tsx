@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Form, Button, Radio, Typography, Divider, Badge, Spin } from 'antd';
+import { Form, Button, Radio, Typography, Badge, Spin } from 'antd';
 import {
   SaveOutlined,
   RightOutlined,
@@ -11,6 +11,7 @@ import { useFlowConfig } from '../../hooks/useFlowConfig';
 import PathInput from '../shared/PathInput';
 import { getGitInfo } from '../../utils/ipc';
 import useWizardStore from '../../store/wizardStore';
+import CollapsibleSection from '../shared/CollapsibleSection';
 
 const { Text } = Typography;
 
@@ -112,28 +113,28 @@ const Step1CommonConfig: React.FC<{ onNext: () => void; moduleKey?: string }> = 
             <PathInput state={sailorCfg} placeholder="请输入或选择 common sailor cfg 路径" showSelectFile showOpen />
           </Form.Item>
 
-          <Divider orientation="left" plain>出口配置</Divider>
+          <CollapsibleSection title="出口配置">
+            <Form.Item label="验证出口">
+              <Radio.Group value={exitType} onChange={(e) => setExitType(e.target.value)}>
+                <Radio value="ATPG">ATPG</Radio>
+                <Radio value="sim">sim</Radio>
+                <Radio value="STA">STA</Radio>
+                <Radio value="formal">formal</Radio>
+              </Radio.Group>
+            </Form.Item>
 
-          <Form.Item label="验证出口">
-            <Radio.Group value={exitType} onChange={(e) => setExitType(e.target.value)}>
-              <Radio value="ATPG">ATPG</Radio>
-              <Radio value="sim">sim</Radio>
-              <Radio value="STA">STA</Radio>
-              <Radio value="formal">formal</Radio>
-            </Radio.Group>
-          </Form.Item>
+            <Form.Item label="common atpg cfg">
+              <PathInput state={atpgCfg} placeholder="请输入或选择 common atpg cfg 路径" showSelectFile showOpen />
+            </Form.Item>
 
-          <Form.Item label="common atpg cfg">
-            <PathInput state={atpgCfg} placeholder="请输入或选择 common atpg cfg 路径" showSelectFile showOpen />
-          </Form.Item>
+            <Form.Item label="common sta cfg">
+              <PathInput state={staCfg} placeholder="请输入或选择 common sta cfg 路径" showSelectFile showOpen />
+            </Form.Item>
 
-          <Form.Item label="common sta cfg">
-            <PathInput state={staCfg} placeholder="请输入或选择 common sta cfg 路径" showSelectFile showOpen />
-          </Form.Item>
-
-          <Form.Item label="common fml cfg">
-            <PathInput state={fmlCfg} placeholder="请输入或选择 common fml cfg 路径" showSelectFile showOpen />
-          </Form.Item>
+            <Form.Item label="common fml cfg">
+              <PathInput state={fmlCfg} placeholder="请输入或选择 common fml cfg 路径" showSelectFile showOpen />
+            </Form.Item>
+          </CollapsibleSection>
 
           <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 32 }}>
             <Button icon={<FileAddOutlined />}>产生默认配置</Button>
