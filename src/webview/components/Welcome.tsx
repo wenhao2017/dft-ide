@@ -45,8 +45,8 @@ interface Props {
 
 const flows = [
   {
-    key: 'COMMON',
-    label: 'COMMON',
+    key: 'Common',
+    label: 'Common',
     title: '公共配置',
     desc: '统一管理 Git 分支、项目路径、归一化表格和 OBS 公共数据。',
     icon: <SettingOutlined />,
@@ -192,9 +192,9 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
       setDashboard((prev) => prev ? { ...prev, currentProjectId: selected.id } : prev);
       // 优化6：使用 onNavigate 以获得 dirty check
       if (onNavigate) {
-        onNavigate('COMMON');
+        onNavigate('Common');
       } else {
-        setFlowContext({ category: 'COMMON', projectId: selected.id });
+        setFlowContext({ category: 'Common', projectId: selected.id });
       }
     } finally {
       setSelectingProjectId(null);

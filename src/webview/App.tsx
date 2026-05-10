@@ -35,7 +35,7 @@ function detectVscodeTheme(): 'dark' | 'light' | 'hc' {
 }
 
 const flowMeta: Record<string, { title: string; subtitle: string; accent: string }> = {
-  COMMON: {
+  Common: {
     title: '公共配置中心',
     subtitle: '维护设计、验证与共享数据都会复用的基础路径和同步动作。',
     accent: '#2563eb',
@@ -55,7 +55,7 @@ const flowMeta: Record<string, { title: string; subtitle: string; accent: string
 // 优化6：内部 Tab 导航配置
 const flowTabs: Array<{ key: string; label: string; icon: React.ReactNode }> = [
   { key: 'HOME', label: '首页', icon: <HomeOutlined /> },
-  { key: 'COMMON', label: 'COMMON', icon: <SettingOutlined /> },
+  { key: 'Common', label: 'Common', icon: <SettingOutlined /> },
   { key: 'Design', label: 'Design', icon: <RocketOutlined /> },
   { key: 'Verification', label: 'Verification', icon: <CheckCircleOutlined /> },
   { key: 'Formal', label: 'Formal', icon: <ExperimentOutlined /> },
@@ -152,7 +152,7 @@ const App: React.FC = () => {
 
   const renderFlowContent = (category: string) => {
     switch (category) {
-      case 'COMMON':
+      case 'Common':
         return <CommonFlow />;
       case 'Design':
         return <DesignFlow />;

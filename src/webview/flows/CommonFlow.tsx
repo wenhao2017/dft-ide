@@ -103,7 +103,7 @@ const CommonFlow: React.FC = () => {
         <Alert
           showIcon
           type="info"
-          message="COMMON 是公共配置入口，可避免各流程重复维护同一份路径配置。"
+          message="Common 是公共配置入口，可避免各流程重复维护同一份路径配置。"
           style={{ marginBottom: 12, borderRadius: 8 }}
         />
 

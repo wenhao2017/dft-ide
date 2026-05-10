@@ -1,19 +1,19 @@
 # DFT IDE
 
-DFT IDE is a VS Code extension that turns VS Code into a local DFT workflow console. It provides a project home page, DFT flow navigation, COMMON configuration, Design and Verification workflow pages, project/workspace opening helpers, local page-state persistence, Git-assisted sync, OBS viewer integration, execution helpers, and reserved backend API integration points.
+DFT IDE is a VS Code extension that turns VS Code into a local DFT workflow console. It provides a project home page, DFT flow navigation, Common configuration, Design and Verification workflow pages, project/workspace opening helpers, local page-state persistence, Git-assisted sync, OBS viewer integration, execution helpers, and reserved backend API integration points.
 
-The current codebase is still a demo/foundation rather than a complete production IDE. It is structured so different projects can load different COMMON, Design, Verification, Formal, and STA contexts over time.
+The current codebase is still a demo/foundation rather than a complete production IDE. It is structured so different projects can load different Common, Design, Verification, Formal, and STA contexts over time.
 
 ## Features
 
 - Custom DFT IDE Activity Bar container and flow Tree View.
 - React webview home page with project search, selection, local-state path settings, and quick flow entry.
-- COMMON flow for shared paths, design tree location, normalized table location, OBS common data, and Git sync.
+- Common flow for shared paths, design tree location, normalized table location, OBS common data, and Git sync.
 - Design and Verification flows built on a shared `FlowShell`, including module scope selection through a shared design tree panel.
 - File/folder picking, local path validation, file opening, OBS path support, and read-only OBS preview documents through webview IPC.
 - File-based page-state persistence under `.dft-ide/local-state`, or a user-configured base path through `dftIde.localConfigPath`.
 - Config save/read helpers that shallow-merge JSON so independent steps can persist separate fields.
-- Design tree persistence from an explicit design-tree file, with fallback draft storage in COMMON local state.
+- Design tree persistence from an explicit design-tree file, with fallback draft storage in Common local state.
 - Module-level config skeleton generation for Design/Verification after saving a design tree.
 - Git integration through VS Code's built-in Git extension: branch/status lookup, changed-file preview, add/commit/push, and opening the Source Control view.
 - Execution helpers for opening VS Code terminals, tracking mock job status, cancelling mock jobs, and storing recent execution history locally.
@@ -48,7 +48,7 @@ The current codebase is still a demo/foundation rather than a complete productio
 |       |-- main.tsx                # React webview entry
 |       |-- App.tsx                 # Theme, routing, and top-level webview layout
 |       |-- components/             # Welcome, shared controls, flow steps, wizard demo
-|       |-- flows/                  # COMMON, Design, and Verification containers
+|       |-- flows/                  # Common, Design, and Verification containers
 |       |-- hooks/                  # Flow config and VS Code path hooks
 |       |-- services/               # Webview API clients
 |       |-- store/                  # Zustand store
@@ -89,7 +89,7 @@ Run in VS Code:
 1. Open this repository in VS Code.
 2. Run `npm run compile`, or keep `npm run watch` running.
 3. Press `F5` and use the `Run DFT IDE Extension` launch config.
-4. Open the DFT IDE Activity Bar view and choose Home, COMMON, Design, or Verification.
+4. Open the DFT IDE Activity Bar view and choose Home, Common, Design, or Verification.
 
 Package as VSIX:
 
@@ -186,7 +186,7 @@ design/<module>/config -> .dft-ide/local-state/design/<module>/config.json
 
 Design and Verification use `src/webview/components/shared/DesignTreePanel.tsx` to select and maintain module scope.
 
-If COMMON config contains `designTree`, the extension resolves it as a file path, or as a directory containing `design_tree.mock.json`. Saving the tree writes to that file. If no design-tree path is configured, the tree is stored as `designTreeDraft` inside COMMON local state.
+If Common config contains `designTree`, the extension resolves it as a file path, or as a directory containing `design_tree.mock.json`. Saving the tree writes to that file. If no design-tree path is configured, the tree is stored as `designTreeDraft` inside Common local state.
 
 Saving a design tree also updates Design/Verification module config skeletons, including module keys, titles, types, active module key, and per-module config files.
 
@@ -198,7 +198,7 @@ Current capabilities include:
 
 - Repository detection for the active workspace/resource.
 - Branch, commit, upstream, and changed-file status lookup.
-- Changed-file preview for the COMMON Git sync dialog.
+- Changed-file preview for the Common Git sync dialog.
 - Source Control view opening.
 - Add, commit, pull, push, fetch, checkout, and branch creation helpers.
 

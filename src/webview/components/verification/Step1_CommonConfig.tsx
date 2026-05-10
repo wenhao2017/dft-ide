@@ -101,8 +101,8 @@ const Step1CommonConfig: React.FC<{ onNext: () => void; moduleKey?: string }> = 
             />
           </Form.Item>
 
-          <Form.Item label="COMMON_PATH">
-            <PathInput state={commonPath} placeholder="请选择 COMMON_PATH 目录" showSelectFolder showOpen />
+          <Form.Item label="Common_PATH">
+            <PathInput state={commonPath} placeholder="请选择 Common_PATH 目录" showSelectFolder showOpen />
           </Form.Item>
 
           <Form.Item label="WORK_PATH">

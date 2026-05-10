@@ -4,7 +4,7 @@
 
 - Added the DFT IDE Activity Bar container, flow Tree View, and reusable webview panel.
 - Added project home page with mock/backend project dashboard, project selection, project workspace opening, and local-state path configuration.
-- Added COMMON, Design, and Verification workflow pages with shared flow shell patterns.
+- Added Common, Design, and Verification workflow pages with shared flow shell patterns.
 - Added shared design tree editing/selection, design-tree persistence, and module-scoped Design/Verification config skeleton generation.
 - Added local JSON page-state persistence under `.dft-ide/local-state` or `dftIde.localConfigPath`, with automatic Git ignore handling.
 - Added IPC bridges for path picking, path validation, file opening, config save/read, design-tree save/read, execution terminal opening, execution history, Git sync, OBS viewer, and mock job control.

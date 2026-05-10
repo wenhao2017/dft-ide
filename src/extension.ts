@@ -206,11 +206,11 @@ const FLOW_CONFIGS: FlowMenuConfig[] = [
     contextValue: 'dftFlow.home',
   },
   {
-    label: 'COMMON',
+    label: 'Common',
     icon: 'settings-gear',
     description: 'Git · OBS · Paths',
     tooltip: '公共配置\n─────────────────\n• Git 设计/验证分支管理\n• Design Tree 路径配置\n• OBS 存储与公共数据下载\n• 归一化表格路径',
-    category: 'COMMON',
+    category: 'Common',
     contextValue: 'dftFlow.common',
   },
   {
@@ -287,7 +287,7 @@ class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
 /** 每个 category 对应的 Tab 标题 */
 const CATEGORY_TITLES: Record<string, string> = {
   HOME: 'DFT IDE — 主页',
-  COMMON: 'DFT IDE — 公共配置',
+  Common: 'DFT IDE — 公共配置',
   Design: 'DFT IDE — Design Flow',
   Verification: 'DFT IDE — Verification Flow',
   Formal: 'DFT IDE — Formal',
@@ -1034,7 +1034,7 @@ async function runVscodeDemo(action: unknown): Promise<void> {
       return;
     case 'quickPick': {
       const picked = await vscode.window.showQuickPick(
-        ['COMMON 配置', 'Design 工作流', 'Verification 工作流'],
+        ['Common 配置', 'Design 工作流', 'Verification 工作流'],
         { placeHolder: '选择要进入的 DFT 功能区' }
       );
       if (picked) {
@@ -1264,7 +1264,7 @@ async function openProjectWorkspace(rootPath: string): Promise<{ opened: boolean
     : targetUri.fsPath;
 
   if (isProjectCurrentlyOpen(targetRoot)) {
-    await vscode.commands.executeCommand('dftIde.openFlow', 'COMMON');
+    await vscode.commands.executeCommand('dftIde.openFlow', 'Common');
     return {
       opened: false,
       targetPath: targetUri.fsPath,

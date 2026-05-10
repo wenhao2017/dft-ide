@@ -165,7 +165,7 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey }) => {
         <ControlledPathInput placeholder="包含文件路径" showSelectFile showOpen />
         <div style={{ marginTop: 4 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            包含文件路径（可由 COMMON 传出可配置修改）
+            包含文件路径（可由 Common 传出可配置修改）
           </Text>
         </div>
       </Form.Item>
@@ -217,7 +217,7 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey }) => {
           <ControlledPathInput placeholder="特殊参数路径或值" showSelectFile showOpen />
           <div style={{ marginTop: 4 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              特殊参数配置（可由 COMMON 传出可配置修改）
+              特殊参数配置（可由 Common 传出可配置修改）
             </Text>
           </div>
         </Form.Item>

@@ -8,7 +8,7 @@ DFT IDE is a VS Code extension that turns VS Code into a local DFT workflow cons
 
 - A custom Activity Bar container and Tree View for DFT flows.
 - A React webview home page and flow pages.
-- COMMON, Design, and Verification workflow screens.
+- Common, Design, and Verification workflow screens.
 - Project creation/opening helpers for local DFT workspaces.
 - Local page-state persistence under `.dft-ide/local-state` or a user-configured base path.
 - IPC bridges from the webview to VS Code APIs for path picking, path validation, file opening, config persistence, design-tree persistence, Git sync, OBS viewer actions, execution history, terminal opening, and mock job submission/cancellation.
@@ -75,7 +75,7 @@ src/services/           Extension-host services: Git, OBS, and Donau mock servic
 src/webview/main.tsx    React webview entry point
 src/webview/App.tsx     Webview theme, routing, and top-level layout
 src/webview/components/ UI components grouped by flow or shared usage
-src/webview/flows/      COMMON, Design, and Verification flow containers
+src/webview/flows/      Common, Design, and Verification flow containers
 src/webview/hooks/      Shared React hooks
 src/webview/services/   Webview-side API clients
 src/webview/store/      Zustand store
@@ -174,7 +174,7 @@ The extension automatically ensures local state is ignored by Git by adding `.df
 
 Shared design tree behavior lives in `src/webview/components/shared/DesignTreePanel.tsx`.
 
-If COMMON config has a `designTree` path, the extension writes tree state there. Directory paths resolve to `design_tree.mock.json`. If no design-tree path is configured, the tree is stored as `designTreeDraft` in COMMON local state.
+If Common config has a `designTree` path, the extension writes tree state there. Directory paths resolve to `design_tree.mock.json`. If no design-tree path is configured, the tree is stored as `designTreeDraft` in Common local state.
 
 Saving a design tree also updates module config skeletons for the current flow, including `activeModuleKey`, module metadata, and per-module config files.
 
