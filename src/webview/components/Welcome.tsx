@@ -238,7 +238,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
         className="welcome-hero-grid"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1.15fr) minmax(340px, 0.85fr)',
+          gridTemplateColumns: 'minmax(0, 7fr) minmax(340px, 5fr)',
           alignItems: 'stretch',
           gap: 18,
           marginBottom: 18,
@@ -332,8 +332,17 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
         </div>
       </div>
 
-      <Row gutter={[14, 14]} style={{ marginBottom: 18 }}>
-        <Col xs={24} lg={14}>
+      <div
+        className="welcome-content-grid"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 7fr) minmax(340px, 5fr)',
+          alignItems: 'stretch',
+          gap: 18,
+          marginBottom: 18,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
           <Card
             title="项目列表"
             extra={currentProject ? <Tag color="blue">上次：{currentProject.name}</Tag> : null}
@@ -394,9 +403,9 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
               <Empty description={projectKeyword ? '未找到匹配项目' : '暂无项目'} style={{ padding: 36 }} />
             )}
           </Card>
-        </Col>
+        </div>
 
-        <Col xs={24} lg={10} style={{ display: 'flex' }}>
+        <div style={{ display: 'flex', minWidth: 0 }}>
           <div style={{ display: 'grid', gridTemplateRows: 'auto 1fr', gap: 14, width: '100%' }}>
           <Card
             title="本地配置存储"
@@ -478,8 +487,8 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
             </Space>
           </Card>
           </div>
-        </Col>
-      </Row>
+        </div>
+      </div>
 
       <Row gutter={[14, 14]}>
         {flows.map((flow) => (
@@ -540,7 +549,8 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
       </Row>
       <style>{`
         @media (max-width: 760px) {
-          .welcome-hero-grid {
+          .welcome-hero-grid,
+          .welcome-content-grid {
             grid-template-columns: 1fr !important;
           }
         }
