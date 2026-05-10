@@ -231,7 +231,8 @@ const App: React.FC = () => {
             display: flex;
             align-items: stretch;
             gap: 12px;
-            min-width: 0;
+            width: 100%;
+            min-width: 920px;
           }
 
           .dft-flow-sidebar {
@@ -241,7 +242,7 @@ const App: React.FC = () => {
           }
 
           .dft-flow-main {
-            min-width: 0;
+            min-width: 608px;
             flex: 1 1 auto;
             display: flex;
             flex-direction: column;
@@ -282,7 +283,8 @@ const App: React.FC = () => {
             border: 1px solid var(--vscode-panel-border, rgba(127,127,127,0.22));
             padding: 14px;
             background: var(--vscode-editor-background);
-            overflow-x: hidden;
+            overflow-x: auto;
+            scrollbar-width: thin;
           }
 
           .dft-flow-card .ant-form-item {
@@ -321,18 +323,6 @@ const App: React.FC = () => {
             justify-content: center;
             gap: 10px;
             flex-wrap: wrap;
-          }
-
-          @media (max-width: 980px) {
-            .dft-flow-shell {
-              flex-direction: column;
-            }
-
-            .dft-flow-sidebar {
-              flex: 0 0 auto;
-              max-height: 260px;
-              overflow: auto;
-            }
           }
 
           @media (max-width: 760px) {
@@ -543,7 +533,12 @@ const App: React.FC = () => {
                   返回首页
                 </Button>
               </div>
-              <div className="dft-shell-body" style={{ padding: 12 }}>{renderFlowContent(flowContext.category)}</div>
+              <div
+                className="dft-shell-body"
+                style={{ padding: 12, overflowX: 'auto', scrollbarWidth: 'thin' }}
+              >
+                {renderFlowContent(flowContext.category)}
+              </div>
             </div>
           )}
         </Content>
