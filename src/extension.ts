@@ -353,8 +353,10 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       }
       
       case 'webviewReady':
-        currentPanel?.webview.postMessage(pendingWebviewCommand ?? { command: 'showWelcome' });
-        pendingWebviewCommand = undefined;
+        if (pendingWebviewCommand) {
+          currentPanel?.webview.postMessage(pendingWebviewCommand);
+          pendingWebviewCommand = undefined;
+        }
         return;
 
       case 'createWorkspace':
