@@ -350,8 +350,8 @@ export async function openExecutionTerminal(options: {
   command?: string;
   cwd?: string;
 }): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('openExecutionTerminal', options);
-  return res as { success: boolean; error?: string };
+  vscode.postMessage({ command: 'openExecutionTerminal', ...options });
+  return { success: true };
 }
 
 export interface ExecutionHistoryRecord {

@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
-import { Form, Button, Tabs, Alert, message, Space, Typography } from 'antd';
+import { Form, Button, Tabs, Alert, Space, Typography } from 'antd';
 import { LeftOutlined, RightOutlined, CodeOutlined } from '@ant-design/icons';
 import { useVscodePath } from '../../hooks/useVscodePath';
 import PathInput from '../shared/PathInput';
 import ExecutionLogPanel from '../shared/ExecutionLogPanel';
-import { openExecutionTerminal } from '../../utils/ipc';
 
 const { Text } = Typography;
 
@@ -13,20 +12,23 @@ interface Props {
   onPrev: () => void;
 }
 
-const openTerminal = async (title: string, command: string) => {
-  const res = await openExecutionTerminal({ title, command });
-  if (res.success) {
-    message.success('已在 VS Code 终端中打开任务');
-    return;
-  }
-  message.error(`打开终端失败: ${res.error ?? 'unknown error'}`);
-};
-
-const TerminalLaunch: React.FC<{
+const ExecutionLaunch: React.FC<{
   title: string;
   command: string;
   description: string;
-}> = ({ title, command, description }) => (
+}> = ({ title, command, description }) => {
+  const [logs, setLogs] = useState<string[]>([]);
+
+  const handleOpenTerminal = () => {
+    setLogs((prev) => [
+      ...prev,
+      `[INFO] 已发送打开终端请求: ${title}`,
+      `$ ${command}`,
+    ]);
+  };
+  const commandUri = `command:dftIde.openExecutionTerminalFromUri?${encodeURIComponent(JSON.stringify([{ title, command }]))}`;
+
+  return (
   <div style={{ marginTop: 16 }}>
     <Alert
       message={description}
@@ -36,20 +38,22 @@ const TerminalLaunch: React.FC<{
       style={{ marginBottom: 16 }}
     />
     <Space style={{ marginBottom: 16 }}>
-      <Button type="primary" icon={<CodeOutlined />} onClick={() => openTerminal(title, command)}>
+      <Button
+        type="primary"
+        icon={<CodeOutlined />}
+        href={commandUri}
+        onClick={handleOpenTerminal}
+      >
         在 VS Code 终端中运行
       </Button>
     </Space>
     <ExecutionLogPanel
-      title="执行日志"
-      status="idle"
-      logs={[
-        '[INFO] 真实命令会在 VS Code 终端中运行。',
-        '[INFO] Webview 仅展示已保存的日志、历史记录和结果摘要。',
-      ]}
+      title="执行摘要"
+      logs={logs}
     />
   </div>
-);
+  );
+};
 
 const Step3Execution: React.FC<Props> = ({ onNext, onPrev }) => {
   const [activeTab, setActiveTab] = useState('gen');
@@ -75,7 +79,7 @@ const Step3Execution: React.FC<Props> = ({ onNext, onPrev }) => {
         <PathInput state={checkPath} placeholder="路径..." showSelectFile showOpen />
       </Form.Item>
 
-      <TerminalLaunch
+      <ExecutionLaunch
         title="DFT Design Script Generation"
         command="make gen_design_scripts"
         description="脚本生成应由 VS Code 终端执行，便于团队接入真实工具链。"
@@ -95,7 +99,7 @@ const Step3Execution: React.FC<Props> = ({ onNext, onPrev }) => {
             key: 'exec',
             label: '执行',
             children: (
-              <TerminalLaunch
+              <ExecutionLaunch
                 title="DFT Design Execution"
                 command="make run_design"
                 description="准备开始执行设计流程。"
