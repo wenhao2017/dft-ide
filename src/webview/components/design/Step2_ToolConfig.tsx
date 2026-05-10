@@ -23,6 +23,7 @@ import {
   SaveOutlined,
 } from '@ant-design/icons';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
+import ControlledPathInput from '../shared/ControlledPathInput';
 
 const { Text } = Typography;
 
@@ -161,10 +162,7 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey }) => {
       </Form.Item>
 
       <Form.Item label="包含文件" name="includeFile">
-        <Space.Compact style={{ width: '100%' }}>
-          <Input placeholder="包含文件路径" />
-          <Button icon={<FolderOpenOutlined />}>打开</Button>
-        </Space.Compact>
+        <ControlledPathInput placeholder="包含文件路径" showSelectFile showOpen />
         <div style={{ marginTop: 4 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
             包含文件路径（可由 COMMON 传出可配置修改）
@@ -191,7 +189,7 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey }) => {
                 </Col>
                 <Col span={14}>
                   <Form.Item {...restField} name={[name, 'path']} noStyle>
-                    <Input placeholder="宏定义路径或具体配置修改" />
+                    <ControlledPathInput placeholder="宏定义路径或具体配置修改" showSelectFile showOpen />
                   </Form.Item>
                 </Col>
                 <Col span={2}>
@@ -215,10 +213,7 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey }) => {
 
       <Divider orientation="left">特殊参数配置</Divider>
       <Form.Item label="特殊参数" name="specialParam">
-        <Space.Compact style={{ width: '100%' }}>
-          <Input placeholder="特殊参数路径或值" />
-          <Button icon={<FolderOpenOutlined />}>打开</Button>
-        </Space.Compact>
+        <ControlledPathInput placeholder="特殊参数路径或值" showSelectFile showOpen />
         <div style={{ marginTop: 4 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
             特殊参数配置（可由 COMMON 传出可配置修改）

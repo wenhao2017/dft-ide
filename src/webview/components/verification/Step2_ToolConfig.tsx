@@ -1,7 +1,8 @@
 import React, { useEffect } from 'react';
 import { Form, Input, Button, Select, Badge, Spin, Space } from 'antd';
-import { FolderOpenOutlined, LeftOutlined, RightOutlined, SaveOutlined } from '@ant-design/icons';
+import { LeftOutlined, RightOutlined, SaveOutlined } from '@ant-design/icons';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
+import ControlledPathInput from '../shared/ControlledPathInput';
 
 const Step2ToolConfig: React.FC<{ onNext: () => void; onPrev: () => void; moduleKey?: string }> = ({
   onNext,
@@ -42,17 +43,11 @@ const Step2ToolConfig: React.FC<{ onNext: () => void; onPrev: () => void; module
         style={{ padding: '16px 0' }}
       >
         <Form.Item label="common tessent cfg" name="tessentCfg">
-          <Space.Compact style={{ width: '100%' }}>
-            <Input />
-            <Button icon={<FolderOpenOutlined />}>打开</Button>
-          </Space.Compact>
+          <ControlledPathInput placeholder="选择文件..." showSelectFile showOpen />
         </Form.Item>
 
         <Form.Item label="common mbist cfg" name="mbistCfg">
-          <Space.Compact style={{ width: '100%' }}>
-            <Input />
-            <Button icon={<FolderOpenOutlined />}>打开</Button>
-          </Space.Compact>
+          <ControlledPathInput placeholder="选择文件..." showSelectFile showOpen />
         </Form.Item>
 
         <Form.Item label="IP 选择" name="selectedIp">
