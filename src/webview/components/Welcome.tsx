@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Col, Empty, Input, List, Progress, Row, Space, Spin, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Col, Empty, Input, List, Progress, Row, Space, Spin, Tag, Tooltip, Typography, message } from 'antd';
 import {
   CheckCircleOutlined,
   CloudSyncOutlined,
@@ -10,6 +10,7 @@ import {
   RocketOutlined,
   SaveOutlined,
   SettingOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
 import {
   getLocalConfigInfo,
@@ -22,6 +23,7 @@ import {
 import useWizardStore from '../store/wizardStore';
 import {
   DftProject,
+  canManageProjectMembers,
   fetchProjectDashboard,
   ProjectDashboard,
   ProjectRepoStatus,
@@ -33,6 +35,7 @@ const { Paragraph, Text, Title } = Typography;
 interface Props {
   isDark?: boolean;
   onNavigate?: (category: string) => void;
+  onManageMembers?: (project: DftProject) => void;
 }
 
 const flows = [
@@ -91,7 +94,7 @@ function repoTagColor(status: ProjectRepoStatus['status']): string {
   return 'default';
 }
 
-const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
+const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }) => {
   const { setFlowContext, setActiveProject } = useWizardStore();
   const [dashboard, setDashboard] = useState<ProjectDashboard | null>(null);
   const [loadingProjects, setLoadingProjects] = useState(true);
@@ -441,7 +444,9 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
           ) : filteredProjects.length ? (
             <List
               dataSource={filteredProjects}
-              renderItem={(project) => (
+              renderItem={(project) => {
+                const canManageMembers = canManageProjectMembers(project);
+                return (
                 <List.Item
                   actions={[
                     <Button
@@ -453,6 +458,17 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
                     >
                       初始化
                     </Button>,
+                    <Tooltip key="members" title={canManageMembers ? '管理项目成员' : '当前项目不是 DFTM 角色，不能管理成员'}>
+                      <span>
+                        <Button
+                          icon={<TeamOutlined />}
+                          disabled={!canManageMembers}
+                          onClick={() => onManageMembers?.(project)}
+                        >
+                          管理成员
+                        </Button>
+                      </span>
+                    </Tooltip>,
                     <Button
                       key="enter"
                       loading={workingProjectId === project.id}
@@ -490,7 +506,8 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
                     }
                   />
                 </List.Item>
-              )}
+                );
+              }}
             />
           ) : (
             <Empty description={projectKeyword ? '未找到匹配项目' : '暂无项目'} style={{ padding: 36 }} />

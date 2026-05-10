@@ -18,9 +18,11 @@ import DesignFlow from './flows/DesignFlow';
 import VerificationFlow from './flows/VerificationFlow';
 import TaskStepper from './components/wizard/TaskStepper';
 import Welcome from './components/Welcome';
+import ProjectMembers from './components/ProjectMembers';
 import useWizardStore from './store/wizardStore';
 import vscode from './utils/vscode';
 import { toggleZenMode as ipcToggleZenMode } from './utils/ipc';
+import type { DftProject } from './services/projectService';
 
 const { Content } = Layout;
 const { Text, Title } = Typography;
@@ -50,6 +52,11 @@ const flowMeta: Record<string, { title: string; subtitle: string; accent: string
     subtitle: '围绕验证工具链、用例执行和报告分析沉淀标准化验证流程。',
     accent: '#059669',
   },
+  MemberManagement: {
+    title: '项目成员管理',
+    subtitle: '维护项目成员工号、角色和 CTMP 标识。',
+    accent: '#0ea5e9',
+  },
 };
 
 // 优化6：内部 Tab 导航配置
@@ -68,6 +75,7 @@ const App: React.FC = () => {
   const { flowContext, activeProject, dirtyFlows, setFlowContext, zenMode, toggleZenMode, reset } = useWizardStore();
   const [vscTheme, setVscTheme] = useState<'dark' | 'light' | 'hc'>(detectVscodeTheme);
   const isDirty = useWizardStore((s) => s.isDirty);
+  const [memberProject, setMemberProject] = useState<DftProject | null>(null);
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -110,6 +118,7 @@ const App: React.FC = () => {
     const currentFlow = flowContext?.category;
 
     const doNavigate = () => {
+      setMemberProject(null);
       if (category === 'HOME') {
         setFlowContext(null);
       } else {
@@ -139,6 +148,12 @@ const App: React.FC = () => {
     }
   }, [flowContext, dirtyFlows, setFlowContext, reset]);
 
+  const navigateToMembers = useCallback((project: DftProject) => {
+    setMemberProject(project);
+    setFlowContext({ category: 'MemberManagement', projectId: project.id });
+    reset();
+  }, [setFlowContext, reset]);
+
   // 优化5：专注模式切换
   const handleZenToggle = useCallback(async () => {
     const nextState = !zenMode;
@@ -158,6 +173,12 @@ const App: React.FC = () => {
         return <DesignFlow />;
       case 'Verification':
         return <VerificationFlow />;
+      case 'MemberManagement':
+        return memberProject ? (
+          <ProjectMembers project={memberProject} isDark={isDark} />
+        ) : (
+          <TaskStepper />
+        );
       default:
         return <TaskStepper />;
     }
@@ -166,10 +187,12 @@ const App: React.FC = () => {
   useEffect(() => {
     const applyViewMessage = (msg: InitialView) => {
       if (msg.command === 'loadFlow') {
+        setMemberProject(null);
         setFlowContext({ category: msg.category });
         reset();
       }
       if (msg.command === 'showWelcome') {
+        setMemberProject(null);
         setFlowContext(null);
         reset();
       }
@@ -463,7 +486,7 @@ const App: React.FC = () => {
           }}
         >
           {!flowContext ? (
-            <Welcome isDark={isDark} onNavigate={navigateToFlow} />
+            <Welcome isDark={isDark} onNavigate={navigateToFlow} onManageMembers={navigateToMembers} />
           ) : (
             <div
               style={{
