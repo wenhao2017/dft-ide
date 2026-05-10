@@ -10,6 +10,7 @@ const LAYOUT_BACKUP_KEY = 'dftIde.layout.previousSettings';
 const LOCAL_STATE_DIR_NAME = '.dft-ide';
 const LOCAL_STATE_SUBDIR = 'local-state';
 const OBS_READONLY_SCHEME = 'dft-obs-readonly';
+const PROJECT_REPOS = ['data', 'design', 'verification'] as const;
 
 let currentPanel: vscode.WebviewPanel | undefined = undefined;
 let activeCategory: string | undefined = undefined;
@@ -50,13 +51,13 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('dftIde.createWorkspace', async () => {
-      await createProject();
+      await openProjectFromPicker();
     })
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('dftIde.createProject', async () => {
-      await createProject();
+      await openProjectFromPicker();
     })
   );
 
@@ -648,6 +649,32 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
+      case 'prepareProjectWorkspace': {
+        const requestId: string = msg.requestId;
+        const projectName = typeof msg.projectName === 'string' ? msg.projectName.trim() : '';
+        const projectKey = typeof msg.projectKey === 'string' ? msg.projectKey.trim() : projectName;
+        try {
+          if (!projectName) {
+            throw new Error('Project name is empty.');
+          }
+          const result = await prepareProjectWorkspace(projectName, projectKey);
+          currentPanel?.webview.postMessage({
+            command: 'prepareProjectWorkspaceResponse',
+            requestId,
+            success: true,
+            ...result,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'prepareProjectWorkspaceResponse',
+            requestId,
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
       case 'saveConfig': {
         const requestId: string = msg.requestId;
         const flow = String(msg.flow ?? 'default');
@@ -939,6 +966,21 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
 // ============================================================
 // createProject
 // ============================================================
+async function openProjectFromPicker(): Promise<void> {
+  const picked = await vscode.window.showOpenDialog({
+    canSelectMany: false,
+    canSelectFiles: false,
+    canSelectFolders: true,
+    openLabel: '打开项目'
+  });
+
+  if (!picked || picked.length === 0) {
+    return;
+  }
+
+  await openProjectWorkspace(picked[0].fsPath);
+}
+
 async function createProject(): Promise<void> {
   const picked = await vscode.window.showOpenDialog({
     canSelectMany: false,
@@ -954,20 +996,20 @@ async function createProject(): Promise<void> {
   const selectedRoot = picked[0];
   const projectRoot = vscode.Uri.joinPath(selectedRoot, 'dft-ide-workspace');
 
-  const mainRoot = vscode.Uri.joinPath(projectRoot, 'main');
+  const legacyRoot = vscode.Uri.joinPath(projectRoot, 'data');
   const designRoot = vscode.Uri.joinPath(projectRoot, 'design');
   const verificationRoot = vscode.Uri.joinPath(projectRoot, 'verification');
   const dataRoot = vscode.Uri.joinPath(projectRoot, 'data');
 
   await vscode.workspace.fs.createDirectory(projectRoot);
-  await vscode.workspace.fs.createDirectory(mainRoot);
+  await vscode.workspace.fs.createDirectory(legacyRoot);
   await vscode.workspace.fs.createDirectory(designRoot);
   await vscode.workspace.fs.createDirectory(verificationRoot);
   await vscode.workspace.fs.createDirectory(dataRoot);
 
   await vscode.workspace.fs.writeFile(
-    vscode.Uri.joinPath(mainRoot, 'README.md'),
-    Buffer.from('# DFT IDE Main Workspace\n')
+    vscode.Uri.joinPath(legacyRoot, 'README.md'),
+    Buffer.from('# DFT IDE Data Workspace\n')
   );
 
   await vscode.workspace.fs.writeFile(
@@ -1002,7 +1044,6 @@ async function createProject(): Promise<void> {
   const workspaceFile = vscode.Uri.joinPath(projectRoot, 'dft-ide.code-workspace');
   const workspaceContent = {
     folders: [
-      { name: 'main', path: 'main' },
       { name: 'design', path: 'design' },
       { name: 'verification', path: 'verification' },
       { name: 'data', path: 'data' }
@@ -1195,14 +1236,9 @@ function toConfigPathSegment(flow: string): string {
 }
 
 function resolveLocalConfigDirectory(): string | undefined {
-  const configured = vscode.workspace.getConfiguration('dftIde').get<string>('localConfigPath', '').trim();
   const projectRoot = resolveProjectRoot();
   if (!projectRoot) {
     return undefined;
-  }
-
-  if (configured) {
-    return path.join(path.resolve(configured), toProjectStateDirectoryName(projectRoot), LOCAL_STATE_SUBDIR);
   }
 
   return path.join(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR);
@@ -1214,7 +1250,7 @@ function resolveProjectRoot(): string | undefined {
     return undefined;
   }
 
-  const expectedRoots = ['main', 'design', 'verification'];
+  const expectedRoots = [...PROJECT_REPOS];
   const matched = expectedRoots
     .map((name) => folders.find((folder) => folder.name.toLowerCase() === name))
     .filter((folder): folder is vscode.WorkspaceFolder => Boolean(folder));
@@ -1322,7 +1358,7 @@ async function getLocalConfigInfo(): Promise<{
   defaultPath: string | null;
   isDefault: boolean;
 }> {
-  const configuredPath = vscode.workspace.getConfiguration('dftIde').get<string>('localConfigPath', '').trim();
+  const configuredPath = vscode.workspace.getConfiguration('dftIde').get<string>('localProjectsRoot', '').trim();
   const projectRoot = resolveProjectRoot();
   const defaultPath = projectRoot ? path.join(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR) : null;
   const effectivePath = resolveLocalConfigDirectory() ?? null;
@@ -1343,13 +1379,10 @@ async function getLocalConfigInfo(): Promise<{
 }
 
 async function updateLocalConfigPath(localPath: string): Promise<void> {
-  const target = vscode.workspace.workspaceFolders
-    ? vscode.ConfigurationTarget.Workspace
-    : vscode.ConfigurationTarget.Global;
   await vscode.workspace.getConfiguration('dftIde').update(
-    'localConfigPath',
+    'localProjectsRoot',
     localPath || undefined,
-    target
+    vscode.ConfigurationTarget.Global
   );
 
   const effectivePath = resolveLocalConfigDirectory();
@@ -1361,6 +1394,73 @@ async function updateLocalConfigPath(localPath: string): Promise<void> {
   if (projectRoot) {
     await ensureLocalStateIgnored(projectRoot, effectivePath ?? undefined);
   }
+}
+
+async function prepareProjectWorkspace(
+  projectName: string,
+  projectKey: string
+): Promise<{ rootPath: string; workspacePath: string; repos: Array<{ key: string; gitlabProjectName: string; localPath: string }> }> {
+  const localProjectsRoot = vscode.workspace.getConfiguration('dftIde').get<string>('localProjectsRoot', '').trim();
+  if (!localProjectsRoot) {
+    throw new Error('Please set the local projects root before preparing a project.');
+  }
+
+  const projectDirName = toSafeProjectDirectoryName(projectKey || projectName);
+  const projectRoot = vscode.Uri.file(path.join(path.resolve(localProjectsRoot), projectDirName));
+  await vscode.workspace.fs.createDirectory(projectRoot);
+
+  const repoProjectPrefix = toGitLabProjectPrefix(projectName);
+  const repos: Array<{ key: string; gitlabProjectName: string; localPath: string }> = [];
+  for (const repo of PROJECT_REPOS) {
+    const repoUri = vscode.Uri.joinPath(projectRoot, repo);
+    await vscode.workspace.fs.createDirectory(repoUri);
+    await writeFileIfMissing(
+      vscode.Uri.joinPath(repoUri, 'README.md'),
+      `# ${repoProjectPrefix}_${repo}\n\nLocal placeholder for the GitLab repository \`${repoProjectPrefix}_${repo}\`.\n`
+    );
+    repos.push({
+      key: repo,
+      gitlabProjectName: `${repoProjectPrefix}_${repo}`,
+      localPath: repoUri.fsPath,
+    });
+  }
+
+  const localStateUri = vscode.Uri.joinPath(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR);
+  await vscode.workspace.fs.createDirectory(localStateUri);
+  await ensureLocalStateIgnored(projectRoot.fsPath, localStateUri.fsPath);
+
+  const workspaceFile = vscode.Uri.joinPath(projectRoot, 'dft-ide.code-workspace');
+  const workspaceContent = {
+    folders: PROJECT_REPOS.map((repo) => ({ name: repo, path: repo })),
+    settings: {
+      'workbench.startupEditor': 'none'
+    }
+  };
+  await vscode.workspace.fs.writeFile(workspaceFile, Buffer.from(JSON.stringify(workspaceContent, null, 2)));
+
+  vscode.window.showInformationMessage(`DFT IDE 项目初始化完成：${projectName}`);
+
+  return {
+    rootPath: projectRoot.fsPath,
+    workspacePath: workspaceFile.fsPath,
+    repos,
+  };
+}
+
+async function writeFileIfMissing(uri: vscode.Uri, content: string): Promise<void> {
+  try {
+    await vscode.workspace.fs.stat(uri);
+  } catch {
+    await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf-8'));
+  }
+}
+
+function toSafeProjectDirectoryName(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'dft-project';
+}
+
+function toGitLabProjectPrefix(value: string): string {
+  return value.trim().replace(/\s+/g, '-').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'dft-project';
 }
 
 async function ensureLocalConfigDirectory(dirPath: string): Promise<void> {

@@ -48,11 +48,11 @@
       },
       {
         "command": "dftIde.createWorkspace",
-        "title": "DFT IDE: Create Project"
+        "title": "DFT IDE: Open Project"
       },
       {
         "command": "dftIde.createProject",
-        "title": "DFT IDE: Create Project"
+        "title": "DFT IDE: Open Project"
       },
       {
         "command": "dftIde.openFlow",
@@ -75,10 +75,15 @@
           "default": "",
           "description": "DFT IDE backend API base URL, for example http://localhost:8080."
         },
-        "dftIde.localConfigPath": {
+        "dftIde.localProjectsRoot": {
           "type": "string",
           "default": "",
-          "description": "Base directory for DFT IDE local page state. Leave empty to use the workspace default .dft-ide/local-state directory. Custom bases are automatically scoped by project."
+          "description": "Base directory where CTMP/GitLab DFT projects are cloned locally. Project state is stored under each project root."
+        },
+        "dftIde.currentUser": {
+          "type": "string",
+          "default": "",
+          "description": "Optional debug user id. Leave empty to use whoami in production-like environments, with w00445630 as the development fallback."
         },
         "dftIde.obs.page": {
           "type": "string",

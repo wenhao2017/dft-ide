@@ -101,6 +101,26 @@ export async function openProjectWorkspace(
   return res as { success: boolean; opened?: boolean; alreadyOpen?: boolean; targetPath?: string; error?: string };
 }
 
+export async function prepareProjectWorkspace(
+  projectName: string,
+  projectKey: string
+): Promise<{
+  success: boolean;
+  rootPath?: string;
+  workspacePath?: string;
+  repos?: Array<{ key: string; gitlabProjectName: string; localPath: string }>;
+  error?: string;
+}> {
+  const res = await ipcRequest('prepareProjectWorkspace', { projectName, projectKey });
+  return res as {
+    success: boolean;
+    rootPath?: string;
+    workspacePath?: string;
+    repos?: Array<{ key: string; gitlabProjectName: string; localPath: string }>;
+    error?: string;
+  };
+}
+
 /**
  * 保存配置数据到本地工作区文件。
  * @param flow  配置所属的流程，决定写入哪个子目录和文件名

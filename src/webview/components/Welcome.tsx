@@ -1,28 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Badge, Button, Card, Col, Empty, Input, List, Row, Space, Spin, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Col, Empty, Input, List, Progress, Row, Space, Spin, Tag, Typography, message } from 'antd';
 import {
-  ApiOutlined,
-  BellOutlined,
   CheckCircleOutlined,
   CloudSyncOutlined,
-  CodeOutlined,
-  CopyOutlined,
   ExperimentOutlined,
   FileProtectOutlined,
   FolderOpenOutlined,
   LineChartOutlined,
-  PlusOutlined,
   RocketOutlined,
   SaveOutlined,
   SettingOutlined,
-  SlidersOutlined,
-  ThunderboltOutlined,
 } from '@ant-design/icons';
-import vscode from '../utils/vscode';
 import {
   getLocalConfigInfo,
   openProjectWorkspace,
-  runVscodeDemo,
+  prepareProjectWorkspace,
   selectPath,
   setLocalConfigPath,
   type LocalConfigInfo,
@@ -32,6 +24,7 @@ import {
   DftProject,
   fetchProjectDashboard,
   ProjectDashboard,
+  ProjectRepoStatus,
   selectProject,
 } from '../services/projectService';
 
@@ -39,7 +32,6 @@ const { Paragraph, Text, Title } = Typography;
 
 interface Props {
   isDark?: boolean;
-  /** 优化6：使用统一的导航方法（带 dirty check） */
   onNavigate?: (category: string) => void;
 }
 
@@ -48,7 +40,7 @@ const flows = [
     key: 'Common',
     label: 'Common',
     title: '公共配置',
-    desc: '统一管理 Git 分支、项目路径、归一化表格和 OBS 公共数据。',
+    desc: '项目级路径、Design Tree、Git、OBS 和公共数据配置。',
     icon: <SettingOutlined />,
     accent: '#2563eb',
     status: 'Ready',
@@ -57,7 +49,7 @@ const flows = [
     key: 'Design',
     label: 'Design',
     title: '设计流程',
-    desc: '覆盖工具版本、集群资源、执行脚本和设计结果查看。',
+    desc: '按模块管理工具版本、执行参数、资源配置和设计结果。',
     icon: <RocketOutlined />,
     accent: '#7c3aed',
     status: 'Ready',
@@ -66,7 +58,7 @@ const flows = [
     key: 'Verification',
     label: 'Verification',
     title: '验证流程',
-    desc: '组织验证环境、用例执行、日志定位和报告分析。',
+    desc: '按模块管理仿真配置、任务提交、日志和覆盖率结果。',
     icon: <CheckCircleOutlined />,
     accent: '#059669',
     status: 'Ready',
@@ -93,27 +85,25 @@ const flows = [
   },
 ];
 
-const vscodeDemos = [
-  { key: 'notification', label: '通知', icon: <BellOutlined /> },
-  { key: 'quickPick', label: '快速选择', icon: <ThunderboltOutlined /> },
-  { key: 'clipboard', label: '剪贴板', icon: <CopyOutlined /> },
-  { key: 'terminal', label: '终端', icon: <CodeOutlined /> },
-  { key: 'settings', label: '设置页', icon: <SlidersOutlined /> },
-  { key: 'external', label: '外部链接', icon: <ApiOutlined /> },
-];
+function repoTagColor(status: ProjectRepoStatus['status']): string {
+  if (status === 'ready') return 'green';
+  if (status === 'missing') return 'orange';
+  return 'default';
+}
 
 const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
   const { setFlowContext, setActiveProject } = useWizardStore();
   const [dashboard, setDashboard] = useState<ProjectDashboard | null>(null);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [projectError, setProjectError] = useState<string | null>(null);
-  const [selectingProjectId, setSelectingProjectId] = useState<string | null>(null);
+  const [workingProjectId, setWorkingProjectId] = useState<string | null>(null);
+  const [initializingProjectId, setInitializingProjectId] = useState<string | null>(null);
+  const [initializingProgress, setInitializingProgress] = useState(0);
   const [projectKeyword, setProjectKeyword] = useState('');
-  const [localConfigInfo, setLocalConfigInfo] = useState<LocalConfigInfo | null>(null);
-  const [localConfigPath, setLocalConfigPathValue] = useState('');
-  const [savingLocalConfigPath, setSavingLocalConfigPath] = useState(false);
+  const [localRootInfo, setLocalRootInfo] = useState<LocalConfigInfo | null>(null);
+  const [localProjectsRoot, setLocalProjectsRoot] = useState('');
+  const [savingLocalProjectsRoot, setSavingLocalProjectsRoot] = useState(false);
 
-  // 优化7：使用 CSS 变量
   const cardBorder = 'var(--vscode-panel-border, rgba(127,127,127,0.18))';
   const panelBg = isDark
     ? 'color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 96%, white)'
@@ -128,7 +118,9 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
     const keyword = projectKeyword.trim().toLowerCase();
     const projects = dashboard?.projects ?? [];
     if (!keyword) return projects;
-    return projects.filter((project) => project.name.toLowerCase().includes(keyword));
+    return projects.filter((project) =>
+      [project.name, project.id, project.owner, project.role].some((text) => text.toLowerCase().includes(keyword))
+    );
   }, [dashboard, projectKeyword]);
 
   useEffect(() => {
@@ -161,12 +153,12 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
     getLocalConfigInfo()
       .then((info) => {
         if (disposed) return;
-        setLocalConfigInfo(info);
-        setLocalConfigPathValue(info.configuredPath);
+        setLocalRootInfo(info);
+        setLocalProjectsRoot(info.configuredPath);
       })
       .catch((error) => {
         if (!disposed) {
-          message.warning(error instanceof Error ? error.message : '本地配置路径读取失败');
+          message.warning(error instanceof Error ? error.message : '本地托管目录读取失败');
         }
       });
 
@@ -175,11 +167,12 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
     };
   }, []);
 
-  const activateProject = async (project: DftProject) => {
-    setSelectingProjectId(project.id);
+  const enterProject = async (project: DftProject, rootPath?: string) => {
+    setWorkingProjectId(project.id);
     try {
       const selected = await selectProject(project.id);
-      const openResult = await openProjectWorkspace(selected.rootPath);
+      const targetRoot = rootPath ?? selected.rootPath;
+      const openResult = await openProjectWorkspace(targetRoot);
       if (!openResult.success) {
         message.error(openResult.error ?? '项目工作区打开失败');
         return;
@@ -187,17 +180,69 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
       setActiveProject({
         id: selected.id,
         name: selected.name,
-        rootPath: selected.rootPath,
+        rootPath: targetRoot,
       });
       setDashboard((prev) => prev ? { ...prev, currentProjectId: selected.id } : prev);
-      // 优化6：使用 onNavigate 以获得 dirty check
       if (onNavigate) {
         onNavigate('Common');
       } else {
         setFlowContext({ category: 'Common', projectId: selected.id });
       }
     } finally {
-      setSelectingProjectId(null);
+      setWorkingProjectId(null);
+    }
+  };
+
+  const isProjectInitialized = (project: DftProject) =>
+    project.repos.every((repo) => repo.status === 'ready');
+
+  const initializeProject = async (project: DftProject) => {
+    if (isProjectInitialized(project)) return;
+
+    setInitializingProjectId(project.id);
+    setInitializingProgress(8);
+    const timer = window.setInterval(() => {
+      setInitializingProgress((value) => Math.min(value + 9, 88));
+    }, 180);
+
+    try {
+      const result = await prepareProjectWorkspace(project.name, project.id);
+      if (!result.success || !result.rootPath) {
+        message.error(result.error ?? '项目准备失败');
+        return;
+      }
+      setInitializingProgress(100);
+      setDashboard((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          projects: prev.projects.map((item) =>
+            item.id === project.id
+              ? {
+                  ...item,
+                  rootPath: result.rootPath ?? item.rootPath,
+                  repos: item.repos.map((repo) => ({ ...repo, status: 'ready' as const })),
+                }
+              : item
+          ),
+        };
+      });
+      message.success('项目初始化完成');
+    } finally {
+      window.clearInterval(timer);
+      window.setTimeout(() => {
+        setInitializingProjectId(null);
+        setInitializingProgress(0);
+      }, 450);
+    }
+  };
+
+  const openLocalProject = async () => {
+    const selected = await selectPath('folder');
+    if (!selected) return;
+    const openResult = await openProjectWorkspace(selected);
+    if (!openResult.success) {
+      message.error(openResult.error ?? '本地项目打开失败');
     }
   };
 
@@ -209,26 +254,26 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
     }
   };
 
-  const chooseLocalConfigPath = async () => {
+  const chooseLocalProjectsRoot = async () => {
     const selected = await selectPath('folder');
     if (selected) {
-      setLocalConfigPathValue(selected);
+      setLocalProjectsRoot(selected);
     }
   };
 
-  const saveLocalConfigPath = async (nextPath = localConfigPath) => {
-    setSavingLocalConfigPath(true);
+  const saveLocalProjectsRoot = async (nextPath = localProjectsRoot) => {
+    setSavingLocalProjectsRoot(true);
     try {
       const result = await setLocalConfigPath(nextPath.trim());
       if (result.success) {
-        setLocalConfigInfo(result);
-        setLocalConfigPathValue(result.configuredPath);
-        message.success(result.isDefault ? '已恢复默认本地配置目录' : '本地配置目录已保存');
+        setLocalRootInfo(result);
+        setLocalProjectsRoot(result.configuredPath);
+        message.success(result.configuredPath ? '本地项目托管目录已保存' : '已清空本地项目托管目录');
       } else {
-        message.error(result.error ?? '本地配置目录保存失败');
+        message.error(result.error ?? '本地项目托管目录保存失败');
       }
     } finally {
-      setSavingLocalConfigPath(false);
+      setSavingLocalProjectsRoot(false);
     }
   };
 
@@ -249,15 +294,14 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
             borderRadius: 8,
             padding: '28px 28px 24px',
             border: `1px solid ${cardBorder}`,
-            // 优化7：使用 color-mix + CSS 变量替代硬编码
             background: isDark
               ? `linear-gradient(135deg,
-                  color-mix(in srgb, var(--vscode-focusBorder, #2563eb) 20%, transparent),
-                  color-mix(in srgb, #059669 10%, transparent) 48%,
+                  color-mix(in srgb, #f97316 18%, transparent),
+                  color-mix(in srgb, var(--vscode-focusBorder, #2563eb) 12%, transparent) 48%,
                   rgba(255,255,255,0.04))`
               : `linear-gradient(135deg,
-                  color-mix(in srgb, var(--vscode-focusBorder, #2563eb) 12%, transparent),
-                  color-mix(in srgb, #059669 8%, transparent) 48%,
+                  color-mix(in srgb, #f97316 14%, transparent),
+                  color-mix(in srgb, var(--vscode-focusBorder, #2563eb) 8%, transparent) 48%,
                   var(--vscode-editor-background, #fff))`,
             boxShadow: isDark
               ? '0 18px 52px rgba(0,0,0,0.34)'
@@ -265,35 +309,55 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
           }}
         >
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Tag color="blue" icon={<ApiOutlined />}>
-              DFT Project Console
-            </Tag>
+            <Space wrap>
+              <Tag color="orange">Project Hub</Tag>
+            </Space>
             <div>
-              <Title level={1} style={{ margin: 0, fontSize: 42, lineHeight: 1.12 }}>
+              <Title level={1} style={{ margin: 0, fontSize: 40, lineHeight: 1.12 }}>
                 DFT IDE
               </Title>
               <Paragraph
                 type="secondary"
-                style={{ margin: '12px 0 0', maxWidth: 680, fontSize: 15, lineHeight: 1.8 }}
+                style={{ margin: '12px 0 0', maxWidth: 760, fontSize: 15, lineHeight: 1.8 }}
               >
-                面向 Design-for-Testability 的本地工作台：选择项目后，公共配置、设计流程和验证流程会按项目加载对应上下文。
+                从项目列表进入本地 DFT 工作区。每个项目对应 GitLab 三个仓库：
+                <Text code>项目名_data</Text>、<Text code>项目名_design</Text>、
+                <Text code>项目名_verification</Text>，本地目录固定为
+                <Text code>data/design/verification</Text>。
               </Paragraph>
             </div>
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 10,
+                width: 'fit-content',
+                minWidth: 0,
+                padding: '8px 12px',
+                borderRadius: 8,
+                border: '1px solid color-mix(in srgb, #f97316 34%, transparent)',
+                background: isDark
+                  ? 'color-mix(in srgb, #f97316 10%, var(--vscode-editor-background, #1e1e1e))'
+                  : 'color-mix(in srgb, #fff7ed 56%, var(--vscode-editor-background, #fff))',
+              }}
+            >
+              <Text type="secondary" style={{ fontSize: 13, lineHeight: 1.2 }}>
+                当前用户
+              </Text>
+              <Text strong style={{ fontSize: 16, lineHeight: 1.2, color: '#ea580c', letterSpacing: 0 }}>
+                {dashboard?.currentUser ?? 'w00445630'}
+              </Text>
+            </div>
             <Space size={12} wrap>
-              <Button
-                type="primary"
-                size="large"
-                icon={<PlusOutlined />}
-                onClick={() => vscode.postMessage({ command: 'createProject' })}
-              >
-                新建项目
+              <Button type="primary" size="large" icon={<FolderOpenOutlined />} onClick={openLocalProject}>
+                打开本地项目
               </Button>
               {currentProject && (
                 <Button
                   size="large"
                   icon={<CloudSyncOutlined />}
-                  onClick={() => activateProject(currentProject)}
-                  loading={selectingProjectId === currentProject.id}
+                  onClick={() => enterProject(currentProject)}
+                  loading={workingProjectId === currentProject.id}
                 >
                   进入上次项目
                 </Button>
@@ -302,34 +366,39 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
           </Space>
         </div>
 
-        <div
-          style={{
-            borderRadius: 8,
-            padding: 18,
-            border: `1px solid ${cardBorder}`,
-            background: panelBg,
-            height: '100%',
-          }}
+        <Card
+          title="本地项目托管目录"
+          style={{ borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
         >
-          <Space direction="vertical" size={14} style={{ width: '100%' }}>
-            <Text strong>VS Code 能力示例</Text>
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.7 }}>
-              这些能力由扩展宿主执行，可用于项目提醒、环境选择、脚本调试和配置入口。
+              选择一个空间充足的本地目录，项目会默认准备到该目录下。页面状态始终保存到项目根目录的
+              <Text code>.dft-ide/local-state</Text>。
             </Text>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
-              {vscodeDemos.map((item) => (
-                <Button
-                  key={item.key}
-                  icon={item.icon}
-                  onClick={() => runVscodeDemo(item.key)}
-                  style={{ justifyContent: 'flex-start' }}
-                >
-                  {item.label}
-                </Button>
-              ))}
-            </div>
+            <Space.Compact style={{ width: '100%' }}>
+              <Input
+                value={localProjectsRoot}
+                onChange={(event) => setLocalProjectsRoot(event.target.value)}
+                placeholder="例如 D:/dft/projects"
+                allowClear
+              />
+              <Button icon={<FolderOpenOutlined />} onClick={chooseLocalProjectsRoot}>
+                选择
+              </Button>
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                loading={savingLocalProjectsRoot}
+                onClick={() => saveLocalProjectsRoot()}
+              >
+                保存
+              </Button>
+            </Space.Compact>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              当前项目状态目录：{localRootInfo?.effectivePath ?? '打开项目后自动生成'}
+            </Text>
           </Space>
-        </div>
+        </Card>
       </div>
 
       <div
@@ -342,208 +411,158 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
           marginBottom: 18,
         }}
       >
-        <div style={{ minWidth: 0 }}>
-          <Card
-            title="项目列表"
-            extra={currentProject ? <Tag color="blue">上次：{currentProject.name}</Tag> : null}
-            style={{ height: '100%', borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
-            bodyStyle={{ padding: 0 }}
-          >
-            <div style={{ padding: '14px 18px', borderBottom: `1px solid ${cardBorder}` }}>
-              <Input.Search
-                allowClear
-                placeholder="搜索项目"
-                value={projectKeyword}
-                onChange={(event) => setProjectKeyword(event.target.value)}
-              />
-            </div>
-            {projectError && (
-              <Alert
-                type="warning"
-                showIcon
-                message="项目服务暂不可用"
-                description={projectError}
-                style={{ margin: 16 }}
-              />
-            )}
-            {loadingProjects ? (
-              <div style={{ padding: 36, textAlign: 'center' }}>
-                <Spin />
-              </div>
-            ) : filteredProjects.length ? (
-              <List
-                dataSource={filteredProjects}
-                renderItem={(project) => (
-                  <List.Item
-                    actions={[
-                      <Button
-                        key="select"
-                        type={project.id === dashboard?.currentProjectId ? 'primary' : 'default'}
-                        loading={selectingProjectId === project.id}
-                        onClick={() => activateProject(project)}
-                      >
-                        选择项目
-                      </Button>,
-                    ]}
-                    style={{ padding: '14px 18px' }}
-                  >
-                    <List.Item.Meta
-                      avatar={<FileProtectOutlined style={{ color: 'var(--vscode-focusBorder, #2563eb)', fontSize: 22 }} />}
-                      title={
-                        <Space wrap>
-                          <Text strong>{project.name}</Text>
-                          {project.id === dashboard?.currentProjectId && <Tag color="green">上次项目</Tag>}
-                        </Space>
-                      }
-                    />
-                  </List.Item>
-                )}
-              />
-            ) : (
-              <Empty description={projectKeyword ? '未找到匹配项目' : '暂无项目'} style={{ padding: 36 }} />
-            )}
-          </Card>
-        </div>
-
-        <div style={{ display: 'flex', minWidth: 0 }}>
-          <div style={{ display: 'grid', gridTemplateRows: 'auto 1fr', gap: 14, width: '100%' }}>
-          <Card
-            title="本地配置存储"
-            style={{ borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
-          >
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.7 }}>
-                页面配置只保存在本地目录，不参与 Git 管控。自定义路径会作为基目录，并按当前项目自动隔离。
-              </Text>
-              <Space.Compact style={{ width: '100%' }}>
-                <Input
-                  value={localConfigPath}
-                  onChange={(event) => setLocalConfigPathValue(event.target.value)}
-                  placeholder={localConfigInfo?.defaultPath ?? '默认本地配置目录'}
-                  allowClear
-                />
-                <Button icon={<FolderOpenOutlined />} onClick={chooseLocalConfigPath}>
-                  选择
-                </Button>
-                <Button
-                  type="primary"
-                  icon={<SaveOutlined />}
-                  loading={savingLocalConfigPath}
-                  onClick={() => saveLocalConfigPath()}
-                >
-                  保存
-                </Button>
-              </Space.Compact>
-              <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  当前：{localConfigInfo?.effectivePath ?? '未找到工作区'}
-                </Text>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  默认：{localConfigInfo?.defaultPath ?? '打开工作区后自动生成'}
-                </Text>
-              </Space>
-              <Button
-                size="small"
-                onClick={() => saveLocalConfigPath('')}
-                loading={savingLocalConfigPath}
-              >
-                恢复默认
-              </Button>
-            </Space>
-          </Card>
-
-          <Card
-            title="当前能力"
-            style={{ height: '100%', borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
-          >
-            <Space direction="vertical" size={14} style={{ width: '100%' }}>
-              {[
-                ['Project', '项目列表、上次项目和项目选择入口', <FileProtectOutlined key="project" />],
-                ['Flow', '公共、设计、验证三条流程入口', <CloudSyncOutlined key="flow" />],
-                ['Roadmap', 'Formal / STA 工作流规划中', <ExperimentOutlined key="roadmap" />],
-              ].map(([name, desc, icon]) => (
-                <div
-                  key={String(name)}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '32px 1fr',
-                    gap: 10,
-                    alignItems: 'center',
-                    padding: '10px 0',
-                    borderTop: `1px solid ${cardBorder}`,
-                  }}
-                >
-                  <span style={{ color: 'var(--vscode-focusBorder, #2563eb)', fontSize: 20 }}>{icon}</span>
-                  <div>
-                    <Text strong>{name}</Text>
-                    <div>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        {desc}
-                      </Text>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </Space>
-          </Card>
+        <Card
+          title="我的项目"
+          extra={currentProject ? <Tag color="blue">上次：{currentProject.name}</Tag> : null}
+          style={{ height: '100%', borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
+          bodyStyle={{ padding: 0 }}
+        >
+          <div style={{ padding: '14px 18px', borderBottom: `1px solid ${cardBorder}` }}>
+            <Input.Search
+              allowClear
+              placeholder="搜索项目、角色或负责人"
+              value={projectKeyword}
+              onChange={(event) => setProjectKeyword(event.target.value)}
+            />
           </div>
-        </div>
+          {projectError && (
+            <Alert
+              type="warning"
+              showIcon
+              message="项目服务暂不可用"
+              description={projectError}
+              style={{ margin: 16 }}
+            />
+          )}
+          {loadingProjects ? (
+            <div style={{ padding: 36, textAlign: 'center' }}>
+              <Spin />
+            </div>
+          ) : filteredProjects.length ? (
+            <List
+              dataSource={filteredProjects}
+              renderItem={(project) => (
+                <List.Item
+                  actions={[
+                    <Button
+                      key="initialize"
+                      type="primary"
+                      disabled={isProjectInitialized(project)}
+                      loading={initializingProjectId === project.id}
+                      onClick={() => initializeProject(project)}
+                    >
+                      初始化
+                    </Button>,
+                    <Button
+                      key="enter"
+                      loading={workingProjectId === project.id}
+                      onClick={() => enterProject(project)}
+                    >
+                      进入
+                    </Button>,
+                  ]}
+                  style={{ padding: '14px 18px' }}
+                >
+                  <List.Item.Meta
+                    avatar={<FileProtectOutlined style={{ color: 'var(--vscode-focusBorder, #2563eb)', fontSize: 22 }} />}
+                    title={
+                      <Space wrap>
+                        <Text strong>{project.name}</Text>
+                        <Tag>{project.role}</Tag>
+                        <Tag color="processing">Stage {project.stage}</Tag>
+                        {project.id === dashboard?.currentProjectId && <Tag color="green">上次项目</Tag>}
+                      </Space>
+                    }
+                    description={
+                      <Space direction="vertical" size={6}>
+                        <Text type="secondary">{project.description}</Text>
+                        <Space wrap>
+                          {project.repos.map((repo) => (
+                            <Tag key={repo.key} color={repoTagColor(repo.status)}>
+                              {repo.gitlabProjectName}
+                            </Tag>
+                          ))}
+                        </Space>
+                        {initializingProjectId === project.id && (
+                          <Progress percent={initializingProgress} size="small" status="active" style={{ maxWidth: 420 }} />
+                        )}
+                      </Space>
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+          ) : (
+            <Empty description={projectKeyword ? '未找到匹配项目' : '暂无项目'} style={{ padding: 36 }} />
+          )}
+        </Card>
+
+        <Card
+          title="项目准入模型"
+          style={{ height: '100%', borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
+        >
+          <Space direction="vertical" size={14} style={{ width: '100%' }}>
+            {[
+              ['项目平台', '首页按当前用户展示可参与项目、角色和项目阶段。'],
+              ['GitLab', '每个项目固定映射 data、design、verification 三个仓库。'],
+              ['Local Root', '用户选择本地托管目录后，项目克隆到该目录下的独立 project root。'],
+              ['Local State', '配置状态默认跟随 project root，统一保存在 .dft-ide/local-state。'],
+            ].map(([name, desc]) => (
+              <div
+                key={name}
+                style={{
+                  padding: '10px 0',
+                  borderTop: `1px solid ${cardBorder}`,
+                }}
+              >
+                <Text strong>{name}</Text>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.7 }}>
+                    {desc}
+                  </Text>
+                </div>
+              </div>
+            ))}
+          </Space>
+        </Card>
       </div>
 
       <Row gutter={[14, 14]}>
         {flows.map((flow) => (
-          <Col
-            key={flow.key}
-            xs={24}
-            sm={12}
-            lg={8}
-            style={{ display: 'flex' }}
-          >
-            <div style={{ width: '100%', height: '100%' }}>
-              <Badge.Ribbon
-                text={flow.status}
-                color={flow.disabled ? 'default' : flow.accent}
-                style={{ display: flow.disabled ? 'block' : 'none' }}
-              >
-                <Card
-                  hoverable={!flow.disabled}
-                  onClick={flow.disabled ? undefined : () => openFlow(flow.key)}
-                  style={{
-                    height: '100%',
-                    minHeight: 220,
-                    width: '100%',
-                    borderRadius: 8,
-                    border: `1px solid ${flow.disabled ? cardBorder : `${flow.accent}45`}`,
-                    background: panelBg,
-                    opacity: flow.disabled ? 0.66 : 1,
-                    cursor: flow.disabled ? 'not-allowed' : 'pointer',
-                  }}
-                  bodyStyle={{ padding: 18, height: '100%' }}
-                >
-                  <Space
-                    direction="vertical"
-                    size={12}
-                    style={{ width: '100%', height: '100%', justifyContent: 'space-between' }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                      <span style={{ color: flow.accent, fontSize: 28 }}>{flow.icon}</span>
-                      {!flow.disabled && <Tag color={flow.accent}>{flow.status}</Tag>}
-                    </div>
-                    <div>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        {flow.label}
-                      </Text>
-                      <Title level={4} style={{ margin: '2px 0 6px', fontSize: 18 }}>
-                        {flow.title}
-                      </Title>
-                      <Text type="secondary" style={{ lineHeight: 1.7 }}>
-                        {flow.desc}
-                      </Text>
-                    </div>
-                  </Space>
-                </Card>
-              </Badge.Ribbon>
-            </div>
+          <Col key={flow.key} xs={24} sm={12} lg={8} style={{ display: 'flex' }}>
+            <Card
+              hoverable={!flow.disabled}
+              onClick={flow.disabled ? undefined : () => openFlow(flow.key)}
+              style={{
+                height: '100%',
+                minHeight: 188,
+                width: '100%',
+                borderRadius: 8,
+                border: `1px solid ${flow.disabled ? cardBorder : `${flow.accent}45`}`,
+                background: panelBg,
+                opacity: flow.disabled ? 0.66 : 1,
+                cursor: flow.disabled ? 'not-allowed' : 'pointer',
+              }}
+              bodyStyle={{ padding: 18, height: '100%' }}
+            >
+              <Space direction="vertical" size={12} style={{ width: '100%', height: '100%', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                  <span style={{ color: flow.accent, fontSize: 28 }}>{flow.icon}</span>
+                  <Tag color={flow.disabled ? 'default' : flow.accent}>{flow.status}</Tag>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {flow.label}
+                  </Text>
+                  <Title level={4} style={{ margin: '2px 0 6px', fontSize: 18 }}>
+                    {flow.title}
+                  </Title>
+                  <Text type="secondary" style={{ lineHeight: 1.7 }}>
+                    {flow.desc}
+                  </Text>
+                </div>
+              </Space>
+            </Card>
           </Col>
         ))}
       </Row>
