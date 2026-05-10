@@ -1,6 +1,11 @@
 import { useCallback, useRef, useState } from 'react';
 import { openFileInEditor, openObsFileReadOnly, selectPath, validatePath } from '../utils/ipc';
 
+export type PathSelectTarget = 'file' | 'folder';
+export type PathSource = 'local' | 'obs';
+
+const defaultPathSources: PathSource[] = ['local', 'obs'];
+
 interface UseVscodePathOptions {
   defaultValue?: string;
   /** 是否在失焦时自动验证路径有效性（优化2） */
@@ -20,8 +25,8 @@ export interface VscodePathState {
   selecting: boolean;
   /** 路径验证状态（优化2） */
   validation: PathValidation;
-  handleSelect: (targetType?: 'file' | 'folder') => Promise<void>;
-  handleOpen: () => Promise<void>;
+  handleSelect: (targetType?: PathSelectTarget) => Promise<void>;
+  handleOpen: (options?: { targetType?: PathSelectTarget; sources?: PathSource[] }) => Promise<void>;
   /** 手动触发路径校验 */
   handleValidate: () => Promise<void>;
 }
@@ -75,7 +80,7 @@ export function useVscodePath(options: UseVscodePathOptions = {}): VscodePathSta
     });
   }, [autoValidate, scheduleValidation]);
 
-  const handleSelect = useCallback(async (targetType: 'file' | 'folder' = 'file') => {
+  const handleSelect = useCallback(async (targetType: PathSelectTarget = 'file') => {
     setSelecting(true);
     setLoading(true);
     try {
@@ -91,10 +96,15 @@ export function useVscodePath(options: UseVscodePathOptions = {}): VscodePathSta
     }
   }, []);
 
-  const handleOpen = useCallback(async () => {
+  const handleOpen = useCallback(async (options: { targetType?: PathSelectTarget; sources?: PathSource[] } = {}) => {
+    const targetType = options.targetType ?? 'file';
+    const sources = options.sources ?? defaultPathSources;
     const targetPath = value.trim();
     if (targetPath) {
       if (targetPath.startsWith('obs://')) {
+        if (!sources.includes('obs')) {
+          return;
+        }
         if (targetPath.endsWith('/')) {
           return;
         }
@@ -106,14 +116,20 @@ export function useVscodePath(options: UseVscodePathOptions = {}): VscodePathSta
         }
         return;
       }
+      if (!sources.includes('local')) {
+        return;
+      }
       openFileInEditor(targetPath);
       return;
     }
 
+    if (!sources.includes('local')) {
+      return;
+    }
     setSelecting(true);
     setLoading(true);
     try {
-      const path = await selectPath('file');
+      const path = await selectPath(targetType);
       if (path !== null) {
         setValue(path);
         setValidation({ status: 'valid', message: '文件已选择' });

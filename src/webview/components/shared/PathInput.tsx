@@ -10,7 +10,7 @@ import {
   FolderOutlined,
   LoadingOutlined,
 } from '@ant-design/icons';
-import { VscodePathState } from '../../hooks/useVscodePath';
+import { PathSelectTarget, PathSource, VscodePathState } from '../../hooks/useVscodePath';
 import useWizardStore from '../../store/wizardStore';
 import ObsViewer, { ObsSelectTarget } from './ObsViewer';
 
@@ -22,6 +22,7 @@ interface PathInputProps {
   showSelect?: boolean;
   showSelectFolder?: boolean;
   showSelectFile?: boolean;
+  pathSources?: PathSource[];
   size?: 'small' | 'middle' | 'large';
   showValidation?: boolean;
 }
@@ -38,6 +39,8 @@ const selectButtonWidth = {
   large: 44,
 } as const;
 
+const defaultPathSources: PathSource[] = ['local', 'obs'];
+
 const PathInput: React.FC<PathInputProps> = ({
   state,
   placeholder = '请输入路径',
@@ -46,6 +49,7 @@ const PathInput: React.FC<PathInputProps> = ({
   showSelect = false,
   showSelectFolder = false,
   showSelectFile = false,
+  pathSources = defaultPathSources,
   size = 'middle',
   showValidation = true,
 }) => {
@@ -54,6 +58,15 @@ const PathInput: React.FC<PathInputProps> = ({
   const obsSpaceName = activeProject?.name ?? 'dft-ide-workspace';
   const canSelectFolder = showSelect || showSelectFolder;
   const canSelectFile = showSelect || showSelectFile;
+  const enabledSources: PathSource[] = pathSources.length > 0 ? pathSources : defaultPathSources;
+  const openTarget: PathSelectTarget = canSelectFile ? 'file' : 'folder';
+  const handleOpenClick = () => {
+    if (!state.value.trim() && enabledSources.length === 1 && enabledSources[0] === 'obs') {
+      setObsTarget(openTarget);
+      return;
+    }
+    void state.handleOpen({ targetType: openTarget, sources: enabledSources });
+  };
 
   const validationSuffix = showValidation && state.validation
     ? (() => {
@@ -85,57 +98,63 @@ const PathInput: React.FC<PathInputProps> = ({
   const makeSelectButton = (target: ObsSelectTarget) => {
     const isFolder = target === 'folder';
     const title = isFolder ? '选择目录' : '选择文件';
+    const icon = isFolder ? <FolderOutlined /> : <FileOutlined />;
+    const onlyOneSource = enabledSources.length === 1;
+    const selectFromSource = (source: PathSource) => {
+      if (source === 'local') {
+        void state.handleSelect(target);
+      } else {
+        setObsTarget(target);
+      }
+    };
+    const button = (
+      <Tooltip title={state.selecting ? '选择中...' : title}>
+        <Button
+          aria-label={title}
+          loading={state.selecting}
+          disabled={disabled}
+          size={size}
+          onClick={onlyOneSource ? () => selectFromSource(enabledSources[0]) : undefined}
+          style={{ flex: '0 0 auto', width: selectButtonWidth[size], paddingInline: 4 }}
+        >
+          {!state.selecting && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 4,
+                width: '100%',
+              }}
+            >
+              {icon}
+              {!onlyOneSource && <DownOutlined style={{ fontSize: 9 }} />}
+            </span>
+          )}
+        </Button>
+      </Tooltip>
+    );
+
+    if (onlyOneSource) {
+      return button;
+    }
 
     return (
       <Dropdown
         disabled={disabled}
         trigger={['click']}
         menu={{
-          items: [
-            {
-              key: 'local',
-              icon: isFolder ? <FolderOutlined /> : <FileOutlined />,
-              label: isFolder ? '本地目录' : '本地文件',
-            },
-            {
-              key: 'obs',
-              icon: <CloudOutlined />,
-              label: isFolder ? 'OBS目录' : 'OBS文件',
-            },
-          ],
-          onClick: ({ key }) => {
-            if (key === 'local') {
-              void state.handleSelect(target);
-            } else {
-              setObsTarget(target);
-            }
-          },
+          items: enabledSources.map((source) => ({
+            key: source,
+            icon: source === 'local' ? icon : <CloudOutlined />,
+            label: source === 'local'
+              ? (isFolder ? '本地目录' : '本地文件')
+              : (isFolder ? 'OBS目录' : 'OBS文件'),
+          })),
+          onClick: ({ key }) => selectFromSource(key as PathSource),
         }}
       >
-        <Tooltip title={state.selecting ? '选择中...' : title}>
-          <Button
-            aria-label={title}
-            loading={state.selecting}
-            disabled={disabled}
-            size={size}
-            style={{ flex: '0 0 auto', width: selectButtonWidth[size], paddingInline: 4 }}
-          >
-            {!state.selecting && (
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 4,
-                  width: '100%',
-                }}
-              >
-                {isFolder ? <FolderOutlined /> : <FileOutlined />}
-                <DownOutlined style={{ fontSize: 9 }} />
-              </span>
-            )}
-          </Button>
-        </Tooltip>
+        {button}
       </Dropdown>
     );
   };
@@ -173,7 +192,7 @@ const PathInput: React.FC<PathInputProps> = ({
               loading={state.loading}
               disabled={disabled}
               size={size}
-              onClick={() => state.handleOpen()}
+              onClick={handleOpenClick}
               style={{ flex: '0 0 auto', width: openButtonWidth[size], paddingInline: 4 }}
             />
           </Tooltip>
@@ -184,7 +203,10 @@ const PathInput: React.FC<PathInputProps> = ({
         spaceName={obsSpaceName}
         selectTarget={obsTarget ?? undefined}
         onCancel={() => setObsTarget(null)}
-        onSelect={(path) => state.setValue(path)}
+        onSelect={(path) => {
+          state.setValue(path);
+          setObsTarget(null);
+        }}
       />
     </>
   );

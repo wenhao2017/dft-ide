@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import PathInput from './PathInput';
-import { useVscodePath } from '../../hooks/useVscodePath';
+import { PathSource, useVscodePath } from '../../hooks/useVscodePath';
 
 interface ControlledPathInputProps {
   value?: string;
@@ -10,6 +10,7 @@ interface ControlledPathInputProps {
   showOpen?: boolean;
   showSelectFolder?: boolean;
   showSelectFile?: boolean;
+  pathSources?: PathSource[];
   size?: 'small' | 'middle' | 'large';
   showValidation?: boolean;
 }
