@@ -146,10 +146,62 @@ export async function readConfig(
   return res.data as Record<string, unknown> ?? null;
 }
 
-export async function readDesignTree(): Promise<Record<string, unknown> | null> {
-  const res = await ipcRequest('readDesignTree');
+export async function readDesignTree(flow?: 'design' | 'verification'): Promise<Record<string, unknown> | null> {
+  const res = await ipcRequest('readDesignTree', flow ? { flow } : {});
   if (res.error) return null;
   return res.data as Record<string, unknown> ?? null;
+}
+
+export type RepoKey = 'design' | 'verification';
+
+export interface RepoGitInfo {
+  repo: RepoKey;
+  repoRoot?: string;
+  branch?: string;
+  upstream?: string;
+  hasChanges?: boolean;
+  changedCount?: number;
+  error?: string;
+}
+
+export async function getRepoGitInfo(repo: RepoKey): Promise<RepoGitInfo> {
+  const res = await ipcRequest('getRepoGitInfo', { repo });
+  return res as unknown as RepoGitInfo;
+}
+
+export async function getProjectRepoGitInfo(): Promise<{ repos: RepoGitInfo[]; error?: string }> {
+  const res = await ipcRequest('getProjectRepoGitInfo');
+  return res as { repos: RepoGitInfo[]; error?: string };
+}
+
+export async function runRepoGitAction(options: {
+  repo: RepoKey;
+  action: 'pull' | 'push' | 'fetch' | 'checkout' | 'createBranch' | 'openScm';
+  branchName?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('runRepoGitAction', options, 120_000);
+  return res as { success: boolean; error?: string };
+}
+
+export async function syncCommonArtifacts(options: {
+  targetRepo: RepoKey;
+  designTree?: string;
+  normTable?: string;
+  message?: string;
+  push?: boolean;
+}): Promise<{
+  success: boolean;
+  commitMessage?: string;
+  files?: Array<{ label: string; path: string; overwritten: boolean }>;
+  error?: string;
+}> {
+  const res = await ipcRequest('syncCommonArtifacts', options, 120_000);
+  return res as {
+    success: boolean;
+    commitMessage?: string;
+    files?: Array<{ label: string; path: string; overwritten: boolean }>;
+    error?: string;
+  };
 }
 
 export async function saveDesignTree(

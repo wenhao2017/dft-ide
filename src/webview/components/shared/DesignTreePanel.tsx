@@ -244,7 +244,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   const selectedModule = findModule(modules, selectedKey) ?? modules[0];
 
   useEffect(() => {
-    readDesignTree().then((data) => {
+    readDesignTree(flow).then((data) => {
       const loaded = normalizeTreeState(data);
       setModules(loaded);
       setExpandedKeys(getAllKeys(loaded));

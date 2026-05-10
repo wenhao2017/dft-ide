@@ -623,6 +623,92 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
+      case 'getProjectRepoGitInfo': {
+        const requestId: string = msg.requestId;
+        try {
+          const repos = await Promise.all(
+            (['design', 'verification'] as const).map((repo) => getRepoGitInfoForWebview(repo))
+          );
+          currentPanel?.webview.postMessage({
+            command: 'getProjectRepoGitInfoResponse',
+            requestId,
+            repos
+          });
+        } catch (error) {
+          currentPanel?.webview.postMessage({
+            command: 'getProjectRepoGitInfoResponse',
+            requestId,
+            repos: [],
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+        return;
+      }
+
+      case 'getRepoGitInfo': {
+        const requestId: string = msg.requestId;
+        const repo = normalizeProjectRepo(msg.repo);
+        try {
+          if (!repo) {
+            throw new Error('Unsupported repository.');
+          }
+          currentPanel?.webview.postMessage({
+            command: 'getRepoGitInfoResponse',
+            requestId,
+            ...(await getRepoGitInfoForWebview(repo))
+          });
+        } catch (error) {
+          currentPanel?.webview.postMessage({
+            command: 'getRepoGitInfoResponse',
+            requestId,
+            repo: typeof msg.repo === 'string' ? msg.repo : 'unknown',
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+        return;
+      }
+
+      case 'runRepoGitAction': {
+        const requestId: string = msg.requestId;
+        const repo = normalizeProjectRepo(msg.repo);
+        const action = typeof msg.action === 'string' ? msg.action : '';
+        const branchName = typeof msg.branchName === 'string' ? msg.branchName.trim() : '';
+        try {
+          if (!repo) {
+            throw new Error('Unsupported repository.');
+          }
+          const resource = vscode.Uri.file(getProjectRepoRoot(repo));
+          if (action === 'pull') {
+            await gitService.pull(resource);
+          } else if (action === 'push') {
+            await gitService.push(resource);
+          } else if (action === 'fetch') {
+            await gitService.fetch(resource);
+          } else if (action === 'checkout') {
+            await gitService.checkout(branchName, resource);
+          } else if (action === 'createBranch') {
+            await gitService.createBranch(branchName, true, resource);
+          } else if (action === 'openScm') {
+            await gitService.openSourceControl();
+          } else {
+            throw new Error(`Unsupported Git action: ${action}`);
+          }
+          currentPanel?.webview.postMessage({
+            command: 'runRepoGitActionResponse',
+            requestId,
+            success: true
+          });
+        } catch (error) {
+          currentPanel?.webview.postMessage({
+            command: 'runRepoGitActionResponse',
+            requestId,
+            success: false,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+        return;
+      }
+
       // ── 配置保存 ───────────────────────────────────────────────
       case 'openProjectWorkspace': {
         const requestId: string = msg.requestId;
@@ -746,8 +832,9 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       // ── Git 同步 ────────────────────────────────────────────────
       case 'readDesignTree': {
         const requestId: string = msg.requestId;
+        const flow = typeof msg.flow === 'string' ? msg.flow : undefined;
         try {
-          const data = await readDesignTreeState();
+          const data = await readDesignTreeState(flow);
           currentPanel?.webview.postMessage({
             command: 'readDesignTreeResponse',
             requestId,
@@ -782,6 +869,38 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             requestId,
             success: false,
             error: String(err)
+          });
+        }
+        return;
+      }
+
+      case 'syncCommonArtifacts': {
+        const requestId: string = msg.requestId;
+        const targetRepo = normalizeProjectRepo(msg.targetRepo);
+        const push = Boolean(msg.push);
+        const customMsg = typeof msg.message === 'string' ? msg.message.trim() : '';
+        const designTree = typeof msg.designTree === 'string' ? msg.designTree.trim() : '';
+        const normTable = typeof msg.normTable === 'string' ? msg.normTable.trim() : '';
+        try {
+          if (!targetRepo) {
+            throw new Error('Please choose Design or Verification repository.');
+          }
+          const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+          const commitMessage = customMsg || `feat(dft-ide): sync common artifacts to ${targetRepo} [${now}]`;
+          const result = await syncCommonArtifactsToRepo(targetRepo, { designTree, normTable }, commitMessage, push);
+          currentPanel?.webview.postMessage({
+            command: 'syncCommonArtifactsResponse',
+            requestId,
+            success: true,
+            commitMessage,
+            files: result.files
+          });
+        } catch (error) {
+          currentPanel?.webview.postMessage({
+            command: 'syncCommonArtifactsResponse',
+            requestId,
+            success: false,
+            error: error instanceof Error ? error.message : String(error)
           });
         }
         return;
@@ -1518,13 +1637,25 @@ async function mergeConfigFile(
   }
 }
 
-async function readDesignTreeState(): Promise<Record<string, unknown> | null> {
+async function readDesignTreeState(flow?: string): Promise<Record<string, unknown> | null> {
   const commonPath = resolveConfigPath('common');
   if (!commonPath) {
     return null;
   }
 
   const common = await readJsonFile(commonPath);
+  const syncedDesignTreePath = getSyncedArtifactPath(common, flow, 'designTree');
+  if (syncedDesignTreePath) {
+    const fileData = await readJsonFile(syncedDesignTreePath);
+    if (fileData) {
+      return {
+        ...fileData,
+        sourcePath: syncedDesignTreePath,
+        sourceMode: 'repoDesignTreeFile'
+      };
+    }
+  }
+
   const designTreeFilePath = resolveDesignTreeFilePath(common);
   if (designTreeFilePath) {
     const fileData = await readJsonFile(designTreeFilePath);
@@ -1552,7 +1683,8 @@ async function saveDesignTreeState(
 
   await ensureLocalConfigDirectory(path.dirname(commonPath));
   const common = await readJsonFile(commonPath);
-  const designTreeFilePath = resolveDesignTreeFilePath(common);
+  const syncedDesignTreePath = getSyncedArtifactPath(common, flow, 'designTree');
+  const designTreeFilePath = syncedDesignTreePath ?? resolveDesignTreeFilePath(common);
   const encoded = Buffer.from(JSON.stringify(data, null, 2), 'utf-8');
 
   if (designTreeFilePath) {
@@ -1641,6 +1773,172 @@ function resolveDesignTreeFilePath(common: Record<string, unknown> | null): stri
   }
 
   return path.extname(resolved) ? resolved : path.join(resolved, 'design_tree.mock.json');
+}
+
+function getSyncedArtifactPath(
+  common: Record<string, unknown> | null,
+  flow: string | undefined,
+  key: 'designTree' | 'normTable'
+): string | undefined {
+  const normalizedFlow = normalizeProjectRepo(flow);
+  if (!normalizedFlow || !common) {
+    return undefined;
+  }
+
+  const syncedArtifacts = common.syncedArtifacts;
+  if (!isRecord(syncedArtifacts)) {
+    return undefined;
+  }
+
+  const flowArtifacts = syncedArtifacts[normalizedFlow];
+  if (!isRecord(flowArtifacts)) {
+    return undefined;
+  }
+
+  const value = flowArtifacts[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function normalizeProjectRepo(value: unknown): 'design' | 'verification' | undefined {
+  return value === 'design' || value === 'verification' ? value : undefined;
+}
+
+function getProjectRepoRoot(repo: 'design' | 'verification'): string {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  const matchedFolder = folders.find((folder) => folder.name.toLowerCase() === repo);
+  if (matchedFolder) {
+    return matchedFolder.uri.fsPath;
+  }
+
+  const projectRoot = resolveProjectRoot();
+  if (!projectRoot) {
+    throw new Error('No DFT project workspace is open.');
+  }
+
+  return path.join(projectRoot, repo);
+}
+
+async function getRepoGitInfoForWebview(repo: 'design' | 'verification'): Promise<{
+  repo: 'design' | 'verification';
+  repoRoot?: string;
+  branch?: string;
+  upstream?: string;
+  hasChanges?: boolean;
+  changedCount?: number;
+  error?: string;
+}> {
+  try {
+    const repoRoot = getProjectRepoRoot(repo);
+    const info = await gitService.getCurrentGitInfo(vscode.Uri.file(repoRoot));
+    return {
+      repo,
+      repoRoot,
+      branch: info?.branch,
+      upstream: info?.upstream,
+      hasChanges: info?.hasChanges,
+      changedCount: info?.changedFiles.length ?? 0
+    };
+  } catch (error) {
+    return {
+      repo,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+async function syncCommonArtifactsToRepo(
+  targetRepo: 'design' | 'verification',
+  source: { designTree: string; normTable: string },
+  commitMessage: string,
+  push: boolean
+): Promise<{ files: Array<{ label: string; path: string; overwritten: boolean }> }> {
+  const repoRoot = getProjectRepoRoot(targetRepo);
+  await vscode.workspace.fs.stat(vscode.Uri.file(repoRoot));
+
+  const commonPath = resolveConfigPath('common');
+  if (!commonPath) {
+    throw new Error('Common local-state path is not available.');
+  }
+
+  const common = await readJsonFile(commonPath);
+  const copiedFiles: Array<{ label: string; path: string; overwritten: boolean }> = [];
+
+  const designTreeTarget = path.join(repoRoot, 'design_tree.mock.json');
+  const designTreeSource = resolveDesignTreeFilePath({ ...(common ?? {}), designTree: source.designTree });
+  const designTreeCopied = await copyDesignTreeArtifact(designTreeSource, common, designTreeTarget);
+  copiedFiles.push({ label: 'Design tree', path: designTreeTarget, overwritten: designTreeCopied });
+
+  if (source.normTable) {
+    const normTableSource = path.isAbsolute(source.normTable)
+      ? source.normTable
+      : path.resolve(resolveProjectRoot() ?? repoRoot, source.normTable);
+    const ext = path.extname(normTableSource) || '.json';
+    const normTableTarget = path.join(repoRoot, `normalized-table${ext}`);
+    const overwritten = await copyFileArtifact(normTableSource, normTableTarget);
+    copiedFiles.push({ label: 'Normalized table', path: normTableTarget, overwritten });
+  }
+
+  const nextCommon = await mergeConfigFile(commonPath, {
+    syncedArtifacts: {
+      ...(isRecord(common?.syncedArtifacts) ? common?.syncedArtifacts : {}),
+      [targetRepo]: {
+        designTree: designTreeTarget,
+        normTable: copiedFiles.find((file) => file.label === 'Normalized table')?.path,
+        updatedAt: new Date().toISOString()
+      }
+    }
+  });
+  await vscode.workspace.fs.writeFile(
+    vscode.Uri.file(commonPath),
+    Buffer.from(JSON.stringify(nextCommon, null, 2), 'utf-8')
+  );
+
+  const fileUris = copiedFiles.map((file) => vscode.Uri.file(file.path));
+  await gitService.addFiles(fileUris, vscode.Uri.file(repoRoot));
+  await gitService.commit(commitMessage, vscode.Uri.file(repoRoot));
+  if (push) {
+    await gitService.push(vscode.Uri.file(repoRoot));
+  }
+
+  return { files: copiedFiles.map((file) => ({ ...file, path: vscode.workspace.asRelativePath(file.path) })) };
+}
+
+async function copyDesignTreeArtifact(
+  sourcePath: string | undefined,
+  common: Record<string, unknown> | null,
+  targetPath: string
+): Promise<boolean> {
+  if (sourcePath) {
+    return copyFileArtifact(sourcePath, targetPath);
+  }
+
+  const draft = common?.designTreeDraft;
+  if (!isRecord(draft)) {
+    throw new Error('Design tree file is not configured and no Common draft design tree was found.');
+  }
+
+  const overwritten = await pathExists(targetPath);
+  await vscode.workspace.fs.writeFile(
+    vscode.Uri.file(targetPath),
+    Buffer.from(JSON.stringify(draft, null, 2), 'utf-8')
+  );
+  return overwritten;
+}
+
+async function copyFileArtifact(sourcePath: string, targetPath: string): Promise<boolean> {
+  const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(sourcePath));
+  const overwritten = await pathExists(targetPath);
+  await vscode.workspace.fs.writeFile(vscode.Uri.file(targetPath), bytes);
+  return overwritten;
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function readJsonFile(filePath: string): Promise<Record<string, unknown> | null> {
