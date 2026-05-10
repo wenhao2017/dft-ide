@@ -710,6 +710,34 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       }
 
       // ── 配置保存 ───────────────────────────────────────────────
+      case 'submitRepoToCloud': {
+        const requestId: string = msg.requestId;
+        const repo = normalizeProjectRepo(msg.repo);
+        const message = typeof msg.message === 'string' ? msg.message : undefined;
+        const pullBeforePush = Boolean(msg.pullBeforePush);
+        try {
+          if (!repo) {
+            throw new Error('Unsupported repository.');
+          }
+          const result = await submitRepoToCloud(repo, { message, pullBeforePush });
+          currentPanel?.webview.postMessage({
+            command: 'submitRepoToCloudResponse',
+            requestId,
+            ...result,
+          });
+        } catch (error) {
+          currentPanel?.webview.postMessage({
+            command: 'submitRepoToCloudResponse',
+            requestId,
+            success: false,
+            state: 'error',
+            repo: typeof msg.repo === 'string' ? msg.repo : 'design',
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+        return;
+      }
+
       case 'openProjectWorkspace': {
         const requestId: string = msg.requestId;
         const rootPath = typeof msg.rootPath === 'string' ? msg.rootPath.trim() : '';
@@ -1825,6 +1853,7 @@ async function getRepoGitInfoForWebview(repo: 'design' | 'verification'): Promis
   upstream?: string;
   hasChanges?: boolean;
   changedCount?: number;
+  changedFiles?: Array<{ path: string; type: string }>;
   error?: string;
 }> {
   try {
@@ -1836,7 +1865,11 @@ async function getRepoGitInfoForWebview(repo: 'design' | 'verification'): Promis
       branch: info?.branch,
       upstream: info?.upstream,
       hasChanges: info?.hasChanges,
-      changedCount: info?.changedFiles.length ?? 0
+      changedCount: info?.changedFiles.length ?? 0,
+      changedFiles: info?.changedFiles.map((file) => ({
+        path: file.path,
+        type: file.type
+      })) ?? []
     };
   } catch (error) {
     return {
@@ -1844,6 +1877,198 @@ async function getRepoGitInfoForWebview(repo: 'design' | 'verification'): Promis
       error: error instanceof Error ? error.message : String(error)
     };
   }
+}
+
+type RepoCloudSubmitResult = {
+  success: boolean;
+  state: 'clean' | 'committed' | 'pushed' | 'needsPull' | 'conflict' | 'gitOperationInProgress' | 'noRepo' | 'noRemote' | 'error';
+  repo: 'design' | 'verification';
+  repoRoot?: string;
+  branch?: string;
+  upstream?: string;
+  changedCount?: number;
+  conflictFiles?: Array<{ path: string; type: string }>;
+  commitMessage?: string;
+  error?: string;
+};
+
+async function submitRepoToCloud(
+  repo: 'design' | 'verification',
+  options: { message?: string; pullBeforePush?: boolean }
+): Promise<RepoCloudSubmitResult> {
+  const repoRoot = getProjectRepoRoot(repo);
+  const resource = vscode.Uri.file(repoRoot);
+  await vscode.workspace.fs.stat(resource);
+
+  let gitInfo = await gitService.getCurrentGitInfo(resource);
+  if (!gitInfo) {
+    return {
+      success: false,
+      state: 'noRepo',
+      repo,
+      repoRoot,
+      error: `${repo} repository is not a Git repository.`
+    };
+  }
+
+  const repository = await gitService.getCurrentRepository(resource);
+  if (isGitOperationInProgress(repository)) {
+    return {
+      success: false,
+      state: 'gitOperationInProgress',
+      repo,
+      repoRoot,
+      branch: gitInfo.branch,
+      upstream: gitInfo.upstream,
+      changedCount: gitInfo.changedFiles.length,
+      error: 'Git is already in the middle of another operation. Please finish it in VS Code Git first.'
+    };
+  }
+
+  const conflictFiles = gitInfo.changedFiles.filter((file) => file.type === 'merge');
+  if (conflictFiles.length > 0) {
+    return {
+      success: false,
+      state: 'conflict',
+      repo,
+      repoRoot,
+      branch: gitInfo.branch,
+      upstream: gitInfo.upstream,
+      changedCount: gitInfo.changedFiles.length,
+      conflictFiles: conflictFiles.map((file) => ({ path: file.path, type: file.type })),
+      error: 'Conflict files must be resolved before submitting to cloud.'
+    };
+  }
+
+  if (!hasRemote(repository, gitInfo)) {
+    return {
+      success: false,
+      state: 'noRemote',
+      repo,
+      repoRoot,
+      branch: gitInfo.branch,
+      upstream: gitInfo.upstream,
+      changedCount: gitInfo.changedFiles.length,
+      error: 'No remote repository is configured for this flow repository.'
+    };
+  }
+
+  if (!gitInfo.hasChanges && !hasOutgoingCommits(repository)) {
+    return {
+      success: true,
+      state: 'clean',
+      repo,
+      repoRoot,
+      branch: gitInfo.branch,
+      upstream: gitInfo.upstream,
+      changedCount: 0
+    };
+  }
+
+  const commitMessage = buildRepoCloudCommitMessage(repo, options.message);
+  let committed = false;
+
+  if (gitInfo.hasChanges) {
+    await gitService.addFiles(gitInfo.changedFiles.map((file) => file.uri), resource);
+    await gitService.commit(commitMessage, resource);
+    committed = true;
+  }
+
+  if (options.pullBeforePush) {
+    try {
+      await gitService.pull(resource);
+    } catch (error) {
+      gitInfo = await gitService.getCurrentGitInfo(resource);
+      const postPullConflicts = gitInfo?.changedFiles.filter((file) => file.type === 'merge') ?? [];
+      if (postPullConflicts.length > 0) {
+        return {
+          success: false,
+          state: 'conflict',
+          repo,
+          repoRoot,
+          branch: gitInfo?.branch,
+          upstream: gitInfo?.upstream,
+          changedCount: gitInfo?.changedFiles.length ?? 0,
+          conflictFiles: postPullConflicts.map((file) => ({ path: file.path, type: file.type })),
+          commitMessage: committed ? commitMessage : undefined,
+          error: 'Remote sync created conflicts. Resolve them and continue submitting.'
+        };
+      }
+      throw error;
+    }
+  }
+
+  try {
+    await gitService.push(resource);
+    return {
+      success: true,
+      state: 'pushed',
+      repo,
+      repoRoot,
+      branch: gitInfo.branch,
+      upstream: gitInfo.upstream,
+      changedCount: gitInfo.changedFiles.length,
+      commitMessage: committed ? commitMessage : undefined
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (isRemoteBehindError(errorMessage)) {
+      return {
+        success: false,
+        state: 'needsPull',
+        repo,
+        repoRoot,
+        branch: gitInfo.branch,
+        upstream: gitInfo.upstream,
+        changedCount: gitInfo.changedFiles.length,
+        commitMessage: committed ? commitMessage : undefined,
+        error: 'Remote has newer commits. Sync remote changes and continue.'
+      };
+    }
+    return {
+      success: false,
+      state: 'error',
+      repo,
+      repoRoot,
+      branch: gitInfo.branch,
+      upstream: gitInfo.upstream,
+      changedCount: gitInfo.changedFiles.length,
+      commitMessage: committed ? commitMessage : undefined,
+      error: errorMessage
+    };
+  }
+}
+
+function buildRepoCloudCommitMessage(repo: 'design' | 'verification', customMessage?: string): string {
+  const trimmed = customMessage?.trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  const label = repo === 'design' ? 'design' : 'verification';
+  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  return `chore(dft-ide): submit ${label} flow to cloud [${now}]`;
+}
+
+function hasRemote(repository: any, info: { upstream?: string }): boolean {
+  if (info.upstream) {
+    return true;
+  }
+  const remotes = repository?.state?.remotes;
+  return Array.isArray(remotes) && remotes.length > 0;
+}
+
+function hasOutgoingCommits(repository: any): boolean {
+  const ahead = repository?.state?.HEAD?.ahead;
+  return typeof ahead === 'number' && ahead > 0;
+}
+
+function isGitOperationInProgress(repository: any): boolean {
+  const state = repository?.state;
+  return Boolean(state?.rebaseCommit || state?.sequencerState);
+}
+
+function isRemoteBehindError(message: string): boolean {
+  return /non-fast-forward|fetch first|rejected|remote contains work|Updates were rejected|failed to push/i.test(message);
 }
 
 async function syncCommonArtifactsToRepo(

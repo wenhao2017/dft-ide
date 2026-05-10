@@ -161,6 +161,7 @@ export interface RepoGitInfo {
   upstream?: string;
   hasChanges?: boolean;
   changedCount?: number;
+  changedFiles?: GitChangedFileInfo[];
   error?: string;
 }
 
@@ -181,6 +182,39 @@ export async function runRepoGitAction(options: {
 }): Promise<{ success: boolean; error?: string }> {
   const res = await ipcRequest('runRepoGitAction', options, 120_000);
   return res as { success: boolean; error?: string };
+}
+
+export type RepoCloudSubmitState =
+  | 'clean'
+  | 'committed'
+  | 'pushed'
+  | 'needsPull'
+  | 'conflict'
+  | 'gitOperationInProgress'
+  | 'noRepo'
+  | 'noRemote'
+  | 'error';
+
+export interface RepoCloudSubmitResult {
+  success: boolean;
+  state: RepoCloudSubmitState;
+  repo: RepoKey;
+  repoRoot?: string;
+  branch?: string;
+  upstream?: string;
+  changedCount?: number;
+  conflictFiles?: GitChangedFileInfo[];
+  commitMessage?: string;
+  error?: string;
+}
+
+export async function submitRepoToCloud(options: {
+  repo: RepoKey;
+  message?: string;
+  pullBeforePush?: boolean;
+}): Promise<RepoCloudSubmitResult> {
+  const res = await ipcRequest('submitRepoToCloud', options, 180_000);
+  return res as unknown as RepoCloudSubmitResult;
 }
 
 export async function syncCommonArtifacts(options: {
