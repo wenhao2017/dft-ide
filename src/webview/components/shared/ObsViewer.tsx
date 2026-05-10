@@ -104,6 +104,7 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
 
   return (
     <Modal
+      className="dft-obs-modal"
       title={null}
       open={open}
       onCancel={onCancel}
@@ -115,22 +116,218 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
           </Button>
         </Space>
       ) : null}
-      width="min(1100px, 94vw)"
-      styles={{ body: { padding: 0 } }}
+      width="min(1040px, 96vw)"
+      styles={{ body: { padding: 0, overflow: 'hidden' } }}
     >
-      <div style={{ background: 'var(--vscode-editor-background)', minHeight: 620 }}>
+      <style>
+        {`
+          .dft-obs-viewer {
+            background: var(--vscode-editor-background);
+            height: min(680px, calc(92vh - 96px));
+            min-height: 420px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+          }
+
+          .dft-obs-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--vscode-panel-border, rgba(127,127,127,0.22));
+            flex-shrink: 0;
+          }
+
+          .dft-obs-title {
+            min-width: 0;
+          }
+
+          .dft-obs-tags {
+            flex: 0 0 auto;
+          }
+
+          .dft-obs-layout {
+            display: grid;
+            grid-template-columns: clamp(168px, 22vw, 220px) minmax(0, 1fr);
+            min-height: 0;
+            flex: 1;
+          }
+
+          .dft-obs-sidebar {
+            border-right: 1px solid var(--vscode-panel-border, rgba(127,127,127,0.22));
+            padding: 12px;
+            background: var(--vscode-sideBar-background, rgba(127,127,127,0.04));
+            min-width: 0;
+            overflow: auto;
+          }
+
+          .dft-obs-main {
+            padding: 14px;
+            min-width: 0;
+            overflow: auto;
+          }
+
+          .dft-obs-toolbar {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 8px;
+            margin-bottom: 12px;
+          }
+
+          .dft-obs-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+            flex-wrap: nowrap;
+          }
+
+          .dft-obs-search {
+            flex: 1 1 auto;
+            min-width: 160px;
+            max-width: 360px;
+          }
+
+          .dft-obs-actions .ant-btn,
+          .dft-obs-actions .ant-input-affix-wrapper {
+            height: 32px;
+          }
+
+          .dft-obs-icon-button {
+            width: 34px;
+            padding-inline: 0;
+          }
+
+          .dft-obs-table .ant-table {
+            min-width: 720px;
+          }
+
+          .dft-obs-table .ant-table-cell {
+            white-space: nowrap;
+          }
+
+          .dft-obs-name {
+            min-width: 0;
+            max-width: 260px;
+          }
+
+          .dft-obs-name .ant-typography {
+            max-width: 220px;
+          }
+
+          .dft-obs-preview {
+            margin-top: 12px;
+            padding: 12px;
+            border: 1px solid var(--vscode-panel-border, rgba(127,127,127,0.22));
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+          }
+
+          @media (max-width: 900px) {
+            .dft-obs-action-label {
+              display: none;
+            }
+
+            .dft-obs-actions .ant-btn {
+              width: 34px;
+              padding-inline: 0;
+            }
+
+            .dft-obs-search {
+              min-width: 140px;
+            }
+          }
+
+          @media (max-width: 720px) {
+            .dft-obs-viewer {
+              height: min(720px, calc(94vh - 76px));
+            }
+
+            .dft-obs-header {
+              padding: 10px 12px;
+              align-items: flex-start;
+            }
+
+            .dft-obs-header-icon {
+              display: none !important;
+            }
+
+            .dft-obs-tags {
+              display: none;
+            }
+
+            .dft-obs-layout {
+              display: flex;
+              flex-direction: column;
+            }
+
+            .dft-obs-sidebar {
+              border-right: 0;
+              border-bottom: 1px solid var(--vscode-panel-border, rgba(127,127,127,0.22));
+              padding: 8px;
+              flex: 0 0 auto;
+            }
+
+            .dft-obs-folder-list {
+              display: flex !important;
+              flex-direction: row !important;
+              gap: 6px;
+              overflow-x: auto;
+              padding-bottom: 2px;
+            }
+
+            .dft-obs-folder-list .ant-space-item {
+              flex: 0 0 auto;
+            }
+
+            .dft-obs-folder-list .ant-btn {
+              width: auto !important;
+            }
+
+            .dft-obs-stats {
+              display: none !important;
+            }
+
+            .dft-obs-main {
+              padding: 10px;
+            }
+
+            .dft-obs-toolbar .ant-breadcrumb {
+              white-space: nowrap;
+              overflow-x: auto;
+            }
+
+            .dft-obs-actions {
+              flex-wrap: nowrap;
+              overflow-x: auto;
+              padding-bottom: 2px;
+            }
+
+            .dft-obs-search {
+              min-width: 150px;
+              flex: 0 0 auto;
+            }
+
+            .dft-obs-preview {
+              display: none;
+            }
+          }
+        `}
+      </style>
+      <div className="dft-obs-viewer">
         <div
+          className="dft-obs-header"
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 16,
-            padding: '18px 22px',
-            borderBottom: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
           }}
         >
           <Space size={12}>
             <div
+              className="dft-obs-header-icon"
               style={{
                 width: 38,
                 height: 38,
@@ -143,14 +340,14 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
             >
               <DatabaseOutlined />
             </div>
-            <div>
+            <div className="dft-obs-title">
               <Title level={4} style={{ margin: 0, fontSize: 18 }}>
                 {title}
               </Title>
-              <Text type="secondary">Space: {spaceName}</Text>
+              <Text type="secondary" ellipsis={{ tooltip: `Space: ${spaceName}` }}>Space: {spaceName}</Text>
             </div>
           </Space>
-          <Space wrap>
+          <Space wrap className="dft-obs-tags">
             <Tag color="blue">Mock</Tag>
             <Tag color="green">spaceToken ready</Tag>
             {selectTarget && <Tag color="purple">{selectTarget}</Tag>}
@@ -158,20 +355,16 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
         </div>
 
         <div
+          className="dft-obs-layout"
           style={{
-            display: 'grid',
-            gridTemplateColumns: '220px minmax(0, 1fr)',
-            minHeight: 560,
           }}
         >
           <div
+            className="dft-obs-sidebar"
             style={{
-              borderRight: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
-              padding: 16,
-              background: 'var(--vscode-sideBar-background, rgba(127,127,127,0.04))',
             }}
           >
-            <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            <Space direction="vertical" size={8} className="dft-obs-folder-list" style={{ width: '100%' }}>
               {folders.map((item, index) => (
                 <Button
                   key={item}
@@ -183,8 +376,8 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
                 </Button>
               ))}
             </Space>
-            <Divider style={{ margin: '18px 0' }} />
-            <Space direction="vertical" size={6}>
+            <Divider className="dft-obs-stats" style={{ margin: '14px 0' }} />
+            <Space className="dft-obs-stats" direction="vertical" size={4}>
               <Text type="secondary">Bucket</Text>
               <Text strong>dft-public-data</Text>
               <Text type="secondary">Objects</Text>
@@ -194,41 +387,44 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
             </Space>
           </div>
 
-          <div style={{ padding: 18 }}>
+          <div className="dft-obs-main">
             <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: 12,
-                flexWrap: 'wrap',
-                marginBottom: 14,
-              }}
+              className="dft-obs-toolbar"
             >
-              <Breadcrumb
-                items={[
-                  { title: 'OBS' },
-                  { title: spaceName },
-                  { title: 'root' },
-                ]}
-              />
-              <Space wrap>
-                <Input prefix={<SearchOutlined />} placeholder="Search objects" style={{ width: 220 }} />
+              <div style={{ minWidth: 0 }}>
+                <Breadcrumb
+                  items={[
+                    { title: 'OBS' },
+                    { title: spaceName },
+                    { title: 'root' },
+                  ]}
+                />
+              </div>
+              <div className="dft-obs-actions">
+                <Input className="dft-obs-search" prefix={<SearchOutlined />} placeholder="Search objects" />
                 <Tooltip title="Refresh">
-                  <Button icon={<ReloadOutlined />} />
+                  <Button className="dft-obs-icon-button" icon={<ReloadOutlined />} />
                 </Tooltip>
-                <Button icon={<UploadOutlined />}>Upload</Button>
-                <Button icon={<CloudDownloadOutlined />}>Download</Button>
+                <Tooltip title="Upload">
+                  <Button icon={<UploadOutlined />}><span className="dft-obs-action-label">Upload</span></Button>
+                </Tooltip>
+                <Tooltip title="Download">
+                  <Button icon={<CloudDownloadOutlined />}><span className="dft-obs-action-label">Download</span></Button>
+                </Tooltip>
                 <Tooltip title="Delete">
-                  <Button danger icon={<DeleteOutlined />} />
+                  <Button className="dft-obs-icon-button" danger icon={<DeleteOutlined />} />
                 </Tooltip>
-              </Space>
+              </div>
             </div>
 
             <Table<MockObsFile>
-              size="middle"
+              className="dft-obs-table"
+              size="small"
               pagination={false}
+              scroll={{ x: 720 }}
               rowSelection={{
                 type: 'radio',
+                columnWidth: 36,
                 selectedRowKeys,
                 onChange: setSelectedRowKeys,
                 getCheckboxProps: (record) => ({
@@ -255,39 +451,30 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
                   title: 'Name',
                   dataIndex: 'name',
                   render: (name: string, record) => (
-                    <Space>
+                    <Space className="dft-obs-name" size={8}>
                       {record.type === 'folder' ? (
                         <FolderOpenOutlined style={{ color: '#2563eb' }} />
                       ) : (
                         <FileTextOutlined style={{ color: '#16a34a' }} />
                       )}
-                      <Text strong={record.type === 'folder'}>{name}</Text>
+                      <Text strong={record.type === 'folder'} ellipsis={{ tooltip: name }}>{name}</Text>
                     </Space>
                   ),
                 },
-                { title: 'Size', dataIndex: 'size', width: 110 },
-                { title: 'Updated', dataIndex: 'updatedAt', width: 170 },
-                { title: 'Owner', dataIndex: 'owner', width: 150 },
+                { title: 'Size', dataIndex: 'size', width: 82 },
+                { title: 'Updated', dataIndex: 'updatedAt', width: 150 },
+                { title: 'Owner', dataIndex: 'owner', width: 132 },
                 {
                   title: 'Status',
                   dataIndex: 'status',
-                  width: 100,
+                  width: 90,
                   render: (status: string) => <Tag color="green">{status}</Tag>,
                 },
               ]}
             />
 
             <div
-              style={{
-                marginTop: 16,
-                padding: 14,
-                border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
-                borderRadius: 8,
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: 12,
-                flexWrap: 'wrap',
-              }}
+              className="dft-obs-preview"
             >
               <Space direction="vertical" size={2}>
                 <Text strong>Preview request</Text>

@@ -27,59 +27,24 @@ const FlowShell: React.FC<FlowShellProps> = ({
   const activeStep = steps[current];
 
   return (
-    /**
-     * align-items: stretch  →  sidebar and main column grow to the same height.
-     * The sidebar <aside> is also a flex column so DesignTreePanel can use flex:1
-     * to fill the full height.
-     */
-    <div style={{ display: 'flex', alignItems: 'stretch', gap: 16 }}>
-      {sidebar && (
-        <aside
-          style={{
-            flexShrink: 0,
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          {sidebar}
-        </aside>
-      )}
+    <div className="dft-flow-shell">
+      {sidebar && <aside className="dft-flow-sidebar">{sidebar}</aside>}
 
-      {/* Main column: steps bar + content card */}
-      <div
-        style={{
-          minWidth: 0,
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        <div style={{ overflow: 'hidden', paddingBottom: 4, marginBottom: 20 }}>
+      <div className="dft-flow-main">
+        <div className="dft-stepbar">
           <Steps
             current={current}
             onChange={onStepChange}
             responsive
+            size="small"
             items={steps.map((step) => ({
               title: step.title,
               description: step.description,
             }))}
-            style={{ width: '100%' }}
           />
         </div>
 
-        {/* Content card grows to fill remaining height */}
-        <div
-          style={{
-            flex: 1,
-            minHeight: 400,
-            minWidth: 0,
-            borderRadius: 8,
-            border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
-            padding: 20,
-            background: 'var(--vscode-editor-background)',
-            overflowX: 'hidden',
-          }}
-        >
+        <div className="dft-flow-card">
           <div style={{ width: '100%', minWidth: 0 }}>{activeStep.content}</div>
         </div>
       </div>

@@ -103,7 +103,7 @@ const CommonFlow: React.FC = () => {
           showIcon
           type="info"
           message="COMMON 是公共配置入口，可避免各流程重复维护同一份路径配置。"
-          style={{ marginBottom: 20, borderRadius: 8 }}
+          style={{ marginBottom: 12, borderRadius: 8 }}
         />
 
         {hasUnsaved && (
@@ -111,7 +111,7 @@ const CommonFlow: React.FC = () => {
             showIcon
             type="warning"
             message="有尚未保存的本地配置，请先保存到本地状态目录。"
-            style={{ marginBottom: 16, borderRadius: 8 }}
+            style={{ marginBottom: 12, borderRadius: 8 }}
           />
         )}
 
@@ -119,12 +119,12 @@ const CommonFlow: React.FC = () => {
           style={{
             border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
             borderRadius: 8,
-            padding: 20,
+            padding: 14,
             background: 'var(--vscode-editor-background)',
           }}
         >
-          <div style={{ marginBottom: 24, textAlign: 'center' }}>
-            <Radio.Group defaultValue="design" buttonStyle="solid" size="large">
+          <div style={{ marginBottom: 14, textAlign: 'center' }}>
+            <Radio.Group defaultValue="design" buttonStyle="solid">
               <Radio.Button value="design">
                 <BranchesOutlined style={{ marginRight: 8 }} />
                 设计 Git 分支
@@ -141,7 +141,6 @@ const CommonFlow: React.FC = () => {
               <PathInput
                 state={designTree}
                 placeholder="请输入或选择设计树路径"
-                size="large"
                 showOpen
                 showSelectFolder
               />
@@ -151,28 +150,26 @@ const CommonFlow: React.FC = () => {
               <PathInput
                 state={normTable}
                 placeholder="请输入或选择归一化表格路径"
-                size="large"
                 showOpen
                 showSelectFile
               />
             </Form.Item>
 
             <Divider orientation="left">OBS 存储与公共数据</Divider>
-            <Space size="middle" wrap>
+            <Space size="small" wrap>
               <Button
-                size="large"
                 icon={<DatabaseOutlined />}
                 onClick={() => setObsViewerOpen(true)}
               >
                 打开 OBS 查看器
               </Button>
-              <Button size="large" icon={<CloudDownloadOutlined />}>
+              <Button icon={<CloudDownloadOutlined />}>
                 下载公共数据
               </Button>
             </Space>
           </Form>
 
-          <Divider style={{ margin: '30px 0 22px' }} />
+          <Divider style={{ margin: '18px 0 14px' }} />
 
           <div
             style={{
@@ -198,10 +195,9 @@ const CommonFlow: React.FC = () => {
                 Git 详细操作
               </Button>
             </Space>
-            <Space size="middle" wrap>
+            <Space size="small" wrap>
               <Badge dot={hasUnsaved} offset={[-4, 4]}>
                 <Button
-                  size="large"
                   icon={<SaveOutlined />}
                   loading={saving}
                   onClick={onSave}
@@ -211,7 +207,6 @@ const CommonFlow: React.FC = () => {
               </Badge>
               {/* 优化4：点击同步按钮打开确认对话框 */}
               <Button
-                size="large"
                 type="primary"
                 icon={<SyncOutlined />}
                 loading={syncing}

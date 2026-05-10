@@ -96,8 +96,12 @@ const App: React.FC = () => {
     },
     components: {
       Card: { borderRadiusLG: 8 },
-      Button: { borderRadius: 7, controlHeight: 34 },
+      Button: { borderRadius: 7, controlHeight: 32, paddingInline: 10 },
+      Form: { itemMarginBottom: 12 },
+      Input: { controlHeight: 32 },
+      Select: { controlHeight: 32 },
       Steps: { colorPrimary: activeMeta?.accent ?? '#2563eb' },
+      Tabs: { horizontalMargin: '0 0 10px 0' },
     },
   };
 
@@ -188,6 +192,165 @@ const App: React.FC = () => {
 
   return (
     <ConfigProvider theme={antdTheme}>
+      <style>
+        {`
+          .dft-top-tabs {
+            overflow-x: auto;
+            overflow-y: hidden;
+            scrollbar-width: thin;
+          }
+
+          .dft-top-tabs .ant-space-item {
+            flex: 0 0 auto;
+          }
+
+          .dft-flow-shell {
+            display: flex;
+            align-items: stretch;
+            gap: 12px;
+            min-width: 0;
+          }
+
+          .dft-flow-sidebar {
+            flex: 0 0 auto;
+            display: flex;
+            flex-direction: column;
+          }
+
+          .dft-flow-main {
+            min-width: 0;
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: column;
+          }
+
+          .dft-stepbar {
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding: 0 0 2px;
+            margin-bottom: 10px;
+            scrollbar-width: thin;
+          }
+
+          .dft-stepbar .ant-steps {
+            min-width: 620px;
+          }
+
+          .dft-stepbar .ant-steps-item-title {
+            font-size: 14px;
+            line-height: 22px;
+            white-space: nowrap;
+          }
+
+          .dft-stepbar .ant-steps-item-description {
+            font-size: 12px;
+            line-height: 18px;
+            max-width: 9em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+
+          .dft-flow-card {
+            flex: 1;
+            min-width: 0;
+            min-height: 360px;
+            border-radius: 8px;
+            border: 1px solid var(--vscode-panel-border, rgba(127,127,127,0.22));
+            padding: 14px;
+            background: var(--vscode-editor-background);
+            overflow-x: hidden;
+          }
+
+          .dft-flow-card .ant-form-item {
+            margin-bottom: 12px;
+          }
+
+          .dft-flow-card .ant-form-item-label {
+            overflow: visible;
+            white-space: normal;
+          }
+
+          .dft-flow-card .ant-form-item-label > label {
+            min-height: 32px;
+            white-space: normal;
+            word-break: break-word;
+          }
+
+          .dft-flow-card .ant-divider-horizontal {
+            margin: 14px 0;
+          }
+
+          .dft-flow-card .ant-card-small > .ant-card-body {
+            padding: 12px;
+          }
+
+          .dft-flow-card .ant-tabs-nav {
+            margin-bottom: 10px;
+          }
+
+          .dft-path-input .ant-input {
+            text-overflow: ellipsis;
+          }
+
+          .dft-action-row {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+          }
+
+          @media (max-width: 980px) {
+            .dft-flow-shell {
+              flex-direction: column;
+            }
+
+            .dft-flow-sidebar {
+              flex: 0 0 auto;
+              max-height: 260px;
+              overflow: auto;
+            }
+          }
+
+          @media (max-width: 760px) {
+            .dft-shell-header {
+              padding: 10px 12px !important;
+            }
+
+            .dft-shell-title {
+              font-size: 18px !important;
+              margin-top: 4px !important;
+            }
+
+            .dft-shell-subtitle {
+              display: none;
+            }
+
+            .dft-shell-body {
+              padding: 10px !important;
+            }
+
+            .dft-flow-card {
+              padding: 10px;
+            }
+
+            .dft-flow-card .ant-form-horizontal .ant-form-item {
+              display: block;
+            }
+
+            .dft-flow-card .ant-form-horizontal .ant-form-item-label,
+            .dft-flow-card .ant-form-horizontal .ant-form-item-control {
+              flex: none !important;
+              max-width: 100% !important;
+            }
+
+            .dft-flow-card .ant-form-item-label {
+              padding-bottom: 3px;
+              text-align: left;
+            }
+          }
+        `}
+      </style>
       <Layout
         style={{
           minHeight: '100vh',
@@ -210,7 +373,7 @@ const App: React.FC = () => {
             flexShrink: 0,
           }}
         >
-          <Space size={0}>
+          <Space size={0} className="dft-top-tabs">
             {flowTabs.map((tab) => {
               const isActive = currentCategory === tab.key;
               const isDisabled = disabledTabs.has(tab.key);
@@ -229,7 +392,7 @@ const App: React.FC = () => {
                     style={{
                       borderRadius: 0,
                       height: 44,
-                      padding: '0 14px',
+                      padding: '0 10px',
                       borderBottom: isActive
                         ? `2px solid ${activeMeta?.accent ?? '#2563eb'}`
                         : '2px solid transparent',
@@ -292,7 +455,7 @@ const App: React.FC = () => {
             maxWidth: 1180,
             margin: '0 auto',
             width: '100%',
-            padding: '24px 18px',
+            padding: '12px',
             // 优化7：使用 CSS 变量的渐变
             background: isDark
               ? `linear-gradient(180deg, color-mix(in srgb, var(--vscode-focusBorder, #2563eb) 8%, transparent), transparent 220px)`
@@ -316,12 +479,13 @@ const App: React.FC = () => {
               }}
             >
               <div
+                className="dft-shell-header"
                 style={{
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
                   gap: 16,
-                  padding: '18px 20px',
+                  padding: '12px 14px',
                   borderBottom: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
                   background: activeMeta
                     ? `linear-gradient(135deg, ${activeMeta.accent}1f, transparent 58%)`
@@ -343,10 +507,10 @@ const App: React.FC = () => {
                       ● 有未保存的更改
                     </Tag>
                   )}
-                  <Title level={2} style={{ margin: '8px 0 2px', fontSize: 24 }}>
+                  <Title className="dft-shell-title" level={2} style={{ margin: '6px 0 0', fontSize: 21 }}>
                     {activeMeta?.title ?? `${flowContext.category} 工作流配置`}
                   </Title>
-                  <Text type="secondary">{activeMeta?.subtitle}</Text>
+                  <Text className="dft-shell-subtitle" type="secondary">{activeMeta?.subtitle}</Text>
                 </div>
                 <Button
                   icon={<HomeOutlined />}
@@ -356,7 +520,7 @@ const App: React.FC = () => {
                   返回首页
                 </Button>
               </div>
-              <div style={{ padding: 20 }}>{renderFlowContent(flowContext.category)}</div>
+              <div className="dft-shell-body" style={{ padding: 12 }}>{renderFlowContent(flowContext.category)}</div>
             </div>
           )}
         </Content>
