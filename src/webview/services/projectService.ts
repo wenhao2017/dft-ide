@@ -84,3 +84,34 @@ export async function selectProject(projectId: string): Promise<DftProject> {
 
   return response.json() as Promise<DftProject>;
 }
+
+export interface ExecutionData {
+  flow: string;
+  status: 'success' | 'error' | 'cancelled';
+  logs: string[];
+  metrics?: Record<string, unknown>;
+  executedAt: number;
+}
+
+export async function uploadExecutionData(projectId: string, data: ExecutionData): Promise<{ success: boolean; id?: string }> {
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    // Mock successful upload if backend is not configured
+    console.log('[Mock] Uploading execution data for project:', projectId, data);
+    return { success: true, id: `mock-id-${Date.now()}` };
+  }
+
+  const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/executions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Upload execution data failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<{ success: boolean; id?: string }>;
+}

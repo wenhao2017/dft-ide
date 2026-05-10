@@ -588,6 +588,38 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
+      case 'openExecutionTerminal': {
+        const requestId: string = msg.requestId;
+        const title = typeof msg.title === 'string' && msg.title.trim()
+          ? msg.title.trim()
+          : 'DFT IDE Task';
+        const command = typeof msg.command === 'string' ? msg.command.trim() : '';
+        const requestedCwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
+        try {
+          const terminal = vscode.window.createTerminal({
+            name: title,
+            cwd: requestedCwd ?? resolveProjectRoot(),
+          });
+          terminal.show();
+          if (command) {
+            terminal.sendText(command);
+          }
+          currentPanel?.webview.postMessage({
+            command: 'openExecutionTerminalResponse',
+            requestId,
+            success: true,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'openExecutionTerminalResponse',
+            requestId,
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
       // ── 配置保存 ───────────────────────────────────────────────
       case 'openProjectWorkspace': {
         const requestId: string = msg.requestId;
@@ -796,6 +828,100 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         } catch (err) {
           currentPanel?.webview.postMessage({
             command: 'syncGitResponse', requestId,
+            success: false, error: String(err)
+          });
+        }
+        return;
+      }
+
+      // ─── 历史执行记录持久化 ────────────────────────────────
+      case 'saveExecutionHistory': {
+        const requestId: string = msg.requestId;
+        const flow = normalizeHistoryFlow(msg.flow);
+        const record = msg.record as Record<string, unknown>;
+        try {
+          const projectRoot = resolveProjectRoot();
+          if (!projectRoot) {
+            throw new Error('未找到项目根目录');
+          }
+          const historyDir = path.join(projectRoot, '.dft-ide', 'local-state', 'history', flow);
+          await vscode.workspace.fs.createDirectory(vscode.Uri.file(historyDir));
+          await ensureLocalStateIgnored(projectRoot, path.join(projectRoot, '.dft-ide', 'local-state'));
+
+          // 滚动清理：保留最新 500 条
+          const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(historyDir));
+          const jsonFiles = entries
+            .filter(e => e[1] === vscode.FileType.File && e[0].endsWith('.json'))
+            .map(e => e[0])
+            .sort();
+          if (jsonFiles.length >= 500) {
+            const toDelete = jsonFiles.slice(0, jsonFiles.length - 499);
+            for (const name of toDelete) {
+              await vscode.workspace.fs.delete(vscode.Uri.file(path.join(historyDir, name)));
+            }
+          }
+
+          const id = `exec_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+          const fullRecord = { ...record, id, executedAt: Date.now() };
+          const filePath = path.join(historyDir, `${id}.json`);
+          await vscode.workspace.fs.writeFile(
+            vscode.Uri.file(filePath),
+            Buffer.from(JSON.stringify(fullRecord, null, 2))
+          );
+
+          currentPanel?.webview.postMessage({
+            command: 'saveExecutionHistoryResponse', requestId,
+            success: true
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'saveExecutionHistoryResponse', requestId,
+            success: false, error: String(err)
+          });
+        }
+        return;
+      }
+
+      case 'getExecutionHistory': {
+        const requestId: string = msg.requestId;
+        const flow = normalizeHistoryFlow(msg.flow);
+        try {
+          const projectRoot = resolveProjectRoot();
+          if (!projectRoot) {
+            currentPanel?.webview.postMessage({
+              command: 'getExecutionHistoryResponse', requestId,
+              success: true, history: []
+            });
+            return;
+          }
+          const historyDir = path.join(projectRoot, '.dft-ide', 'local-state', 'history', flow);
+          let history: Record<string, unknown>[] = [];
+          try {
+            const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(historyDir));
+            const jsonFiles = entries
+              .filter(e => e[1] === vscode.FileType.File && e[0].endsWith('.json'))
+              .map(e => e[0]);
+
+            for (const name of jsonFiles) {
+              const raw = await vscode.workspace.fs.readFile(
+                vscode.Uri.file(path.join(historyDir, name))
+              );
+              try {
+                history.push(JSON.parse(Buffer.from(raw).toString('utf-8')));
+              } catch { /* skip malformed */ }
+            }
+            history.sort((a: any, b: any) => (b.executedAt ?? 0) - (a.executedAt ?? 0));
+          } catch {
+            // The history directory may not exist yet.
+          }
+
+          currentPanel?.webview.postMessage({
+            command: 'getExecutionHistoryResponse', requestId,
+            success: true, history: history.slice(0, 500)
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'getExecutionHistoryResponse', requestId,
             success: false, error: String(err)
           });
         }
@@ -1096,6 +1222,11 @@ function resolveProjectRoot(): string | undefined {
   }
 
   return folders[0].uri.fsPath;
+}
+
+function normalizeHistoryFlow(flow: unknown): string {
+  const value = typeof flow === 'string' ? flow : 'default';
+  return /^[a-z0-9_-]+$/i.test(value) ? value : 'default';
 }
 
 function resolveDefaultProjectName(): string | undefined {

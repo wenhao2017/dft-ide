@@ -238,3 +238,41 @@ export async function toggleZenMode(
   const res = await ipcRequest('toggleZenMode', { enable });
   return res as { success: boolean; error?: string };
 }
+
+export async function openExecutionTerminal(options: {
+  title: string;
+  command?: string;
+  cwd?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('openExecutionTerminal', options);
+  return res as { success: boolean; error?: string };
+}
+
+export interface ExecutionHistoryRecord {
+  id: string;
+  flow: string;
+  status: 'success' | 'error' | 'cancelled';
+  logs: string[];
+  executedAt: number;
+}
+
+/**
+ * 保存执行记录到本地 .dft-ide/local-state/history。
+ */
+export async function saveExecutionHistory(
+  flow: string,
+  record: Omit<ExecutionHistoryRecord, 'id' | 'executedAt'>
+): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('saveExecutionHistory', { flow, record });
+  return res as { success: boolean; error?: string };
+}
+
+/**
+ * 获取某个流程的历史执行记录列表（最多返回最新的 500 条）。
+ */
+export async function getExecutionHistory(
+  flow: string
+): Promise<{ success: boolean; history: ExecutionHistoryRecord[]; error?: string }> {
+  const res = await ipcRequest('getExecutionHistory', { flow });
+  return res as { success: boolean; history: ExecutionHistoryRecord[]; error?: string };
+}

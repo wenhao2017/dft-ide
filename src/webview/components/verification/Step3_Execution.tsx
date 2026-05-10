@@ -1,27 +1,49 @@
 import React from 'react';
-import { Tabs, Form, Input, Button, Radio, Row, Col } from 'antd';
+import { Tabs, Form, Input, Button, Radio, Row, Col, Alert, message, Space, Typography } from 'antd';
 import { LeftOutlined, RightOutlined, CodeOutlined } from '@ant-design/icons';
 import { useVscodePath } from '../../hooks/useVscodePath';
 import PathInput from '../shared/PathInput';
+import ExecutionLogPanel from '../shared/ExecutionLogPanel';
+import { openExecutionTerminal } from '../../utils/ipc';
 
-const TerminalUI: React.FC = () => (
-  <div
-    style={{
-      background: '#000',
-      borderRadius: 6,
-      padding: 16,
-      minHeight: 150,
-      fontFamily: 'monospace',
-      color: '#0f0',
-      marginTop: 16,
-      border: '1px solid #333',
-    }}
-  >
-    <div style={{ borderBottom: '1px solid #333', paddingBottom: 8, marginBottom: 8, color: '#888' }}>
-      <CodeOutlined style={{ marginRight: 8 }} /> 交互终端 (TERM)
-    </div>
-    <div>$ ready...</div>
-    <div style={{ color: '#555', marginTop: 8 }}>_</div>
+const { Text } = Typography;
+
+const openTerminal = async (title: string, command: string) => {
+  const res = await openExecutionTerminal({ title, command });
+  if (res.success) {
+    message.success('已在 VS Code 终端中打开任务');
+    return;
+  }
+  message.error(`打开终端失败: ${res.error ?? 'unknown error'}`);
+};
+
+const TerminalLaunch: React.FC<{
+  title: string;
+  command: string;
+  description: string;
+  tone?: 'info' | 'success';
+}> = ({ title, command, description, tone = 'info' }) => (
+  <div style={{ marginTop: 16 }}>
+    <Alert
+      message={description}
+      description={<Text code>{command}</Text>}
+      type={tone}
+      showIcon
+      style={{ marginBottom: 16 }}
+    />
+    <Space style={{ marginBottom: 16 }}>
+      <Button type="primary" icon={<CodeOutlined />} onClick={() => openTerminal(title, command)}>
+        在 VS Code 终端中运行
+      </Button>
+    </Space>
+    <ExecutionLogPanel
+      title="执行日志"
+      status="idle"
+      logs={[
+        '[INFO] 真实命令会在 VS Code 终端中运行。',
+        '[INFO] Webview 仅展示已保存的日志、历史记录和结果摘要。',
+      ]}
+    />
   </div>
 );
 
@@ -29,11 +51,10 @@ const Step3Execution: React.FC<{ onNext: () => void; onPrev: () => void }> = ({
   onNext,
   onPrev,
 }) => {
-  // 所有路径状态提升至组件顶层（Rule of Hooks）
-  const headerCfg  = useVscodePath();
-  const envCfg     = useVscodePath();
-  const testcase   = useVscodePath();
-  const ip         = useVscodePath();
+  const headerCfg = useVscodePath();
+  const envCfg = useVscodePath();
+  const testcase = useVscodePath();
+  const ip = useVscodePath();
 
   const renderPlan = () => (
     <Tabs
@@ -79,10 +100,25 @@ const Step3Execution: React.FC<{ onNext: () => void; onPrev: () => void }> = ({
                   </Form.Item>
                 </Col>
               </Row>
+              <TerminalLaunch
+                title="DFT Verification PLAN Script"
+                command="make gen_plan_scripts"
+                description="生成 PLAN 相关脚本。"
+              />
             </Form>
           ),
         },
-        { key: 'exec', label: '执行', children: <TerminalUI /> },
+        {
+          key: 'exec',
+          label: '执行',
+          children: (
+            <TerminalLaunch
+              title="DFT Verification PLAN"
+              command="bsub -q normal < run_plan.sh"
+              description="准备提交 PLAN 任务到集群。"
+            />
+          ),
+        },
       ]}
     />
   );
@@ -102,10 +138,25 @@ const Step3Execution: React.FC<{ onNext: () => void; onPrev: () => void }> = ({
               <Form.Item label="env cfg" style={{ marginBottom: 16 }}>
                 <PathInput state={envCfg} placeholder="路径..." showSelectFile showOpen />
               </Form.Item>
+              <TerminalLaunch
+                title="DFT Verification ENV Script"
+                command="make gen_env_scripts"
+                description="生成 ENV 相关脚本。"
+              />
             </Form>
           ),
         },
-        { key: 'exec', label: '执行', children: <TerminalUI /> },
+        {
+          key: 'exec',
+          label: '执行',
+          children: (
+            <TerminalLaunch
+              title="DFT Verification ENV"
+              command="make build_env"
+              description="准备执行环境构建。"
+            />
+          ),
+        },
       ]}
     />
   );
@@ -122,14 +173,40 @@ const Step3Execution: React.FC<{ onNext: () => void; onPrev: () => void }> = ({
               <Form.Item label="testcase">
                 <PathInput state={testcase} placeholder="路径..." showSelectFile showOpen />
               </Form.Item>
-              <Form.Item label="IP" style={{ marginBottom: 0 }}>
+              <Form.Item label="IP" style={{ marginBottom: 16 }}>
                 <PathInput state={ip} placeholder="路径..." showSelectFile showOpen />
               </Form.Item>
+              <TerminalLaunch
+                title="DFT Verification SIM Script"
+                command="make gen_sim_scripts"
+                description="生成 SIM 相关脚本。"
+              />
             </Form>
           ),
         },
-        { key: 'compile', label: '编译', children: <TerminalUI /> },
-        { key: 'exec', label: '执行', children: <TerminalUI /> },
+        {
+          key: 'compile',
+          label: '编译',
+          children: (
+            <TerminalLaunch
+              title="DFT Verification SIM Compile"
+              command="make compile_sim"
+              description="编译 SIM 设计和 Testbench。"
+            />
+          ),
+        },
+        {
+          key: 'exec',
+          label: '执行',
+          children: (
+            <TerminalLaunch
+              title="DFT Verification SIM"
+              command="./simv +UVM_TESTNAME=test_base"
+              description="运行仿真任务。"
+              tone="success"
+            />
+          ),
+        },
       ]}
     />
   );

@@ -1,12 +1,21 @@
-import React from 'react';
-import { Button, Alert } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Button, Alert, Space, Typography, message } from 'antd';
 import {
   LeftOutlined,
   RightOutlined,
   CheckCircleOutlined,
   WarningOutlined,
-  CodeOutlined,
+  FileTextOutlined,
+  HistoryOutlined,
+  CloudUploadOutlined,
 } from '@ant-design/icons';
+import ExecutionLogPanel from '../shared/ExecutionLogPanel';
+import ExecutionHistoryList from '../shared/ExecutionHistoryList';
+import { getExecutionHistory, ExecutionHistoryRecord } from '../../utils/ipc';
+import { uploadExecutionData } from '../../services/projectService';
+import useWizardStore from '../../store/wizardStore';
+
+const { Link } = Typography;
 
 interface Props {
   onNext: () => void;
@@ -14,52 +23,105 @@ interface Props {
 }
 
 const Step4Result: React.FC<Props> = ({ onNext, onPrev }) => {
+  const { activeProject } = useWizardStore();
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyRecords, setHistoryRecords] = useState<ExecutionHistoryRecord[]>([]);
+  const [activeRecord, setActiveRecord] = useState<ExecutionHistoryRecord | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      const res = await getExecutionHistory('design');
+      if (res.success && res.history.length > 0) {
+        setHistoryRecords(res.history);
+        setActiveRecord(res.history[0]);
+      }
+    };
+    fetchHistory();
+  }, []);
+
+  const handleUpload = async () => {
+    if (!activeProject?.id) {
+      message.error('未选择有效的项目 (ProjectId 缺失)');
+      return;
+    }
+    if (!activeRecord) {
+      message.warning('当前没有可提交的执行记录');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      await uploadExecutionData(activeProject.id, {
+        flow: 'design',
+        status: activeRecord.status,
+        logs: activeRecord.logs,
+        executedAt: activeRecord.executedAt,
+      });
+      message.success('已成功同步执行数据到云端分析平台');
+    } catch (err) {
+      message.error('同步失败: ' + String(err));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const currentLogs = activeRecord?.logs ?? [];
+
   return (
     <div style={{ padding: '16px 0' }}>
       <Alert
         message="状态检查"
-        description="是否有错？如果执行过程中存在错误，可在此处跳出具体的 log 以及错误原因进行分析。"
-        type="warning"
+        description="执行结果来自已保存的日志或历史记录；真实任务请在 VS Code 终端中运行。"
+        type={activeRecord?.status === 'success' ? 'success' : 'warning'}
         showIcon
-        icon={<WarningOutlined />}
-        style={{ marginBottom: 24 }}
+        icon={activeRecord?.status === 'success' ? <CheckCircleOutlined /> : <WarningOutlined />}
+        style={{ marginBottom: 16 }}
       />
 
-      {/* 终端日志展示 */}
-      <div
-        style={{
-          background: '#000',
-          borderRadius: 6,
-          padding: 16,
-          border: '1px solid #333',
-          minHeight: 300,
-          fontFamily: 'monospace',
-          color: '#ccc',
-        }}
-      >
-        <div
-          style={{
-            borderBottom: '1px solid #333',
-            paddingBottom: 8,
-            marginBottom: 8,
-            color: '#888',
-          }}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <Space size="large">
+          <Link>
+            <FileTextOutlined /> design/synth.log
+          </Link>
+          <Link>
+            <FileTextOutlined /> design/opt.log
+          </Link>
+        </Space>
+
+        <Button
+          icon={<HistoryOutlined />}
+          onClick={() => setHistoryOpen(true)}
         >
-          <CodeOutlined style={{ marginRight: 8 }} /> 交互终端 (TERM) — 日志输出
-        </div>
-        <div>[INFO] Start parsing results...</div>
-        <div>[INFO] Normalizing data sets...</div>
-        <div style={{ color: '#4ade80', marginTop: 4 }}>[INFO] Module A: OK</div>
-        <div style={{ color: '#4ade80' }}>[INFO] Module B: OK</div>
-        <div style={{ color: '#ff4d4f', marginTop: 4 }}>[ERROR] Failed to load module metrics.</div>
-        <div style={{ color: '#faad14' }}>[WARN] Skipping partial result for Module C.</div>
+          查看历史记录 ({historyRecords.length})
+        </Button>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 24 }}>
+      <ExecutionLogPanel
+        title={`日志分析 ${activeRecord ? `[${new Date(activeRecord.executedAt).toLocaleString()}]` : ''}`}
+        status={activeRecord?.status || 'idle'}
+        logs={currentLogs}
+        minHeight={300}
+      />
+
+      <ExecutionHistoryList
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        history={historyRecords}
+        onSelect={(record) => setActiveRecord(record)}
+      />
+
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 32 }}>
         <Button onClick={onPrev} icon={<LeftOutlined />}>
           上一页
         </Button>
-        <Button icon={<CheckCircleOutlined />}>提交</Button>
+        <Button
+          icon={<CloudUploadOutlined />}
+          onClick={handleUpload}
+          loading={uploading}
+        >
+          提交分析到云端
+        </Button>
         <Button type="primary" onClick={onNext}>
           下一页 <RightOutlined />
         </Button>
