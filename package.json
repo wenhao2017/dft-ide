@@ -4,7 +4,7 @@
   "description": "A VS Code-based DFT workflow console for project setup, common configuration, design flow, verification flow, and backend integration.",
   "version": "0.0.1",
   "publisher": "w00445630",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE",
   "preview": true,
   "categories": [
     "Other"
