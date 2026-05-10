@@ -28,7 +28,7 @@ const mockProjects: DftProject[] = [
   {
     id: 'apollo-dft',
     name: 'Apollo DFT',
-    rootPath: 'D:/dft/projects/apollo-dft',
+    rootPath: 'D:/Downloads/apollo-dft',
     owner: 'DFT Platform',
     role: 'DFT Lead',
     updatedAt: '2026-04-26 09:30',
@@ -43,7 +43,7 @@ const mockProjects: DftProject[] = [
   {
     id: 'nova-mbist',
     name: 'Nova MBIST',
-    rootPath: 'D:/dft/projects/nova-mbist',
+    rootPath: 'D:/Downloads/nova-mbist',
     owner: 'Memory Team',
     role: 'Designer',
     updatedAt: '2026-04-24 18:10',
@@ -52,7 +52,7 @@ const mockProjects: DftProject[] = [
     repos: [
       { key: 'data', gitlabProjectName: 'Nova-MBIST_data', status: 'ready' },
       { key: 'design', gitlabProjectName: 'Nova-MBIST_design', status: 'ready' },
-      { key: 'verification', gitlabProjectName: 'Nova-MBIST_verification', status: 'missing' },
+      { key: 'verification', gitlabProjectName: 'Nova-MBIST_verification', status: 'ready' },
     ],
   },
   {
