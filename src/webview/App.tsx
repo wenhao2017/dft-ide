@@ -1,6 +1,18 @@
-import React, { useEffect, useState } from 'react';
-import { Button, ConfigProvider, Layout, Tag, theme, Typography } from 'antd';
-import { HomeOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Button, ConfigProvider, Layout, Modal, Space, Tag, Tooltip, theme, Typography } from 'antd';
+import {
+  AppstoreOutlined,
+  CheckCircleOutlined,
+  CompressOutlined,
+  ExclamationCircleOutlined,
+  ExpandOutlined,
+  ExperimentOutlined,
+  HomeOutlined,
+  LineChartOutlined,
+  RocketOutlined,
+  SettingOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons';
 import CommonFlow from './flows/CommonFlow';
 import DesignFlow from './flows/DesignFlow';
 import VerificationFlow from './flows/VerificationFlow';
@@ -8,6 +20,7 @@ import TaskStepper from './components/wizard/TaskStepper';
 import Welcome from './components/Welcome';
 import useWizardStore from './store/wizardStore';
 import vscode from './utils/vscode';
+import { toggleZenMode as ipcToggleZenMode } from './utils/ipc';
 
 const { Content } = Layout;
 const { Text, Title } = Typography;
@@ -39,9 +52,22 @@ const flowMeta: Record<string, { title: string; subtitle: string; accent: string
   },
 };
 
+// 优化6：内部 Tab 导航配置
+const flowTabs: Array<{ key: string; label: string; icon: React.ReactNode }> = [
+  { key: 'HOME', label: '首页', icon: <HomeOutlined /> },
+  { key: 'COMMON', label: 'COMMON', icon: <SettingOutlined /> },
+  { key: 'Design', label: 'Design', icon: <RocketOutlined /> },
+  { key: 'Verification', label: 'Verification', icon: <CheckCircleOutlined /> },
+  { key: 'Formal', label: 'Formal', icon: <ExperimentOutlined /> },
+  { key: 'STA', label: 'STA', icon: <LineChartOutlined /> },
+];
+
+const disabledTabs = new Set(['Formal', 'STA']);
+
 const App: React.FC = () => {
-  const { flowContext, activeProject, setFlowContext, reset } = useWizardStore();
+  const { flowContext, activeProject, dirtyFlows, setFlowContext, zenMode, toggleZenMode, reset } = useWizardStore();
   const [vscTheme, setVscTheme] = useState<'dark' | 'light' | 'hc'>(detectVscodeTheme);
+  const isDirty = useWizardStore((s) => s.isDirty);
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -53,7 +79,9 @@ const App: React.FC = () => {
 
   const isDark = vscTheme === 'dark' || vscTheme === 'hc';
   const activeMeta = flowContext ? flowMeta[flowContext.category] : undefined;
+  const currentCategory = flowContext?.category ?? 'HOME';
 
+  // 优化7：使用 CSS 变量构建主题
   const antdTheme = {
     algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
     token: {
@@ -72,6 +100,51 @@ const App: React.FC = () => {
       Steps: { colorPrimary: activeMeta?.accent ?? '#2563eb' },
     },
   };
+
+  // 优化1：切换 flow 前检查未保存变更
+  const navigateToFlow = useCallback((category: string) => {
+    const currentFlow = flowContext?.category;
+
+    const doNavigate = () => {
+      if (category === 'HOME') {
+        setFlowContext(null);
+      } else {
+        setFlowContext({ category });
+      }
+      reset();
+    };
+
+    // 如果当前 flow 有脏数据，弹出确认
+    if (currentFlow && dirtyFlows.has(currentFlow)) {
+      Modal.confirm({
+        title: '存在未保存的更改',
+        icon: <ExclamationCircleOutlined />,
+        content: `当前 ${currentFlow} 页面有尚未保存的配置变更。离开后未保存的数据将丢失。`,
+        okText: '不保存，直接离开',
+        cancelText: '留在当前页',
+        okButtonProps: { danger: true },
+        onOk: () => {
+          // 清除脏标记后导航
+          const clearDirty = useWizardStore.getState().clearDirty;
+          clearDirty(currentFlow);
+          doNavigate();
+        },
+      });
+    } else {
+      doNavigate();
+    }
+  }, [flowContext, dirtyFlows, setFlowContext, reset]);
+
+  // 优化5：专注模式切换
+  const handleZenToggle = useCallback(async () => {
+    const nextState = !zenMode;
+    try {
+      await ipcToggleZenMode(nextState);
+      toggleZenMode();
+    } catch {
+      // 切换失败则不更新本地状态
+    }
+  }, [zenMode, toggleZenMode]);
 
   const renderFlowContent = (category: string) => {
     switch (category) {
@@ -118,22 +191,125 @@ const App: React.FC = () => {
       <Layout
         style={{
           minHeight: '100vh',
-          padding: '24px 18px',
-          background: isDark
-            ? 'linear-gradient(180deg, rgba(37,99,235,0.08), transparent 220px)'
-            : 'linear-gradient(180deg, rgba(37,99,235,0.07), transparent 240px)',
+          padding: '0',
+          background: 'var(--vscode-editor-background, #1e1e1e)',
         }}
       >
-        <Content style={{ maxWidth: 1180, margin: '0 auto', width: '100%' }}>
+        {/* 优化6：顶部 Tab 导航栏 */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0 16px',
+            height: 44,
+            borderBottom: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
+            background: isDark
+              ? 'rgba(255,255,255,0.03)'
+              : 'rgba(0,0,0,0.02)',
+            flexShrink: 0,
+          }}
+        >
+          <Space size={0}>
+            {flowTabs.map((tab) => {
+              const isActive = currentCategory === tab.key;
+              const isDisabled = disabledTabs.has(tab.key);
+              const flowDirty = dirtyFlows.has(tab.key);
+              return (
+                <Tooltip
+                  key={tab.key}
+                  title={isDisabled ? 'Coming Soon' : undefined}
+                >
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={tab.icon}
+                    disabled={isDisabled}
+                    onClick={() => navigateToFlow(tab.key)}
+                    style={{
+                      borderRadius: 0,
+                      height: 44,
+                      padding: '0 14px',
+                      borderBottom: isActive
+                        ? `2px solid ${activeMeta?.accent ?? '#2563eb'}`
+                        : '2px solid transparent',
+                      color: isActive
+                        ? 'var(--vscode-foreground, #ccc)'
+                        : 'var(--vscode-descriptionForeground, #888)',
+                      fontWeight: isActive ? 600 : 400,
+                      opacity: isDisabled ? 0.4 : 1,
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    {tab.label}
+                    {/* 脏数据指示点 */}
+                    {flowDirty && (
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          background: '#faad14',
+                          marginLeft: 6,
+                          verticalAlign: 'middle',
+                        }}
+                      />
+                    )}
+                  </Button>
+                </Tooltip>
+              );
+            })}
+          </Space>
+
+          <Space size={8}>
+            {/* 优化5：专注模式切换按钮 */}
+            <Tooltip title={zenMode ? '退出专注模式' : '进入专注模式'}>
+              <Button
+                type="text"
+                size="small"
+                icon={zenMode ? <CompressOutlined /> : <ExpandOutlined />}
+                onClick={handleZenToggle}
+                style={{
+                  color: 'var(--vscode-descriptionForeground, #888)',
+                }}
+              />
+            </Tooltip>
+            {activeProject && (
+              <Tag
+                color="blue"
+                style={{ margin: 0 }}
+              >
+                {activeProject.name}
+              </Tag>
+            )}
+          </Space>
+        </div>
+
+        {/* 主内容区域 */}
+        <Content
+          style={{
+            maxWidth: 1180,
+            margin: '0 auto',
+            width: '100%',
+            padding: '24px 18px',
+            // 优化7：使用 CSS 变量的渐变
+            background: isDark
+              ? `linear-gradient(180deg, color-mix(in srgb, var(--vscode-focusBorder, #2563eb) 8%, transparent), transparent 220px)`
+              : `linear-gradient(180deg, color-mix(in srgb, var(--vscode-focusBorder, #2563eb) 7%, transparent), transparent 240px)`,
+          }}
+        >
           {!flowContext ? (
-            <Welcome isDark={isDark} />
+            <Welcome isDark={isDark} onNavigate={navigateToFlow} />
           ) : (
             <div
               style={{
                 borderRadius: 8,
                 overflow: 'hidden',
                 border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.24))',
-                background: isDark ? 'rgba(18,18,20,0.72)' : 'rgba(255,255,255,0.88)',
+                background: isDark
+                  ? 'color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 72%, transparent)'
+                  : 'color-mix(in srgb, var(--vscode-editor-background, #fff) 88%, transparent)',
                 boxShadow: isDark
                   ? '0 18px 48px rgba(0,0,0,0.36)'
                   : '0 18px 42px rgba(15,23,42,0.10)',
@@ -161,6 +337,12 @@ const App: React.FC = () => {
                       {activeProject.name}
                     </Tag>
                   )}
+                  {/* 优化1：未保存变更提示 */}
+                  {dirtyFlows.has(flowContext.category) && (
+                    <Tag color="warning" style={{ marginLeft: 8 }}>
+                      ● 有未保存的更改
+                    </Tag>
+                  )}
                   <Title level={2} style={{ margin: '8px 0 2px', fontSize: 24 }}>
                     {activeMeta?.title ?? `${flowContext.category} 工作流配置`}
                   </Title>
@@ -168,7 +350,7 @@ const App: React.FC = () => {
                 </div>
                 <Button
                   icon={<HomeOutlined />}
-                  onClick={() => setFlowContext(null)}
+                  onClick={() => navigateToFlow('HOME')}
                   style={{ flex: '0 0 auto' }}
                 >
                   返回首页

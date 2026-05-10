@@ -26,19 +26,30 @@ interface WizardState {
   taskPayload: TaskPayload;
   flowContext: FlowContext | null;
   activeProject: ProjectContext | null;
+  /** Tracks which flows have unsaved changes (优化1: 防丢失) */
+  dirtyFlows: Set<string>;
+  /** Whether the focused (zen) layout is active (优化5: 专注模式) */
+  zenMode: boolean;
   nextStep: () => void;
   prevStep: () => void;
   updatePayload: (data: Partial<TaskPayload>) => void;
   setFlowContext: (context: FlowContext | null) => void;
   setActiveProject: (project: ProjectContext | null) => void;
+  markDirty: (flow: string) => void;
+  clearDirty: (flow: string) => void;
+  isDirty: (flow?: string) => boolean;
+  toggleZenMode: () => void;
+  setZenMode: (on: boolean) => void;
   reset: () => void;
 }
 
-const useWizardStore = create<WizardState>((set) => ({
+const useWizardStore = create<WizardState>((set, get) => ({
   currentStep: 0,
   taskPayload: {},
   flowContext: null,
   activeProject: null,
+  dirtyFlows: new Set<string>(),
+  zenMode: false,
 
   nextStep: () =>
     set((state) => ({
@@ -64,6 +75,29 @@ const useWizardStore = create<WizardState>((set) => ({
     set(() => ({
       activeProject: project,
     })),
+
+  markDirty: (flow) =>
+    set((state) => {
+      const next = new Set(state.dirtyFlows);
+      next.add(flow);
+      return { dirtyFlows: next };
+    }),
+
+  clearDirty: (flow) =>
+    set((state) => {
+      const next = new Set(state.dirtyFlows);
+      next.delete(flow);
+      return { dirtyFlows: next };
+    }),
+
+  isDirty: (flow) => {
+    const { dirtyFlows } = get();
+    if (flow) return dirtyFlows.has(flow);
+    return dirtyFlows.size > 0;
+  },
+
+  toggleZenMode: () => set((state) => ({ zenMode: !state.zenMode })),
+  setZenMode: (on) => set({ zenMode: on }),
 
   reset: () =>
     set({

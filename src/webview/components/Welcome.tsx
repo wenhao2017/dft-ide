@@ -39,6 +39,8 @@ const { Paragraph, Text, Title } = Typography;
 
 interface Props {
   isDark?: boolean;
+  /** 优化6：使用统一的导航方法（带 dirty check） */
+  onNavigate?: (category: string) => void;
 }
 
 const flows = [
@@ -100,7 +102,7 @@ const vscodeDemos = [
   { key: 'external', label: '外部链接', icon: <ApiOutlined /> },
 ];
 
-const Welcome: React.FC<Props> = ({ isDark = true }) => {
+const Welcome: React.FC<Props> = ({ isDark = true, onNavigate }) => {
   const { setFlowContext, setActiveProject } = useWizardStore();
   const [dashboard, setDashboard] = useState<ProjectDashboard | null>(null);
   const [loadingProjects, setLoadingProjects] = useState(true);
@@ -111,8 +113,11 @@ const Welcome: React.FC<Props> = ({ isDark = true }) => {
   const [localConfigPath, setLocalConfigPathValue] = useState('');
   const [savingLocalConfigPath, setSavingLocalConfigPath] = useState(false);
 
-  const cardBorder = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.12)';
-  const panelBg = isDark ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.92)';
+  // 优化7：使用 CSS 变量
+  const cardBorder = 'var(--vscode-panel-border, rgba(127,127,127,0.18))';
+  const panelBg = isDark
+    ? 'color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 96%, white)'
+    : 'color-mix(in srgb, var(--vscode-editor-background, #fff) 92%, transparent)';
 
   const currentProject = useMemo(() => {
     if (!dashboard?.currentProjectId) return null;
@@ -185,14 +190,23 @@ const Welcome: React.FC<Props> = ({ isDark = true }) => {
         rootPath: selected.rootPath,
       });
       setDashboard((prev) => prev ? { ...prev, currentProjectId: selected.id } : prev);
-      setFlowContext({ category: 'COMMON', projectId: selected.id });
+      // 优化6：使用 onNavigate 以获得 dirty check
+      if (onNavigate) {
+        onNavigate('COMMON');
+      } else {
+        setFlowContext({ category: 'COMMON', projectId: selected.id });
+      }
     } finally {
       setSelectingProjectId(null);
     }
   };
 
   const openFlow = (category: string) => {
-    setFlowContext({ category, projectId: dashboard?.currentProjectId ?? undefined });
+    if (onNavigate) {
+      onNavigate(category);
+    } else {
+      setFlowContext({ category, projectId: dashboard?.currentProjectId ?? undefined });
+    }
   };
 
   const chooseLocalConfigPath = async () => {
@@ -235,9 +249,16 @@ const Welcome: React.FC<Props> = ({ isDark = true }) => {
             borderRadius: 8,
             padding: '28px 28px 24px',
             border: `1px solid ${cardBorder}`,
+            // 优化7：使用 color-mix + CSS 变量替代硬编码
             background: isDark
-              ? 'linear-gradient(135deg, rgba(37,99,235,0.20), rgba(5,150,105,0.10) 48%, rgba(255,255,255,0.04))'
-              : 'linear-gradient(135deg, rgba(37,99,235,0.12), rgba(5,150,105,0.08) 48%, #ffffff)',
+              ? `linear-gradient(135deg,
+                  color-mix(in srgb, var(--vscode-focusBorder, #2563eb) 20%, transparent),
+                  color-mix(in srgb, #059669 10%, transparent) 48%,
+                  rgba(255,255,255,0.04))`
+              : `linear-gradient(135deg,
+                  color-mix(in srgb, var(--vscode-focusBorder, #2563eb) 12%, transparent),
+                  color-mix(in srgb, #059669 8%, transparent) 48%,
+                  var(--vscode-editor-background, #fff))`,
             boxShadow: isDark
               ? '0 18px 52px rgba(0,0,0,0.34)'
               : '0 18px 44px rgba(15,23,42,0.10)',
@@ -358,7 +379,7 @@ const Welcome: React.FC<Props> = ({ isDark = true }) => {
                     style={{ padding: '14px 18px' }}
                   >
                     <List.Item.Meta
-                      avatar={<FileProtectOutlined style={{ color: '#2563eb', fontSize: 22 }} />}
+                      avatar={<FileProtectOutlined style={{ color: 'var(--vscode-focusBorder, #2563eb)', fontSize: 22 }} />}
                       title={
                         <Space wrap>
                           <Text strong>{project.name}</Text>
@@ -443,7 +464,7 @@ const Welcome: React.FC<Props> = ({ isDark = true }) => {
                     borderTop: `1px solid ${cardBorder}`,
                   }}
                 >
-                  <span style={{ color: '#2563eb', fontSize: 20 }}>{icon}</span>
+                  <span style={{ color: 'var(--vscode-focusBorder, #2563eb)', fontSize: 20 }}>{icon}</span>
                   <div>
                     <Text strong>{name}</Text>
                     <div>

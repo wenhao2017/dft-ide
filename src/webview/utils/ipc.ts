@@ -174,3 +174,67 @@ export async function syncGit(
   const res = await ipcRequest('syncGit', { flow, message, push });
   return res as { success: boolean; commitMessage?: string; error?: string };
 }
+
+// ─── 优化 2: 路径有效性验证 ────────────────────────────────────
+
+/**
+ * 验证一个本地路径是否存在。
+ * 返回 { exists, isFile, isDirectory } 或 error。
+ */
+export async function validatePath(
+  targetPath: string
+): Promise<{ exists: boolean; isFile: boolean; isDirectory: boolean; error?: string }> {
+  const res = await ipcRequest('validatePath', { path: targetPath }, 5_000);
+  return res as { exists: boolean; isFile: boolean; isDirectory: boolean; error?: string };
+}
+
+// ─── 优化 3: 任务取消 ──────────────────────────────────────────
+
+/**
+ * 请求取消一个正在运行的 HPC 任务。
+ * @param jobId  任务 ID
+ */
+export async function cancelTask(
+  jobId: string
+): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('cancelTask', { jobId });
+  return res as { success: boolean; error?: string };
+}
+
+// ─── 优化 4: Git changed files (diff 预览) ─────────────────────
+
+export interface GitChangedFileInfo {
+  path: string;
+  type: 'index' | 'workingTree' | 'merge' | 'unknown';
+}
+
+/**
+ * 获取当前仓库的变更文件列表，供 Webview 展示 diff 预览。
+ */
+export async function getGitChangedFiles(): Promise<{
+  files: GitChangedFileInfo[];
+  branch?: string;
+  error?: string;
+}> {
+  const res = await ipcRequest('getGitChangedFiles');
+  return res as { files: GitChangedFileInfo[]; branch?: string; error?: string };
+}
+
+/**
+ * 打开 VS Code Source Control（SCM）视图。
+ */
+export function openSourceControl(): void {
+  vscode.postMessage({ command: 'openSourceControl' });
+}
+
+// ─── 优化 5: 专注模式切换 ──────────────────────────────────────
+
+/**
+ * 切换 VS Code 布局的专注模式（隐藏/恢复活动栏、菜单栏等）。
+ */
+export async function toggleZenMode(
+  enable: boolean
+): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('toggleZenMode', { enable });
+  return res as { success: boolean; error?: string };
+}

@@ -122,8 +122,8 @@
         },
         "dftIde.layout.autoApply": {
           "type": "boolean",
-          "default": true,
-          "description": "Automatically apply the DFT IDE focused workbench layout on startup."
+          "default": false,
+          "description": "Automatically apply the DFT IDE focused workbench layout on startup. Defaults to off; use the Zen Mode toggle in the webview instead."
         },
         "dftIde.layout.hideMenuBar": {
           "type": "boolean",

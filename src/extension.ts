@@ -15,6 +15,8 @@ let currentPanel: vscode.WebviewPanel | undefined = undefined;
 let activeCategory: string | undefined = undefined;
 let pendingWebviewCommand: { command: 'showWelcome' } | { command: 'loadFlow'; category: string } | undefined;
 const obsReadonlyDocuments = new Map<string, string>();
+/** 优化3：跟踪活跃的任务轮询计时器，以便支持取消 */
+const activeJobTimers = new Map<string, ReturnType<typeof setInterval>>();
 
 export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
@@ -76,7 +78,8 @@ export function activate(context: vscode.ExtensionContext) {
 
 async function initializeDftWorkbench(context: vscode.ExtensionContext): Promise<void> {
   const config = vscode.workspace.getConfiguration('dftIde');
-  if (config.get<boolean>('layout.autoApply', true)) {
+  // 优化5：默认不再自动应用激进布局，改为用户手动切换"专注模式"
+  if (config.get<boolean>('layout.autoApply', false)) {
     await applyDftIdeLayout(context, true);
   }
   await focusDftView();
@@ -433,7 +436,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         const jobId = submitJob(payload);
         currentPanel?.webview.postMessage({ command: 'taskSubmitted', jobId });
 
-        let pollCount = 0;
+        // 优化3：基于状态的轮询，不再硬编码 30 次上限
         const timer = setInterval(() => {
           const result = queryJobStatus(jobId);
           currentPanel?.webview.postMessage({
@@ -442,16 +445,124 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             status: result.status,
             progress: result.progress,
           });
-          pollCount++;
-          if (result.status === 'SUCCESS' || pollCount > 30) {
+          if (result.status === 'SUCCESS' || result.status === 'FAILED') {
             clearInterval(timer);
+            activeJobTimers.delete(jobId);
           }
         }, 2000);
+        activeJobTimers.set(jobId, timer);
         return;
       }
       case 'vscodeDemo':
         await runVscodeDemo(msg.action);
         return;
+
+      // ── 优化2：路径有效性验证 ─────────────────────────────────
+      case 'validatePath': {
+        const requestId: string = msg.requestId;
+        const targetPath = typeof msg.path === 'string' ? msg.path.trim() : '';
+        try {
+          if (!targetPath) {
+            currentPanel?.webview.postMessage({
+              command: 'validatePathResponse', requestId,
+              exists: false, isFile: false, isDirectory: false
+            });
+            return;
+          }
+          const uri = vscode.Uri.file(targetPath);
+          const stat = await vscode.workspace.fs.stat(uri);
+          currentPanel?.webview.postMessage({
+            command: 'validatePathResponse', requestId,
+            exists: true,
+            isFile: stat.type === vscode.FileType.File,
+            isDirectory: stat.type === vscode.FileType.Directory,
+          });
+        } catch {
+          currentPanel?.webview.postMessage({
+            command: 'validatePathResponse', requestId,
+            exists: false, isFile: false, isDirectory: false
+          });
+        }
+        return;
+      }
+
+      // ── 优化3：任务取消 ─────────────────────────────────────
+      case 'cancelTask': {
+        const requestId: string = msg.requestId;
+        const jobId = typeof msg.jobId === 'string' ? msg.jobId : '';
+        const timer = activeJobTimers.get(jobId);
+        if (timer) {
+          clearInterval(timer);
+          activeJobTimers.delete(jobId);
+          currentPanel?.webview.postMessage({
+            command: 'jobStatus',
+            jobId,
+            status: 'FAILED',
+            progress: 0,
+          });
+        }
+        currentPanel?.webview.postMessage({
+          command: 'cancelTaskResponse', requestId,
+          success: true,
+        });
+        return;
+      }
+
+      // ── 优化4：获取 Git 变更文件列表 ─────────────────────────
+      case 'getGitChangedFiles': {
+        const requestId: string = msg.requestId;
+        try {
+          const gitInfo = await gitService.getCurrentGitInfo();
+          const files = (gitInfo?.changedFiles ?? []).map(f => ({
+            path: vscode.workspace.asRelativePath(f.path),
+            type: f.type,
+          }));
+          currentPanel?.webview.postMessage({
+            command: 'getGitChangedFilesResponse',
+            requestId,
+            files,
+            branch: gitInfo?.branch,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'getGitChangedFilesResponse',
+            requestId,
+            files: [],
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
+      // ── 优化4：打开 VS Code SCM 视图 ─────────────────────────
+      case 'openSourceControl': {
+        await gitService.openSourceControl();
+        return;
+      }
+
+      // ── 优化5：专注模式切换 ──────────────────────────────────
+      case 'toggleZenMode': {
+        const requestId: string = msg.requestId;
+        const enable = Boolean(msg.enable);
+        try {
+          if (enable) {
+            await applyDftIdeLayout(context, true);
+          } else {
+            await restoreVscodeLayout(context);
+          }
+          currentPanel?.webview.postMessage({
+            command: 'toggleZenModeResponse', requestId,
+            success: true,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'toggleZenModeResponse', requestId,
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
 
       case 'openObsViewer': {
         const requestId: string = msg.requestId;

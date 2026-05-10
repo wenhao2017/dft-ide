@@ -1,6 +1,15 @@
 import React, { useState } from 'react';
-import { Button, Dropdown, Input, Space } from 'antd';
-import { CloudOutlined, DownOutlined, FileOutlined, FolderOpenOutlined, FolderOutlined } from '@ant-design/icons';
+import { Button, Dropdown, Input, Space, Tooltip } from 'antd';
+import {
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  CloudOutlined,
+  DownOutlined,
+  FileOutlined,
+  FolderOpenOutlined,
+  FolderOutlined,
+  LoadingOutlined,
+} from '@ant-design/icons';
 import { VscodePathState } from '../../hooks/useVscodePath';
 import useWizardStore from '../../store/wizardStore';
 import ObsViewer, { ObsSelectTarget } from './ObsViewer';
@@ -14,6 +23,8 @@ interface PathInputProps {
   showSelectFolder?: boolean;
   showSelectFile?: boolean;
   size?: 'small' | 'middle' | 'large';
+  /** 是否显示路径验证状态（优化2，默认 true） */
+  showValidation?: boolean;
 }
 
 const PathInput: React.FC<PathInputProps> = ({
@@ -25,12 +36,41 @@ const PathInput: React.FC<PathInputProps> = ({
   showSelectFolder = false,
   showSelectFile = false,
   size = 'middle',
+  showValidation = true,
 }) => {
   const [obsTarget, setObsTarget] = useState<ObsSelectTarget | null>(null);
   const activeProject = useWizardStore((store) => store.activeProject);
   const obsSpaceName = activeProject?.name ?? 'dft-ide-workspace';
   const canSelectFolder = showSelect || showSelectFolder;
   const canSelectFile = showSelect || showSelectFile;
+
+  // 优化2：根据验证状态渲染图标
+  const validationSuffix = showValidation && state.validation
+    ? (() => {
+        switch (state.validation.status) {
+          case 'validating':
+            return (
+              <Tooltip title="正在验证路径...">
+                <LoadingOutlined style={{ color: 'var(--vscode-input-foreground, #999)' }} />
+              </Tooltip>
+            );
+          case 'valid':
+            return (
+              <Tooltip title={state.validation.message ?? '路径有效'}>
+                <CheckCircleOutlined style={{ color: '#52c41a' }} />
+              </Tooltip>
+            );
+          case 'invalid':
+            return (
+              <Tooltip title={state.validation.message ?? '路径无效'}>
+                <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
+              </Tooltip>
+            );
+          default:
+            return null;
+        }
+      })()
+    : null;
 
   const makeSelectButton = (target: ObsSelectTarget) => (
     <Dropdown
@@ -60,13 +100,14 @@ const PathInput: React.FC<PathInputProps> = ({
     >
       <Button
         icon={target === 'folder' ? <FolderOutlined /> : <FileOutlined />}
-        loading={state.loading}
+        loading={state.selecting}
         disabled={disabled}
         size={size}
         style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }}
       >
-        {target === 'folder' ? '选择目录' : '选择文件'}
-        <DownOutlined style={{ fontSize: 10, marginLeft: 4 }} />
+        {/* 优化2：选择中状态提示 */}
+        {state.selecting ? '选择中…' : (target === 'folder' ? '选择目录' : '选择文件')}
+        {!state.selecting && <DownOutlined style={{ fontSize: 10, marginLeft: 4 }} />}
       </Button>
     </Dropdown>
   );
@@ -77,10 +118,21 @@ const PathInput: React.FC<PathInputProps> = ({
         <Input
           value={state.value}
           onChange={(event) => state.setValue(event.target.value)}
+          onBlur={() => {
+            if (state.value.trim() && showValidation) {
+              state.handleValidate();
+            }
+          }}
           placeholder={placeholder}
           disabled={disabled}
           size={size}
           allowClear
+          suffix={validationSuffix}
+          status={
+            state.validation?.status === 'invalid' ? 'error'
+            : state.validation?.status === 'valid' ? ''
+            : undefined
+          }
           style={{ minWidth: 0 }}
         />
         {canSelectFolder && makeSelectButton('folder')}
