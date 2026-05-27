@@ -6,6 +6,7 @@ import {
   Empty,
   Input,
   Modal,
+  Select,
   Space,
   Tooltip,
   Tree,
@@ -23,6 +24,7 @@ import {
   EditOutlined,
   ExpandAltOutlined,
   FileAddOutlined,
+  FilterOutlined,
   LeftOutlined,
   NodeIndexOutlined,
   RightOutlined,
@@ -214,6 +216,42 @@ function filterModules(modules: DesignTreeModule[], keyword: string): DesignTree
   return filtered;
 }
 
+function filterModulesByFocus(modules: DesignTreeModule[], focusKeys: string[]): DesignTreeModule[] {
+  if (focusKeys.length === 0) return modules;
+  const focusSet = new Set(focusKeys);
+
+  const visit = (items: DesignTreeModule[]): DesignTreeModule[] => {
+    const filtered: DesignTreeModule[] = [];
+    for (const module of items) {
+      if (focusSet.has(module.key)) {
+        filtered.push(module);
+        continue;
+      }
+
+      const children = module.children ? visit(module.children) : [];
+      if (children.length > 0) {
+        filtered.push({ ...module, children });
+      }
+    }
+    return filtered;
+  };
+
+  return visit(modules);
+}
+
+function collectModuleOptions(
+  modules: DesignTreeModule[],
+  parents: string[] = []
+): Array<{ label: string; value: string }> {
+  return modules.flatMap((module) => {
+    const pathLabel = [...parents, module.title].join(' / ');
+    return [
+      { label: pathLabel, value: module.key },
+      ...(module.children ? collectModuleOptions(module.children, [...parents, module.title]) : []),
+    ];
+  });
+}
+
 function normalizeTreeState(value: unknown): DesignTreeModule[] {
   if (!value || typeof value !== 'object' || !('nodes' in value)) {
     return cloneModules(mockDesignTree);
@@ -231,10 +269,12 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   onSelect,
 }) => {
   const { savedData } = useFlowConfig('common');
+  const { savedData: flowSavedData } = useFlowConfig(flow);
   const designTreePath = typeof savedData?.designTree === 'string' ? savedData.designTree : '';
   const [modules, setModules] = useState<DesignTreeModule[]>(() => cloneModules(mockDesignTree));
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(() => getAllKeys(mockDesignTree));
   const [search, setSearch] = useState('');
+  const [focusKeys, setFocusKeys] = useState<string[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -252,6 +292,14 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const rawKeys = flowSavedData?.focusModuleKeys;
+    if (!Array.isArray(rawKeys)) {
+      return;
+    }
+    setFocusKeys(rawKeys.filter((key): key is string => typeof key === 'string' && Boolean(findModule(modules, key))));
+  }, [flowSavedData, modules]);
 
   const touchModules = useCallback((next: DesignTreeModule[]) => {
     setModules(next);
@@ -348,7 +396,37 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     if (selectedModule) deleteModule(selectedModule.key);
   };
 
-  const filteredModules = useMemo(() => filterModules(modules, search), [modules, search]);
+  const moduleOptions = useMemo(() => collectModuleOptions(modules), [modules]);
+  const scopedModules = useMemo(() => filterModulesByFocus(modules, focusKeys), [modules, focusKeys]);
+  const filteredModules = useMemo(() => filterModules(scopedModules, search), [scopedModules, search]);
+  const visibleKeys = useMemo(() => new Set(getAllKeys(filteredModules)), [filteredModules]);
+
+  useEffect(() => {
+    if (focusKeys.length === 0 || visibleKeys.has(selectedKey)) {
+      return;
+    }
+    const nextSelected = focusKeys.find((key) => visibleKeys.has(key)) ?? getAllKeys(filteredModules)[0] ?? '';
+    if (nextSelected) {
+      selectModule(nextSelected);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredModules, focusKeys, selectedKey, visibleKeys]);
+
+  const updateFocusKeys = (keys: string[]) => {
+    setFocusKeys(keys);
+    saveConfig(flow, { focusModuleKeys: keys }).catch(() => undefined);
+    if (keys.length === 0) {
+      return;
+    }
+
+    const scoped = filterModulesByFocus(modules, keys);
+    setExpandedKeys(getAllKeys(scoped));
+    const preferred = keys.find((key) => findModule(modules, key));
+    if (preferred) {
+      selectModule(preferred);
+    }
+  };
+
   const treeData: DataNode[] = useMemo(() => {
     const build = (items: DesignTreeModule[]): DataNode[] => items.map((module) => ({
       key: module.key,
@@ -429,6 +507,31 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
         </Tooltip>
       </Space.Compact>
 
+      <Space direction="vertical" size={6} style={{ width: '100%', marginBottom: 10 }}>
+        <Space size={6}>
+          <FilterOutlined style={{ color: focusKeys.length ? accent : 'var(--vscode-descriptionForeground)' }} />
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            Focus modules
+          </Text>
+          {focusKeys.length > 0 && (
+            <Button size="small" type="link" onClick={() => updateFocusKeys([])} style={{ padding: 0 }}>
+              Show all
+            </Button>
+          )}
+        </Space>
+        <Select
+          mode="multiple"
+          allowClear
+          size="small"
+          maxTagCount="responsive"
+          placeholder="Select owned modules"
+          value={focusKeys}
+          options={moduleOptions}
+          onChange={(keys) => updateFocusKeys(keys)}
+          style={{ width: '100%' }}
+        />
+      </Space>
+
       <Space size={6} wrap style={{ marginBottom: 10 }}>
         <Tooltip title="新增子模块">
           <Button size="small" icon={<FileAddOutlined />} onClick={addChild} />
@@ -455,7 +558,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
             onClick={deleteSelected}
           />
         </Tooltip>
-        <Button size="small" onClick={() => setExpandedKeys(getAllKeys(modules))}>
+        <Button size="small" onClick={() => setExpandedKeys(getAllKeys(filteredModules))}>
           展开
         </Button>
         <Button size="small" onClick={() => setExpandedKeys([])}>
