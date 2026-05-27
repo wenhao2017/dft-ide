@@ -164,6 +164,17 @@ const targetTagStyle: React.CSSProperties = {
   color: 'var(--vscode-foreground)',
 };
 
+const activeRepoCardStyle: React.CSSProperties = {
+  background:
+    'color-mix(in srgb, var(--vscode-editor-background, #fff) 88%, var(--vscode-focusBorder, #1677ff))',
+  color: 'var(--vscode-foreground)',
+};
+
+const inactiveRepoCardStyle: React.CSSProperties = {
+  background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))',
+  color: 'var(--vscode-foreground)',
+};
+
 const CommonFlow: React.FC = () => {
   const dataDesignTree = useVscodePath();
   const dataNormTable = useVscodePath();
@@ -481,10 +492,7 @@ const CommonFlow: React.FC = () => {
             borderLeft: active ? '4px solid var(--vscode-focusBorder)' : '4px solid transparent',
             borderRadius: 10,
             padding: '12px 14px',
-            background: active
-              ? 'var(--vscode-list-activeSelectionBackground, var(--vscode-list-focusBackground, rgba(127,127,127,0.16)))'
-              : 'var(--vscode-editor-background)',
-            color: active ? 'var(--vscode-list-activeSelectionForeground, var(--vscode-foreground))' : 'var(--vscode-foreground)',
+            ...(active ? activeRepoCardStyle : inactiveRepoCardStyle),
             cursor: 'pointer',
           }}
         >
