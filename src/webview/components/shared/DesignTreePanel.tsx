@@ -43,7 +43,7 @@ export interface DesignTreeModule {
 
 interface DesignTreePanelProps {
   accent: string;
-  flow: 'design' | 'verification';
+  flow: 'hibist' | 'sailor' | 'verification';
   flowLabel: string;
   selectedKey: string;
   onSelect: (key: string) => void;

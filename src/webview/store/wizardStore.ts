@@ -9,6 +9,8 @@ export interface ProjectContext {
   id: string;
   name: string;
   rootPath?: string;
+  role?: string;
+  canManageMembers?: boolean;
 }
 
 export interface TaskPayload {
@@ -26,6 +28,7 @@ interface WizardState {
   taskPayload: TaskPayload;
   flowContext: FlowContext | null;
   activeProject: ProjectContext | null;
+  currentUser: string;
   /** Tracks which flows have unsaved changes (优化1: 防丢失) */
   dirtyFlows: Set<string>;
   /** Whether the focused (zen) layout is active (优化5: 专注模式) */
@@ -35,6 +38,7 @@ interface WizardState {
   updatePayload: (data: Partial<TaskPayload>) => void;
   setFlowContext: (context: FlowContext | null) => void;
   setActiveProject: (project: ProjectContext | null) => void;
+  setCurrentUser: (user: string) => void;
   markDirty: (flow: string) => void;
   clearDirty: (flow: string) => void;
   isDirty: (flow?: string) => boolean;
@@ -48,6 +52,7 @@ const useWizardStore = create<WizardState>((set, get) => ({
   taskPayload: {},
   flowContext: null,
   activeProject: null,
+  currentUser: '',
   dirtyFlows: new Set<string>(),
   zenMode: false,
 
@@ -74,6 +79,11 @@ const useWizardStore = create<WizardState>((set, get) => ({
   setActiveProject: (project) =>
     set(() => ({
       activeProject: project,
+    })),
+
+  setCurrentUser: (user) =>
+    set(() => ({
+      currentUser: user,
     })),
 
   markDirty: (flow) =>

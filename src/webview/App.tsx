@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Button, ConfigProvider, Layout, Modal, Space, Tag, Tooltip, theme, Typography } from 'antd';
 import {
   AppstoreOutlined,
+  BellOutlined,
   CheckCircleOutlined,
   CompressOutlined,
   ExclamationCircleOutlined,
@@ -42,6 +43,16 @@ const flowMeta: Record<string, { title: string; subtitle: string; accent: string
     subtitle: '维护设计、验证与共享数据都会复用的基础路径和同步动作。',
     accent: '#2563eb',
   },
+  Hibist: {
+    title: 'Hibist 设计工作流配置',
+    subtitle: '围绕 Hibist 工具链完成环境准备、模块配置、执行编排和结果查看。',
+    accent: '#7c3aed',
+  },
+  Sailor: {
+    title: 'Sailor 设计工作流配置',
+    subtitle: '围绕 Sailor 工具链完成环境准备、模块配置、执行编排和结果查看。',
+    accent: '#0ea5e9',
+  },
   Design: {
     title: 'Design 工作流配置',
     subtitle: '把设计任务从环境准备、工具配置、执行到结果查看串成稳定闭环。',
@@ -63,7 +74,8 @@ const flowMeta: Record<string, { title: string; subtitle: string; accent: string
 const flowTabs: Array<{ key: string; label: string; icon: React.ReactNode }> = [
   { key: 'HOME', label: '首页', icon: <HomeOutlined /> },
   { key: 'Common', label: 'Common', icon: <SettingOutlined /> },
-  { key: 'Design', label: 'Design', icon: <RocketOutlined /> },
+  { key: 'Hibist', label: 'Hibist', icon: <RocketOutlined /> },
+  { key: 'Sailor', label: 'Sailor', icon: <BellOutlined /> },
   { key: 'Verification', label: 'Verification', icon: <CheckCircleOutlined /> },
   { key: 'Formal', label: 'Formal', icon: <ExperimentOutlined /> },
   { key: 'STA', label: 'STA', icon: <LineChartOutlined /> },
@@ -169,8 +181,10 @@ const App: React.FC = () => {
     switch (category) {
       case 'Common':
         return <CommonFlow />;
-      case 'Design':
-        return <DesignFlow />;
+      case 'Hibist':
+        return <DesignFlow category={category}/>;
+      case 'Sailor':
+        return <DesignFlow category={category}/>;
       case 'Verification':
         return <VerificationFlow />;
       case 'MemberManagement':

@@ -20,9 +20,11 @@ const { Link } = Typography;
 interface Props {
   onNext: () => void;
   onPrev: () => void;
+  category: string;
 }
 
-const Step4Result: React.FC<Props> = ({ onNext, onPrev }) => {
+const Step4Result: React.FC<Props> = ({ onNext, onPrev, category }) => {
+  const flowKey = category.toLowerCase();
   const { activeProject } = useWizardStore();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRecords, setHistoryRecords] = useState<ExecutionHistoryRecord[]>([]);
@@ -31,14 +33,14 @@ const Step4Result: React.FC<Props> = ({ onNext, onPrev }) => {
 
   useEffect(() => {
     const fetchHistory = async () => {
-      const res = await getExecutionHistory('design');
+      const res = await getExecutionHistory(flowKey);
       if (res.success && res.history.length > 0) {
         setHistoryRecords(res.history);
         setActiveRecord(res.history[0]);
       }
     };
     fetchHistory();
-  }, []);
+  }, [flowKey]);
 
   const handleUpload = async () => {
     if (!activeProject?.id) {
@@ -53,7 +55,7 @@ const Step4Result: React.FC<Props> = ({ onNext, onPrev }) => {
     setUploading(true);
     try {
       await uploadExecutionData(activeProject.id, {
-        flow: 'design',
+        flow: flowKey,
         status: activeRecord.status,
         logs: activeRecord.logs,
         executedAt: activeRecord.executedAt,

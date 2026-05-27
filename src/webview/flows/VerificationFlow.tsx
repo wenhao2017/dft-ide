@@ -14,7 +14,7 @@ const VerificationFlow: React.FC = () => {
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
 
   const steps = [
-    { title: '公共配置', description: '环境与出口', content: <Step1CommonConfig moduleKey={selectedModule} onNext={nextStep} /> },
+    { title: '公共配置', description: '环境与出口', content: <Step1CommonConfig onNext={nextStep} /> },
     { title: '工具配置', description: '仿真工具链', content: <Step2ToolConfig moduleKey={selectedModule} onNext={nextStep} onPrev={prevStep} /> },
     { title: '执行页', description: '用例与命令', content: <Step3Execution onNext={nextStep} onPrev={prevStep} /> },
     { title: '结果页', description: '日志与报告', content: <Step4Result onNext={nextStep} onPrev={prevStep} /> },
@@ -31,13 +31,15 @@ const VerificationFlow: React.FC = () => {
       current={currentStep}
       onStepChange={setCurrentStep}
       sidebar={
-        <DesignTreePanel
-          accent="#059669"
-          flow="verification"
-          flowLabel="Verification"
-          selectedKey={selectedModule}
-          onSelect={setSelectedModule}
-        />
+        currentStep !== 0 ? (
+          <DesignTreePanel
+            accent="#059669"
+            flow="verification"
+            flowLabel="Verification"
+            selectedKey={selectedModule}
+            onSelect={setSelectedModule}
+          />
+        ) : undefined
       }
     />
   );

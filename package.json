@@ -85,6 +85,11 @@
           "default": "",
           "description": "Optional debug user id. Leave empty to use whoami in production-like environments, with w00445630 as the development fallback."
         },
+        "dftIde.lastSelectedProject": {
+          "type": "string",
+          "default": "",
+          "description": "Last selected project."
+        },
         "dftIde.obs.page": {
           "type": "string",
           "default": "",
@@ -155,10 +160,12 @@
   },
   "dependencies": {
     "@ant-design/icons": "^5.6.1",
+    "@ant-design/v5-patch-for-react-19": "^1.0.3",
     "@hookform/resolvers": "^5.0.1",
     "@tanstack/react-query": "^5.75.5",
     "@tanstack/react-table": "^8.21.3",
     "antd": "^5.25.1",
+    "dotenv": "^17.4.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-hook-form": "^7.56.3",

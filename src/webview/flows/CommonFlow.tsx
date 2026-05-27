@@ -3,70 +3,185 @@ import {
   Alert,
   Badge,
   Button,
-  Divider,
+  Card,
   Dropdown,
   Form,
   Input,
   Modal,
-  Radio,
   Space,
   Spin,
   Tag,
   Tooltip,
   Typography,
   message,
+  Radio,
 } from 'antd';
+import '@ant-design/v5-patch-for-react-19';
 import type { MenuProps } from 'antd';
 import {
   BranchesOutlined,
-  CloudDownloadOutlined,
   CloudSyncOutlined,
-  DatabaseOutlined,
-  ExclamationCircleOutlined,
+  ArrowRightOutlined,
   FileSyncOutlined,
   PullRequestOutlined,
   SaveOutlined,
+  SwapOutlined,
   SyncOutlined,
   UploadOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import { useVscodePath } from '../hooks/useVscodePath';
 import { useFlowConfig } from '../hooks/useFlowConfig';
 import PathInput from '../components/shared/PathInput';
 import useWizardStore from '../store/wizardStore';
 import ObsViewer from '../components/shared/ObsViewer';
-import CollapsibleSection from '../components/shared/CollapsibleSection';
 import {
   getProjectRepoGitInfo,
   openSourceControl,
   runRepoGitAction,
   syncCommonArtifacts,
-  type RepoGitInfo,
-  type RepoKey,
+  RepoGitInfo,
+  RepoKey,
 } from '../utils/ipc';
 
-const { Text } = Typography;
+const { Text, Title, Paragraph } = Typography;
+
+type SyncDirection = 'dataToTarget' | 'targetToData';
 
 const repoLabels: Record<RepoKey, string> = {
-  design: '设计仓库',
+  hibist: 'Hibist 仓库',
+  sailor: 'Sailor 仓库',
+  data: 'Data 公共仓',
   verification: '验证仓库',
 };
 
 const repoShortLabels: Record<RepoKey, string> = {
-  design: '设计',
-  verification: '验证',
+  hibist: 'Hibist',
+  sailor: 'Sailor',
+  data: 'Data',
+  verification: '验证仓',
+};
+
+const pageStyle: React.CSSProperties = {
+  padding: 4,
+  color: 'var(--vscode-foreground)',
+};
+
+const cardStyle: React.CSSProperties = {
+  borderRadius: 12,
+  border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
+  background: 'var(--vscode-editor-background)',
+};
+
+const mutedTextStyle: React.CSSProperties = {
+  color: 'var(--vscode-descriptionForeground)',
+};
+
+const accentPanelStyle: React.CSSProperties = {
+  border: '1px solid var(--vscode-focusBorder, rgba(22,119,255,0.45))',
+  background:
+    'linear-gradient(135deg, rgba(22,119,255,0.18), rgba(82,196,26,0.08)), var(--vscode-editor-background)',
+};
+
+const warmPanelStyle: React.CSSProperties = {
+  border: '1px solid rgba(250, 173, 20, 0.38)',
+  background:
+    'linear-gradient(135deg, rgba(250,173,20,0.16), rgba(22,119,255,0.06)), var(--vscode-editor-background)',
+};
+
+const greenPanelStyle: React.CSSProperties = {
+  border: '1px solid rgba(82, 196, 26, 0.34)',
+  background:
+    'linear-gradient(135deg, rgba(82,196,26,0.14), rgba(22,119,255,0.05)), var(--vscode-editor-background)',
+};
+
+const sectionHeaderStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'flex-start',
+  gap: 12,
+  marginBottom: 14,
+};
+
+const sectionTitleStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+};
+
+const stepBadgeStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 22,
+  height: 22,
+  borderRadius: '50%',
+  fontSize: 12,
+  fontWeight: 600,
+  background: 'var(--vscode-badge-background, rgba(22, 119, 255, 0.16))',
+  color: 'var(--vscode-badge-foreground, #ffffff)',
+};
+
+const directionNodeStyle: React.CSSProperties = {
+  flex: '1 1 220px',
+  minWidth: 220,
+  borderRadius: 12,
+  border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
+  background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))',
+  padding: '12px 14px',
+};
+
+const directionArrowStyle: React.CSSProperties = {
+  width: 54,
+  height: 54,
+  borderRadius: '50%',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  border: '1px solid var(--vscode-focusBorder, rgba(22,119,255,0.45))',
+  background: 'linear-gradient(135deg, rgba(22,119,255,0.95), rgba(82,196,26,0.85))',
+  color: '#ffffff',
+  boxShadow: '0 6px 18px rgba(0,0,0,0.18)',
+  fontSize: 20,
+};
+
+const swapButtonStyle: React.CSSProperties = {
+  border: '1px solid rgba(250, 173, 20, 0.55)',
+  background: 'linear-gradient(135deg, rgba(250,173,20,0.95), rgba(250,140,22,0.9))',
+  color: '#1f1f1f',
+  fontWeight: 600,
+};
+
+const sourceTagStyle: React.CSSProperties = {
+  border: '1px solid rgba(22,119,255,0.45)',
+  background: 'rgba(22,119,255,0.16)',
+  color: 'var(--vscode-foreground)',
+};
+
+const targetTagStyle: React.CSSProperties = {
+  border: '1px solid rgba(82,196,26,0.45)',
+  background: 'rgba(82,196,26,0.16)',
+  color: 'var(--vscode-foreground)',
 };
 
 const CommonFlow: React.FC = () => {
-  const designTree = useVscodePath();
-  const normTable = useVscodePath();
-  const [selectedRepo, setSelectedRepo] = useState<RepoKey>('design');
+  const dataDesignTree = useVscodePath();
+  const dataNormTable = useVscodePath();
+  const targetDesignTree = useVscodePath();
+  const targetNormTable = useVscodePath();
+
+  const [syncDirection, setSyncDirection] = useState<SyncDirection>('dataToTarget');
+  const [selectedDataRepo, setSelectedDataRepo] = useState<RepoKey>('data');
+  const [selectedRepo, setSelectedRepo] = useState<RepoKey>('hibist');
   const [repoInfo, setRepoInfo] = useState<Record<RepoKey, RepoGitInfo>>({
-    design: { repo: 'design' },
+    data: { repo: 'data' },
+    hibist: { repo: 'hibist' },
+    sailor: { repo: 'sailor' },
     verification: { repo: 'verification' },
   });
   const [repoLoading, setRepoLoading] = useState(false);
   const [obsViewerOpen, setObsViewerOpen] = useState(false);
-  const [syncModalOpen, setSyncModalOpen] = useState(false);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [commitMsg, setCommitMsg] = useState('');
   const [pushAfterCommit, setPushAfterCommit] = useState(false);
   const [branchModal, setBranchModal] = useState<{
@@ -74,16 +189,68 @@ const CommonFlow: React.FC = () => {
     repo: RepoKey;
     mode: 'checkout' | 'createBranch';
     value: string;
-  }>({ open: false, repo: 'design', mode: 'checkout', value: '' });
-  const activeProject = useWizardStore((state) => state.activeProject);
+  }>({ open: false, repo: 'hibist', mode: 'checkout', value: '' });
 
-  const { savedData, loading, saving, syncing, hasUnsaved, handleSave, debouncedSave, markDirty } =
+  const activeProject = useWizardStore((s) => s.activeProject);
+  const { savedData, loading, saving, uploading, syncing, hasUnsaved, handleSave, debouncedSave, markDirty } =
     useFlowConfig('common');
 
-  const collectFormData = () => ({
-    designTree: designTree.value,
-    normTable: normTable.value,
-  });
+  const selectedDataInfo = repoInfo[selectedDataRepo];
+  const selectedTargetInfo = repoInfo[selectedRepo];
+  const targetName = repoShortLabels[selectedRepo];
+
+  const sourceRepo = syncDirection === 'dataToTarget' ? selectedDataRepo : selectedRepo;
+  const targetRepo = syncDirection === 'dataToTarget' ? selectedRepo : selectedDataRepo;
+  const sourceLabel = syncDirection === 'dataToTarget' ? repoLabels[selectedDataRepo] : repoLabels[selectedRepo];
+  const targetLabel = syncDirection === 'dataToTarget' ? repoLabels[selectedRepo] : repoLabels[selectedDataRepo];
+  const sourceInfo = repoInfo[sourceRepo];
+  const targetInfo = repoInfo[targetRepo];
+  const primaryButtonText = syncDirection === 'dataToTarget' ? `同步到${targetName}` : '同步到 Data';
+  const confirmTitle = syncDirection === 'dataToTarget' ? `确认同步到${repoLabels[selectedRepo]}` : '确认回写到 Data 公共仓';
+  const confirmOkText = syncDirection === 'dataToTarget' ? '确认' : '确认';
+  const confirmLoading = syncDirection === 'dataToTarget' ? syncing : uploading;
+
+  const collectFormData = () => {
+    let formData: Record<string, unknown> = {};
+    if (savedData) {
+      formData = { ...savedData };
+    }
+    formData[selectedDataRepo] = {
+      designTree: dataDesignTree.value,
+      normTable: dataNormTable.value,
+    };
+    formData[selectedRepo] = {
+      designTree: targetDesignTree.value,
+      normTable: targetNormTable.value,
+    };
+    return formData;
+  };
+
+  const savedFormData = useMemo((): Record<string, unknown> | null => {
+    let formData: Record<string, unknown> = {
+      dataDesignTree: '',
+      dataNormTable: '',
+      targetDesignTree: '',
+      targetNormTable: '',
+    };
+
+    if (savedData?.[selectedDataRepo]) {
+      const repoForm = savedData[selectedDataRepo] as Record<string, unknown>;
+      formData.dataDesignTree = repoForm.designTree;
+      formData.dataNormTable = repoForm.normTable;
+    } else {
+      // 兼容旧字段：如果之前只保存了 designTree / normTable，则默认放到 Data 路径。
+      if (savedData?.designTree) formData.dataDesignTree = savedData.designTree;
+      if (savedData?.normTable) formData.dataNormTable = savedData.normTable;
+    }
+    if (savedData?.[selectedRepo]) {
+      const repoForm = savedData[selectedRepo] as Record<string, unknown>;
+      formData.targetDesignTree = repoForm.designTree;
+      formData.targetNormTable = repoForm.normTable;
+    }
+
+    return formData;
+  }, [savedData, selectedDataRepo, selectedRepo]);
 
   const refreshRepoInfo = async () => {
     setRepoLoading(true);
@@ -105,33 +272,68 @@ const CommonFlow: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!savedData) return;
-    if (savedData.designTree) designTree.setValue(String(savedData.designTree));
-    if (savedData.normTable) normTable.setValue(String(savedData.normTable));
+    dataDesignTree.setValue(String(savedFormData?.dataDesignTree));
+    dataNormTable.setValue(String(savedFormData?.dataNormTable));
+    targetDesignTree.setValue(String(savedFormData?.targetDesignTree));
+    targetNormTable.setValue(String(savedFormData?.targetNormTable));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedData]);
+  }, [savedFormData]);
 
   useEffect(() => {
-    if (savedData === null) return;
     const currentData = collectFormData();
+    const dataRepoForm = currentData[selectedDataRepo] as Record<string, unknown>;
+    const targetRepoForm = currentData[selectedRepo] as Record<string, unknown>;
     const hasChange =
-      currentData.designTree !== (savedData?.designTree ?? '') ||
-      currentData.normTable !== (savedData?.normTable ?? '');
+      dataRepoForm.designTree !== (savedFormData?.dataDesignTree ?? '') ||
+      dataRepoForm.normTable !== (savedFormData?.dataNormTable ?? '') ||
+      targetRepoForm.designTree !== (savedFormData?.targetDesignTree ?? '') ||
+      targetRepoForm.normTable !== (savedFormData?.targetNormTable ?? '');
+
     if (hasChange) {
       markDirty();
       debouncedSave(currentData);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [designTree.value, normTable.value]);
+  }, [dataDesignTree.value, dataNormTable.value, targetDesignTree.value, targetNormTable.value]);
 
-  const selectedInfo = repoInfo[selectedRepo];
-  const syncTargets = useMemo(
-    () => [
-      { name: '设计树文件', path: `${selectedInfo.repoRoot ?? repoLabels[selectedRepo]}\\design_tree.mock.json` },
-      { name: '归一化表格文件', path: `${selectedInfo.repoRoot ?? repoLabels[selectedRepo]}\\normalized-table.*` },
-    ],
-    [selectedInfo.repoRoot, selectedRepo]
-  );
+  const previewTargets = useMemo(() => {
+    if (syncDirection === 'dataToTarget') {
+      return [
+        {
+          name: 'Design Tree',
+          from: dataDesignTree.value || `${repoLabels[selectedDataRepo]}\\design_tree.mock.json`,
+          to: targetDesignTree.value || `${selectedTargetInfo.repoRoot ?? repoLabels[selectedRepo]}\\design_tree.mock.json`,
+        },
+        {
+          name: '归一化表格',
+          from: dataNormTable.value || `${repoLabels[selectedDataRepo]}\\normalized-table.md`,
+          to: targetNormTable.value || `${selectedTargetInfo.repoRoot ?? repoLabels[selectedRepo]}\\normalized-table.md`,
+        },
+      ];
+    }
+
+    return [
+      {
+        name: 'Design Tree',
+        from: targetDesignTree.value || `${selectedTargetInfo.repoRoot ?? repoLabels[selectedRepo]}\\design_tree.mock.json`,
+        to: dataDesignTree.value || `${repoLabels[selectedDataRepo]}\\design_tree.mock.json`,
+      },
+      {
+        name: '归一化表格',
+        from: targetNormTable.value || `${selectedTargetInfo.repoRoot ?? repoLabels[selectedRepo]}\\normalized-table.md`,
+        to: dataNormTable.value || `${repoLabels[selectedDataRepo]}\\normalized-table.md`,
+      },
+    ];
+  }, [
+    dataDesignTree.value,
+    dataNormTable.value,
+    selectedDataRepo,
+    selectedRepo,
+    selectedTargetInfo.repoRoot,
+    syncDirection,
+    targetDesignTree.value,
+    targetNormTable.value,
+  ]);
 
   const runAction = async (repo: RepoKey, action: 'pull' | 'push' | 'openScm') => {
     const hide = message.loading('正在处理 Git 操作...', 0);
@@ -154,11 +356,13 @@ const CommonFlow: React.FC = () => {
       message.warning('请输入分支名');
       return;
     }
+
     const result = await runRepoGitAction({
       repo: branchModal.repo,
       action: branchModal.mode,
       branchName,
     });
+
     if (result.success) {
       message.success(branchModal.mode === 'checkout' ? '已切换分支' : '已创建并切换分支');
       setBranchModal((prev) => ({ ...prev, open: false, value: '' }));
@@ -168,9 +372,19 @@ const CommonFlow: React.FC = () => {
     }
   };
 
-  const repoMenu = (repo: RepoKey): MenuProps['items'] => [
+  const canManageMembers = activeProject
+    ? activeProject.id !== '0' && (activeProject.canManageMembers ?? activeProject.role?.toUpperCase() === 'DFTM')
+    : false;
+
+  const repoMenu = (repo: RepoKey, group: Number): MenuProps['items'] => [
     { key: 'pull', icon: <CloudSyncOutlined />, label: '更新到最新', onClick: () => runAction(repo, 'pull') },
-    { key: 'push', icon: <UploadOutlined />, label: '上传本地提交', onClick: () => runAction(repo, 'push') },
+    {
+      key: 'push',
+      icon: <UploadOutlined />,
+      label: '上传本地提交',
+      onClick: () => runAction(repo, 'push'),
+      disabled: !canManageMembers && group == 1,
+    },
     { type: 'divider' },
     {
       key: 'checkout',
@@ -188,66 +402,110 @@ const CommonFlow: React.FC = () => {
     { key: 'openScm', icon: <FileSyncOutlined />, label: '打开 VS Code Git 面板', onClick: () => runAction(repo, 'openScm') },
   ];
 
-  const openSyncModal = async () => {
+  const openConfirmModal = async () => {
     await handleSave(collectFormData());
     setCommitMsg('');
     setPushAfterCommit(false);
-    setSyncModalOpen(true);
+    setConfirmModalOpen(true);
   };
 
-  const confirmSync = async () => {
+  const confirmSyncByDirection = async () => {
+    // 界面已拆成四个路径，但当前 syncCommonArtifacts 仍沿用原始参数。
+    // 正向：Data 路径作为输入；反向：目标仓路径作为输入。
     const result = await syncCommonArtifacts({
       targetRepo: selectedRepo,
-      designTree: designTree.value,
-      normTable: normTable.value,
+      designTree: syncDirection === 'dataToTarget' ? dataDesignTree.value : targetDesignTree.value,
+      normTable: syncDirection === 'dataToTarget' ? dataNormTable.value : targetNormTable.value,
       message: commitMsg.trim() || undefined,
       push: pushAfterCommit,
     });
+
     if (result.success) {
-      message.success(`已同步到${repoLabels[selectedRepo]}`);
-      setSyncModalOpen(false);
+      message.success(syncDirection === 'dataToTarget' ? `已同步到${repoLabels[selectedRepo]}` : '已回写到 Data 公共仓');
+      setConfirmModalOpen(false);
+      // 更新目标仓的配置
+      let formData = collectFormData();
+      formData[selectedRepo] = {
+        designTree: previewTargets[0]["to"],
+        normTable: previewTargets[1]["to"],
+      };
+      await handleSave(formData);
       await refreshRepoInfo();
       return;
     }
+
     message.error(result.error ?? '同步失败');
   };
 
-  const openBranchModal = (repo: RepoKey, mode: 'checkout' | 'createBranch' = 'checkout') => {
-    setBranchModal({ open: true, repo, mode, value: '' });
+  const setSelectedRepoByGroup = (repo: RepoKey, group: Number) => {
+    if (group == 1) {
+      setSelectedDataRepo(repo);
+    } else {
+      setSelectedRepo(repo);
+    }
   };
 
-  const renderRepoCard = (repo: RepoKey) => {
+  const toggleDirection = () => {
+    setSyncDirection((prev) => (prev === 'dataToTarget' ? 'targetToData' : 'dataToTarget'));
+  };
+
+  const renderStepTitle = (step: number, title: string, description?: string) => (
+    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      <span style={stepBadgeStyle}>{step}</span>
+      <div>
+        <Text strong style={{ fontSize: 15 }}>{title}</Text>
+        {description && (
+          <div style={{ marginTop: 2 }}>
+            <Text style={{ ...mutedTextStyle, fontSize: 12 }}>{description}</Text>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderRepoCard = (repo: RepoKey, group: Number) => {
     const info = repoInfo[repo];
-    const active = selectedRepo === repo;
+    const active = group == 1 ? selectedDataRepo === repo : selectedRepo === repo;
+    const hasError = Boolean(info?.error);
+
     return (
-      <Dropdown trigger={['contextMenu']} menu={{ items: repoMenu(repo) }}>
+      <Dropdown trigger={['contextMenu']} menu={{ items: repoMenu(repo, group) }}>
         <button
           type="button"
-          onClick={() => setSelectedRepo(repo)}
+          onClick={() => setSelectedRepoByGroup(repo, group)}
           style={{
-            flex: '1 1 280px',
-            minWidth: 260,
+            flex: '1 1 230px',
+            minWidth: 220,
             textAlign: 'left',
-            border: `1px solid ${active ? 'var(--vscode-focusBorder, #1677ff)' : 'var(--vscode-panel-border, rgba(127,127,127,0.24))'}`,
-            borderRadius: 8,
+            border: `1px solid ${active ? 'var(--vscode-focusBorder)' : 'var(--vscode-panel-border, rgba(127,127,127,0.24))'}`,
+            borderLeft: active ? '4px solid var(--vscode-focusBorder)' : '4px solid transparent',
+            borderRadius: 10,
             padding: '12px 14px',
-            background: active ? 'rgba(22, 119, 255, 0.10)' : 'var(--vscode-editor-background)',
-            color: 'var(--vscode-foreground)',
+            background: active
+              ? 'var(--vscode-list-activeSelectionBackground, var(--vscode-list-focusBackground, rgba(127,127,127,0.16)))'
+              : 'var(--vscode-editor-background)',
+            color: active ? 'var(--vscode-list-activeSelectionForeground, var(--vscode-foreground))' : 'var(--vscode-foreground)',
             cursor: 'pointer',
           }}
         >
-          <Space direction="vertical" size={6} style={{ width: '100%' }}>
+          <Space direction="vertical" size={7} style={{ width: '100%' }}>
             <Space style={{ width: '100%', justifyContent: 'space-between' }}>
               <Text strong>{repoLabels[repo]}</Text>
-              <Tag color={info?.hasChanges ? 'orange' : 'green'}>
-                {info?.hasChanges ? `${info.changedCount ?? 0} 个变更` : '干净'}
-              </Tag>
+              {hasError ? (
+                <Tag color="red">异常</Tag>
+              ) : (
+                <Tag color={info?.hasChanges ? 'orange' : 'green'}>{info?.hasChanges ? `${info.changedCount ?? 0} 个变更` : '干净'}</Tag>
+              )}
             </Space>
+
             <Space size={6}>
               <BranchesOutlined />
-              <Text>{info?.branch || info?.error || '未检测到分支'}</Text>
+              <Text ellipsis={{ tooltip: info?.branch || info?.error }}>
+                {info?.branch || info?.error || '未检测到分支'}
+              </Text>
             </Space>
-            <Text type="secondary" ellipsis={{ tooltip: info?.repoRoot }}>
+
+            <Text ellipsis={{ tooltip: info?.repoRoot }} style={{ ...mutedTextStyle, fontSize: 12 }}>
               {info?.upstream ? `跟踪 ${info.upstream}` : info?.repoRoot ?? '等待仓库信息'}
             </Text>
           </Space>
@@ -256,100 +514,196 @@ const CommonFlow: React.FC = () => {
     );
   };
 
+  const renderDirectionNode = (title: string, info?: RepoGitInfo) => (
+    <div style={directionNodeStyle}>
+      <Space direction="vertical" size={5} style={{ width: '100%' }}>
+        <Text strong>{title}</Text>
+        <Space size={6}>
+          <BranchesOutlined />
+          <Text ellipsis={{ tooltip: info?.branch || info?.error }}>{info?.branch || info?.error || '未检测到分支'}</Text>
+        </Space>
+        <Text ellipsis={{ tooltip: info?.repoRoot }} style={{ ...mutedTextStyle, fontSize: 12 }}>
+          {info?.repoRoot ?? '等待仓库信息'}
+        </Text>
+      </Space>
+    </div>
+  );
+
+  const renderDataSection = (step: number) => (
+    <Card size="small" style={{ ...cardStyle, ...greenPanelStyle, marginBottom: 14 }} bodyStyle={{ padding: 16 }}>
+      <div style={sectionHeaderStyle}>
+        {renderStepTitle(step, 'Data 公共仓', '公共输入文件的集中维护位置')}
+        <Space size="small" wrap>
+          <Button size="small" icon={<CloudSyncOutlined />} loading={repoLoading} onClick={() => runAction('data', 'pull')}>
+            更新 Data 仓
+          </Button>
+          <Button size="small" icon={<FileSyncOutlined />} onClick={openSourceControl}>
+            打开 Git 面板
+          </Button>
+        </Space>
+      </div>
+
+      <Space size={12} wrap style={{ width: '100%', marginBottom: 16 }}>
+        {renderRepoCard('data', 1)}
+      </Space>
+
+      <Form layout="vertical" style={{ maxWidth: 920 }}>
+        <Form.Item label="Data Design Tree 路径">
+          <PathInput
+            state={dataDesignTree}
+            pathSources={['local']}
+            placeholder="请输入或选择 Data 仓中的 Design Tree 文件/目录"
+            showSelectFile
+            showOpen
+          />
+        </Form.Item>
+        <Form.Item label="Data 归一化表格路径" style={{ marginBottom: 0 }}>
+          <PathInput
+            state={dataNormTable}
+            pathSources={['local']}
+            placeholder="请输入或选择 Data 仓中的归一化表格文件"
+            showSelectFile
+            showOpen
+          />
+        </Form.Item>
+      </Form>
+    </Card>
+  );
+
+  const renderTargetSection = (step: number) => (
+    <Card size="small" style={{ ...cardStyle, ...warmPanelStyle, marginBottom: 14 }} bodyStyle={{ padding: 16 }}>
+      <div style={sectionHeaderStyle}>
+        {renderStepTitle(step, '目标流程仓', '选择 Hibist / Sailor / 验证仓，并配置接收文件路径')}
+        <Space size="small" wrap>
+          <Tooltip title={`更新${repoLabels[selectedRepo]}到远端最新版本`}>
+            <Button size="small" icon={<CloudSyncOutlined />} onClick={() => runAction(selectedRepo, 'pull')}>
+              更新目标仓
+            </Button>
+          </Tooltip>
+          <Button size="small" icon={<FileSyncOutlined />} onClick={openSourceControl}>
+            打开 Git 面板
+          </Button>
+        </Space>
+      </div>
+
+      <Space size={12} wrap style={{ width: '100%', marginBottom: 16 }}>
+        {renderRepoCard('hibist', 2)}
+        {renderRepoCard('sailor', 2)}
+        {renderRepoCard('verification', 2)}
+      </Space>
+
+      <Form layout="vertical" style={{ maxWidth: 920 }}>
+        <Form.Item label={`${targetName} Design Tree 路径`}>
+          <PathInput
+            state={targetDesignTree}
+            pathSources={['local']}
+            placeholder={`请输入或选择 ${targetName} 中的 Design Tree 文件/目录`}
+            showSelectFile
+            showOpen
+          />
+        </Form.Item>
+        <Form.Item label={`${targetName} 归一化表格路径`} style={{ marginBottom: 0 }}>
+          <PathInput
+            state={targetNormTable}
+            pathSources={['local']}
+            placeholder={`请输入或选择 ${targetName} 中的归一化表格文件`}
+            showSelectFile
+            showOpen
+          />
+        </Form.Item>
+      </Form>
+    </Card>
+  );
+
   const obsSpaceName = activeProject?.name ?? 'dft-ide-workspace';
 
   return (
     <Spin spinning={loading} tip="读取配置中...">
-      <div>
+      <div style={pageStyle}>
+
         {hasUnsaved && (
           <Alert
             showIcon
             type="warning"
             message="路径配置有本地改动，同步前会先保存 Common 配置。"
-            style={{ marginBottom: 12, borderRadius: 8 }}
+            style={{ marginBottom: 14, borderRadius: 10 }}
           />
         )}
 
-        <div
-          style={{
-            border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
-            borderRadius: 8,
-            padding: 14,
-            background: 'var(--vscode-editor-background)',
-          }}
-        >
-          <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 12 }} wrap>
-            <Text strong>同步目标</Text>
-            <Space size={4}>
-              <Tooltip title="刷新仓库状态">
-                <Button size="small" icon={<SyncOutlined />} loading={repoLoading} onClick={refreshRepoInfo} />
-              </Tooltip>
-              <Tooltip title="打开 VS Code Git 面板">
-                <Button size="small" icon={<FileSyncOutlined />} onClick={openSourceControl} />
-              </Tooltip>
-            </Space>
-          </Space>
-
-          <Space size={12} wrap style={{ width: '100%', marginBottom: 16 }}>
-            {renderRepoCard('design')}
-            {renderRepoCard('verification')}
-          </Space>
-
-          <Form layout="vertical" style={{ maxWidth: 840, margin: '0 auto' }}>
-            <Form.Item label="设计树路径">
-              <PathInput
-                state={designTree}
-                placeholder="请输入或选择设计树文件/目录"
-                showOpen
-                showSelectFolder
-              />
-            </Form.Item>
-
-            <Form.Item label="归一化表格路径">
-              <PathInput
-                state={normTable}
-                placeholder="请输入或选择归一化表格文件"
-                showOpen
-                showSelectFile
-              />
-            </Form.Item>
-
-            <CollapsibleSection title="OBS 存储与公共数据">
-              <Space size="small" wrap>
-                <Button icon={<DatabaseOutlined />} onClick={() => setObsViewerOpen(true)}>
-                  打开 OBS 查看器
-                </Button>
-                <Button icon={<CloudDownloadOutlined />}>下载公共数据</Button>
+        <Card size="small" style={{ ...cardStyle, ...accentPanelStyle, marginBottom: 14 }} bodyStyle={{ padding: 18 }}>
+          <div style={sectionHeaderStyle}>
+            <div>
+              <Space size={8} wrap>
+                <Tag style={sourceTagStyle}>SOURCE</Tag>
+                <Text strong>{sourceLabel}</Text>
+                <Text style={{ ...mutedTextStyle, fontWeight: 700 }}>→</Text>
+                <Tag style={targetTagStyle}>TARGET</Tag>
+                <Text strong>{targetLabel}</Text>
               </Space>
-            </CollapsibleSection>
-          </Form>
+              <div style={{ marginTop: 7 }}>
+                <Text style={{ ...mutedTextStyle, fontSize: 12 }}>切换方向后，下方源/目标区域和底部同步按钮会同步调转。</Text>
+              </div>
+            </div>
+            <Button size="middle" icon={<SwapOutlined />} onClick={toggleDirection} style={swapButtonStyle}>
+              切换方向
+            </Button>
+          </div>
 
-          <Divider style={{ margin: '18px 0 14px' }} />
+          <Space align="center" size={12} wrap style={{ width: '100%' }}>
+            {renderDirectionNode(sourceLabel, sourceInfo)}
+            <div style={directionArrowStyle}>
+              <ArrowRightOutlined />
+            </div>
+            {renderDirectionNode(targetLabel, targetInfo)}
+          </Space>
+        </Card>
 
+        {syncDirection === 'dataToTarget' ? (
+          <>
+            {renderDataSection(1)}
+            {renderTargetSection(2)}
+          </>
+        ) : (
+          <>
+            {renderTargetSection(1)}
+            {renderDataSection(2)}
+          </>
+        )}
+
+        <Card size="small" style={{ ...cardStyle, border: '1px solid rgba(22,119,255,0.35)' }} bodyStyle={{ padding: 16 }}>
           <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
-            <Space size={6}>
-              <BranchesOutlined />
-              <Text type="secondary">
-                当前同步到 {repoLabels[selectedRepo]} / {selectedInfo.branch || '未检测到分支'}
+            <Space direction="vertical" size={2}>
+              <Space size={6}>
+                <BranchesOutlined />
+                <Text strong>同步操作</Text>
+              </Space>
+              <Text style={mutedTextStyle}>
+                当前方向：{sourceLabel} → {targetLabel}
               </Text>
             </Space>
+
             <Space size="small" wrap>
-              <Tooltip title={`更新${repoLabels[selectedRepo]}到远端最新版本`}>
-                <Button icon={<CloudSyncOutlined />} onClick={() => runAction(selectedRepo, 'pull')}>
-                  更新
-                </Button>
-              </Tooltip>
               <Badge dot={hasUnsaved} offset={[-4, 4]}>
                 <Button icon={<SaveOutlined />} loading={saving} onClick={() => handleSave(collectFormData())}>
-                  保存配置
+                  保存路径配置
                 </Button>
               </Badge>
-              <Button type="primary" icon={<SyncOutlined />} loading={syncing} onClick={openSyncModal}>
-                同步到{repoShortLabels[selectedRepo]}
+              <Button
+                type="primary"
+                icon={<SyncOutlined />}
+                loading={confirmLoading}
+                onClick={openConfirmModal}
+                style={{
+                  fontWeight: 700,
+                  boxShadow: '0 6px 16px rgba(22,119,255,0.24)',
+                }}
+                disabled={syncDirection === 'targetToData' && !canManageMembers }
+              >
+                {primaryButtonText}
               </Button>
             </Space>
           </Space>
-        </div>
+        </Card>
 
         <ObsViewer open={obsViewerOpen} spaceName={obsSpaceName} onCancel={() => setObsViewerOpen(false)} />
 
@@ -357,30 +711,49 @@ const CommonFlow: React.FC = () => {
           title={
             <Space>
               <ExclamationCircleOutlined style={{ color: '#faad14' }} />
-              <span>确认同步到{repoLabels[selectedRepo]}</span>
+              <span>{confirmTitle}</span>
             </Space>
           }
-          open={syncModalOpen}
-          onCancel={() => setSyncModalOpen(false)}
-          confirmLoading={syncing}
-          onOk={confirmSync}
-          okText="确认同步并提交"
+          open={confirmModalOpen}
+          onCancel={() => setConfirmModalOpen(false)}
+          confirmLoading={confirmLoading}
+          onOk={confirmSyncByDirection}
+          okText={confirmOkText}
           cancelText="取消"
-          width={620}
+          width={700}
         >
           <Space direction="vertical" size={14} style={{ width: '100%' }}>
             <Alert
               type="warning"
               showIcon
-              message="同步会把 Common 中的设计树和归一化表格复制到目标仓库根目录；如果已有同名文件，会被覆盖。"
+              message={`本次操作方向为：${sourceLabel} → ${targetLabel}。如果目标位置已有同名文件，可能会被覆盖。`}
             />
+
             <div>
-              <Text strong>目标文件</Text>
+              <Text strong>文件映射预览</Text>
               <div style={{ marginTop: 8 }}>
-                {syncTargets.map((item) => (
-                  <div key={item.name} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-                    <Tag color="processing">{item.name}</Tag>
-                    <Text ellipsis={{ tooltip: item.path }}>{item.path}</Text>
+                {previewTargets.map((item) => (
+                  <div
+                    key={item.name}
+                    style={{
+                      border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
+                      borderRadius: 8,
+                      padding: 10,
+                      marginBottom: 8,
+                      background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))',
+                    }}
+                  >
+                    <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                      <Tag color="processing" style={{ width: 'fit-content' }}>
+                        {item.name}
+                      </Tag>
+                      <Text style={{ fontSize: 12 }} ellipsis={{ tooltip: item.from }}>
+                        From: {item.from}
+                      </Text>
+                      <Text style={{ fontSize: 12 }} ellipsis={{ tooltip: item.to }}>
+                        To: {item.to}
+                      </Text>
+                    </Space>
                   </div>
                 ))}
               </div>
@@ -411,7 +784,7 @@ const CommonFlow: React.FC = () => {
           cancelText="取消"
         >
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
-            <Text type="secondary">{repoLabels[branchModal.repo]}</Text>
+            <Text style={mutedTextStyle}>{repoLabels[branchModal.repo]}</Text>
             <Input
               autoFocus
               value={branchModal.value}

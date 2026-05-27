@@ -27,6 +27,16 @@ export interface GitInfo {
 }
 
 /**
+ * Git 提交信息
+ */
+export interface CommitInfo {
+  hash: string;
+  author: string;
+  date: string;
+  message: string;
+}
+
+/**
  * Git 变更文件
  */
 export interface GitChangedFile {
@@ -35,10 +45,15 @@ export interface GitChangedFile {
   type: GitFileChangeType;
 }
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * DFT IDE 使用的 Git 服务接口
  */
 export interface DftGitService {
+  initGitRepository(resource?: vscode.Uri): Promise<boolean>;
   getCurrentGitInfo(resource?: vscode.Uri): Promise<GitInfo | undefined>;
   getCurrentRepository(resource?: vscode.Uri): Promise<any | undefined>;
   getChangedFiles(resource?: vscode.Uri): Promise<GitChangedFile[]>;
@@ -52,6 +67,12 @@ export interface DftGitService {
   fetch(resource?: vscode.Uri): Promise<void>;
   checkout(branchName: string, resource?: vscode.Uri): Promise<void>;
   createBranch(branchName: string, checkout?: boolean, resource?: vscode.Uri): Promise<void>;
+  getBranches(resource?: vscode.Uri): Promise<string[]>;
+  mergeBranch(branchName: string, resource?: vscode.Uri): Promise<void>;
+  stashSave(message?: string, resource?: vscode.Uri): Promise<void>;
+  stashApply(stashName: string, resource?: vscode.Uri): Promise<void>;
+  getStashList(resource?: vscode.Uri): Promise<string[]>;
+  getCommitInfo(commitHash: string, resource?: vscode.Uri): Promise<CommitInfo | undefined>;
 }
 
 /**
@@ -189,6 +210,39 @@ function collectChangedFiles(repo: any): GitChangedFile[] {
  * 3. Webview 前端不要直接调用 Git，应该通过 extension.ts 转发到这里
  */
 export const gitService: DftGitService = {
+  async initGitRepository(resource?: vscode.Uri): Promise<boolean> {
+    try {
+      // 获取当前工作区根目录
+      const workspaceFolders = vscode.workspace.workspaceFolders;
+      if (!workspaceFolders || workspaceFolders.length === 0) {
+        vscode.window.showWarningMessage("No workspace folder is open.");
+        return false;
+      }
+      // 确定要初始化的目录
+      const targetUri = resource || workspaceFolders[0].uri;
+      const targetPath = targetUri.fsPath;
+
+      // 检查是否已经是 Git 仓库
+      const existingRepo = await getRepository(targetUri);
+      if (existingRepo) {
+        vscode.window.showInformationMessage(`Directory "${targetPath}" is already a Git repository.`);
+        return true;
+      }
+      // 执行 git init 命令
+      const result = await vscode.commands.executeCommand("git.init", targetUri);
+      if (result) {
+        vscode.window.showInformationMessage(`Git repository initialized successfully in "${targetPath}"`);
+        return true;
+      } else {
+        vscode.window.showErrorMessage(`Failed to initialize Git repository in "${targetPath}"`);
+        return false;
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error initializing Git repository: ${getErrorMessage(error)}`);
+      return false;
+    }
+  },
+
   /**
    * 获取当前 Git 仓库基础信息
    */
@@ -208,9 +262,7 @@ export const gitService: DftGitService = {
       repoRoot: repo.rootUri.fsPath,
       branch: head?.name,
       commit: head?.commit,
-      upstream: head?.upstream
-        ? `${head.upstream.remote}/${head.upstream.name}`
-        : undefined,
+      upstream: head?.upstream ? `${head.upstream.remote}/${head.upstream.name}` : undefined,
       hasChanges: changedFiles.length > 0,
       changedFiles,
     };
@@ -261,7 +313,7 @@ export const gitService: DftGitService = {
     if (!repo) {
       return false;
     }
-
+    await repo.status(); // 强制刷新状态
     const repoRoot = repo.rootUri.fsPath;
     const changedFiles = collectChangedFiles(repo);
 
@@ -270,9 +322,7 @@ export const gitService: DftGitService = {
         return p.replace(/\\/g, "/").toLowerCase();
       }
 
-      return vscode.Uri.joinPath(repo.rootUri, p).fsPath
-        .replace(/\\/g, "/")
-        .toLowerCase();
+      return vscode.Uri.joinPath(repo.rootUri, p).fsPath.replace(/\\/g, "/").toLowerCase();
     });
 
     return changedFiles.some((file) => {
@@ -325,7 +375,7 @@ export const gitService: DftGitService = {
       return;
     }
 
-    await repo.add(files);
+    await repo.add(files.map(uri => uri.fsPath));
   },
 
   /**
@@ -391,6 +441,45 @@ export const gitService: DftGitService = {
     await repo.fetch();
   },
 
+  async getBranches(resource?: vscode.Uri): Promise<string[]> {
+    const repo = await getRepository(resource);
+
+    if (!repo) {
+      vscode.window.showWarningMessage("No Git repository found.");
+      return [];
+    }
+
+    const branches = repo.state?.refUpdates || [];
+
+    return branches.filter((b: any) => b.name && b.type === "branch").map((b: any) => b.name);
+  },
+
+  /**
+   * 将指定分支合并到当前分支
+   */
+  async mergeBranch(branchName: string, resource?: vscode.Uri): Promise<void> {
+    const repo = await getRepository(resource);
+
+    if (!repo) {
+      vscode.window.showWarningMessage("No Git repository found.");
+      return;
+    }
+
+    const name = branchName.trim();
+
+    if (!name) {
+      vscode.window.showWarningMessage("Branch name cannot be empty.");
+      return;
+    }
+
+    try {
+      await repo.merge(name);
+      vscode.window.showInformationMessage(`Branch "${name}" merged successfully.`);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to merge branch "${name}":${getErrorMessage(error)}`);
+    }
+  },
+
   /**
    * 切换分支
    */
@@ -415,11 +504,7 @@ export const gitService: DftGitService = {
   /**
    * 创建分支
    */
-  async createBranch(
-    branchName: string,
-    checkout = true,
-    resource?: vscode.Uri
-  ): Promise<void> {
+  async createBranch(branchName: string, checkout = true, resource?: vscode.Uri): Promise<void> {
     const repo = await getRepository(resource);
 
     if (!repo) {
@@ -436,4 +521,108 @@ export const gitService: DftGitService = {
 
     await repo.createBranch(name, checkout);
   },
+
+  /**
+   * 保存当前工作区的修改为 stash
+   */
+  async stashSave(message?: string, resource?: vscode.Uri): Promise<void> {
+    const repo = await getRepository(resource);
+
+    if (!repo) {
+      vscode.window.showWarningMessage("No Git repository found.");
+      return;
+    }
+
+    try {
+      await repo.stashSave(message);
+      vscode.window.showInformationMessage("Changes have been stashed.");
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to stash changes: ${getErrorMessage(error)}`);
+    }
+  },
+
+  /**
+   * 应用指定的 stash
+   */
+  async stashApply(stashName: string, resource?: vscode.Uri): Promise<void> {
+    const repo = await getRepository(resource);
+
+    if (!repo) {
+      vscode.window.showWarningMessage("No Git repository found.");
+      return;
+    }
+
+    const name = stashName.trim();
+
+    if (!name) {
+      vscode.window.showWarningMessage("Stash name cannot be empty.");
+      return;
+    }
+
+    try {
+      await repo.stashApply(name);
+      vscode.window.showInformationMessage(`Stash "${name}" applied successfully.`);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to apply stash "${name}":${getErrorMessage(error)}`);
+    }
+  },
+
+  /**
+   * 获取当前仓库的 stash 列表
+   */
+  async getStashList(resource?: vscode.Uri): Promise<string[]> {
+    const repo = await getRepository(resource);
+
+    if (!repo) {
+      vscode.window.showWarningMessage("No Git repository found.");
+      return [];
+    }
+
+    try {
+      const stashes = await repo.stashList();
+      return stashes.map((s: any) => s.name);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to get stash list: ${getErrorMessage(error)}`);
+      return [];
+    }
+  },
+
+
+  /**
+   * 获取某个提交的详细信息
+   */
+  async getCommitInfo(commitHash: string, resource?: vscode.Uri): Promise<CommitInfo | undefined> {
+    const repo = await getRepository(resource);
+
+    if (!repo) {
+      vscode.window.showWarningMessage("No Git repository found.");
+      return undefined;
+    }
+
+    const hash = commitHash.trim();
+
+    if (!hash) {
+      vscode.window.showWarningMessage("Commit hash cannot be empty.");
+      return undefined;
+    }
+
+    try {
+      const commit = await repo.getCommit(hash);
+
+      if (!commit) {
+        vscode.window.showWarningMessage(`Commit "${hash}" not found.`);
+        return undefined;
+      }
+
+      return {
+        hash: commit.hash,
+        author: commit.author,
+        date: commit.date,
+        message: commit.message,
+      };
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to get commit info for "${hash}":${getErrorMessage(error)}`);
+      return undefined;
+    }
+  }
 };

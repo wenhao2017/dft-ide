@@ -16,7 +16,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { message } from 'antd';
-import { saveConfig, readConfig, syncGit } from '../utils/ipc';
+import { saveConfig, readConfig, syncGit, RepoKey } from '../utils/ipc';
 import useWizardStore from '../store/wizardStore';
 
 type FlowType = string;
@@ -27,6 +27,8 @@ export interface FlowConfigState {
   /** 是否正在加载配置 */
   loading: boolean;
   /** 是否正在保存中 */
+  uploading: boolean;
+  /** 是否正在反向同步中 */
   saving: boolean;
   /** 是否正在同步 Git */
   syncing: boolean;
@@ -63,6 +65,7 @@ export interface FlowConfigState {
 export function useFlowConfig(flow: FlowType): FlowConfigState {
   const [savedData, setSavedData] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [hasUnsaved, setHasUnsaved] = useState(false);
@@ -193,5 +196,5 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
     }
   }, [flow, clearDirtyStore]);
 
-  return { savedData, loading, saving, syncing, hasUnsaved, handleSave, debouncedSave, handleSync, markDirty };
+  return { savedData, loading, uploading, saving, syncing, hasUnsaved, handleSave, debouncedSave, handleSync, markDirty };
 }

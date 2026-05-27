@@ -34,12 +34,16 @@ import {
 const { Text, Title } = Typography;
 
 const repoLabels: Record<RepoKey, string> = {
-  design: 'Design',
+  data: 'Data',
+  hibist: 'Hibist',
+  sailor: 'Sailor',
   verification: 'Verification',
 };
 
 const defaultMessages: Record<RepoKey, string> = {
-  design: 'Update design flow configuration',
+  data: 'Update common data artifacts',
+  hibist: 'Update Hibist flow configuration',
+  sailor: 'Update Sailor flow configuration',
   verification: 'Update verification flow configuration',
 };
 

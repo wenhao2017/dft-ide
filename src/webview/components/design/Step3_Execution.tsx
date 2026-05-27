@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Form, Button, Tabs, Alert, Space, Typography } from 'antd';
+import { Form, Button, Tabs, Alert, Space, Typography, Divider, Row, Card, Col, Steps } from 'antd';
 import { LeftOutlined, RightOutlined, CodeOutlined } from '@ant-design/icons';
 import { useVscodePath } from '../../hooks/useVscodePath';
 import PathInput from '../shared/PathInput';
@@ -56,66 +56,86 @@ const ExecutionLaunch: React.FC<{
 };
 
 const Step3Execution: React.FC<Props> = ({ onNext, onPrev }) => {
-  const [activeTab, setActiveTab] = useState('gen');
+  const [currentStep, setCurrentStep] = useState(0);
   const gvinPath = useVscodePath();
   const makefilePath = useVscodePath();
   const checkPath = useVscodePath();
 
-  const renderScriptGen = () => (
-    <Form layout="horizontal" labelCol={{ span: 5 }} wrapperCol={{ span: 19 }} style={{ padding: '16px 0' }}>
-      <div style={{ marginBottom: 24 }}>
-        <Alert message="如需覆盖默认配置，可选择自定义脚本或配置文件。" type="info" showIcon />
-      </div>
-
-      <Form.Item label="gvin / make_env">
-        <PathInput state={gvinPath} placeholder="路径..." showSelectFile showOpen />
-      </Form.Item>
-
-      <Form.Item label="Makefile" style={{ marginBottom: 16 }}>
-        <PathInput state={makefilePath} placeholder="路径..." showSelectFile showOpen />
-      </Form.Item>
-
-      <Form.Item label="Check">
-        <PathInput state={checkPath} placeholder="路径..." showSelectFile showOpen />
-      </Form.Item>
-
-      <ExecutionLaunch
-        title="DFT Design Script Generation"
-        command="make gen_design_scripts"
-        description="脚本生成应由 VS Code 终端执行，便于团队接入真实工具链。"
-      />
-    </Form>
+  const renderExecution = () => (
+    <Space direction='vertical' style={{ width: '100%' }}>
+      <Row gutter={10}>
+        <Col span={6}>
+          <Card style={{ color: currentStep != 0 ? 'rgba(255,255,255,0.25)': ''}}>
+            <p>参数校验</p>
+            <p>创建目录</p>
+            <p>任务编排</p>
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card style={{ color: currentStep != 1 ? 'rgba(255,255,255,0.25)': ''}}>
+            <p>gen_sailor_cfg</p>
+            <p>gen_analysis_env</p>
+            <p>run_job</p>
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card style={{ color: currentStep != 2 ? 'rgba(255,255,255,0.25)': ''}}>
+            <p>执行结果1</p>
+            <p>执行结果2</p>
+            <p>执行结果3</p>
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card style={{ color: currentStep != 3 ? 'rgba(255,255,255,0.25)': ''}}>
+            <p>公共后处理</p>
+            <p>工具后处理</p>
+          </Card>
+        </Col>
+      </Row >
+      <section
+        style={{
+            border: '1px solid var(--vscode-panel-border, #e5e7eb)',
+            borderRadius: 8,
+            padding: 16,
+            minHeight: 100,
+            background: 'color-mix(in srgb, var(--vscode-editor-background, #fff) 96%, var(--vscode-focusBorder, #1677ff))',
+          }}
+        >
+      </section>
+    </Space>
   );
 
   return (
     <div>
-      <Tabs
-        activeKey={activeTab}
-        onChange={setActiveTab}
-        type="line"
+      <Steps
+        style={{ marginBottom: 10 }}
+        current={currentStep}
+        onChange={setCurrentStep}
+        type={'navigation'}
+        responsive
+        size="small"
         items={[
-          { key: 'gen', label: '脚本生成', children: renderScriptGen() },
-          {
-            key: 'exec',
-            label: '执行',
-            children: (
-              <ExecutionLaunch
-                title="DFT Design Execution"
-                command="make run_design"
-                description="准备开始执行设计流程。"
-              />
-            ),
-          },
+          { title: '环境初始化' },
+          { title: '设计执行' },
+          { title: '结果分析' },
+          { title: '后处理', },
         ]}
       />
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 24 }}>
-        <Button onClick={onPrev} icon={<LeftOutlined />}>
-          上一页
-        </Button>
-        <Button type="primary" onClick={onNext}>
-          下一页 <RightOutlined />
-        </Button>
+      <div className="dft-flow-card">
+        <div style={{ width: '100%', minWidth: 0 }}>{renderExecution()}</div>
       </div>
+
+      <Divider style={{ margin: '18px 0 14px' }} />
+      <Space style={{ width: '100%', justifyContent: 'flex-end' }} wrap>
+        <Space size="small" wrap>
+          <Button onClick={onPrev} icon={<LeftOutlined />}>
+            上一页
+          </Button>
+          <Button type="primary" onClick={onNext}>
+            下一页 <RightOutlined />
+          </Button>
+        </Space>
+      </Space>
     </div>
   );
 };

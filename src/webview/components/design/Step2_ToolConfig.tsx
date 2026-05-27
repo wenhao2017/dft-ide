@@ -3,7 +3,6 @@ import {
   Form,
   Input,
   Button,
-  Space,
   Radio,
   Typography,
   Select,
@@ -30,9 +29,11 @@ interface Props {
   onNext: () => void;
   onPrev: () => void;
   moduleKey?: string;
+  category: string;
 }
 
-const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey }) => {
+const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category }) => {
+  const flowKey = category.toLowerCase();
   const [activeTab, setActiveTab] = useState('task');
   const [taskForm] = Form.useForm();
   const [designForm] = Form.useForm();
@@ -41,7 +42,7 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey }) => {
   // 注意：Step2 与 Step1 同属 design flow，但字段不同，合并到同一个文件中
   // 这里使用独立 key 区分：step2_task / step2_design
   const { savedData, loading, saving, hasUnsaved, handleSave } =
-    useFlowConfig(moduleKey ? `design/${moduleKey}/config` : 'design');
+    useFlowConfig(moduleKey ? `${flowKey}/${moduleKey}/config` : flowKey);
 
   // 回填：从文件读到 savedData 后填入表单
   useEffect(() => {

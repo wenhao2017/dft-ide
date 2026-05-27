@@ -7,6 +7,8 @@ dist/**
 deploy/**
 *.vsix
 *.log
+.env
+**/.env
 build.log
 tsconfig.json
 package-lock.json

@@ -1,13 +1,16 @@
-export type ProjectRepoKey = 'data' | 'design' | 'verification';
+export type ProjectRepoKey = 'data' | 'hibist' | 'sailor' | 'verification';
 
 export interface ProjectRepoStatus {
   key: ProjectRepoKey;
   gitlabProjectName: string;
+  http_url_to_repo?: string;
   status: 'ready' | 'missing' | 'unknown';
+  name?: string;
 }
 
 export interface DftProject {
   id: string;
+  ctmp_id?: number;
   name: string;
   rootPath: string;
   owner: string;
@@ -17,6 +20,7 @@ export interface DftProject {
   stage: string;
   description: string;
   repos: ProjectRepoStatus[];
+  local_root?: string;
 }
 
 export interface ProjectDashboard {
@@ -38,7 +42,8 @@ const mockProjects: DftProject[] = [
     description: '主芯片 DFT 配置、设计流程与验证数据。',
     repos: [
       { key: 'data', gitlabProjectName: 'Apollo-DFT_data', status: 'ready' },
-      { key: 'design', gitlabProjectName: 'Apollo-DFT_design', status: 'ready' },
+      { key: 'hibist', gitlabProjectName: 'Apollo-DFT_hibist', status: 'ready' },
+      { key: 'sailor', gitlabProjectName: 'Apollo-DFT_sailor', status: 'ready' },
       { key: 'verification', gitlabProjectName: 'Apollo-DFT_verification', status: 'ready' },
     ],
   },
@@ -53,7 +58,8 @@ const mockProjects: DftProject[] = [
     description: 'MBIST 环境配置、仿真用例和报告归档。',
     repos: [
       { key: 'data', gitlabProjectName: 'Nova-MBIST_data', status: 'ready' },
-      { key: 'design', gitlabProjectName: 'Nova-MBIST_design', status: 'ready' },
+      { key: 'hibist', gitlabProjectName: 'Nova-MBIST_hibist', status: 'ready' },
+      { key: 'sailor', gitlabProjectName: 'Nova-MBIST_sailor', status: 'ready' },
       { key: 'verification', gitlabProjectName: 'Nova-MBIST_verification', status: 'ready' },
     ],
   },
@@ -68,7 +74,8 @@ const mockProjects: DftProject[] = [
     description: '回归任务配置、集群资源和日志入口。',
     repos: [
       { key: 'data', gitlabProjectName: 'Atlas-Regression_data', status: 'ready' },
-      { key: 'design', gitlabProjectName: 'Atlas-Regression_design', status: 'ready' },
+      { key: 'hibist', gitlabProjectName: 'Atlas-Regression_hibist', status: 'ready' },
+      { key: 'sailor', gitlabProjectName: 'Atlas-Regression_sailor', status: 'ready' },
       { key: 'verification', gitlabProjectName: 'Atlas-Regression_verification', status: 'ready' },
     ],
   },
@@ -86,7 +93,7 @@ export interface ProjectMember {
 
 export interface ProjectMembersResponse {
   members: ProjectMember[];
-  canManage: boolean;
+  canManage?: boolean;
 }
 
 const mockProjectMembers: Record<string, ProjectMember[]> = {
@@ -106,7 +113,13 @@ const mockProjectMembers: Record<string, ProjectMember[]> = {
 };
 
 export function canManageProjectMembers(project: DftProject): boolean {
-  return project.canManageMembers ?? project.role.toUpperCase() === 'DFTM';
+  return project.id !== '0' && (project.canManageMembers ?? project.role?.toUpperCase() === 'DFTM');
+}
+
+function normalizeProjectRepoKey(value: unknown): ProjectRepoKey | null {
+  return value === 'data' || value === 'hibist' || value === 'sailor' || value === 'verification'
+    ? value
+    : null;
 }
 
 function getApiBase(): string | null {
@@ -114,7 +127,31 @@ function getApiBase(): string | null {
   return configured?.replace(/\/$/, '') ?? null;
 }
 
-export async function fetchProjectDashboard(): Promise<ProjectDashboard> {
+export async function initProject(project: DftProject): Promise<boolean> {
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    return false;
+  }
+
+  const response = await fetch(`${apiBase}/api/dft-ide/project/init`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      project_name: project.name,
+      ctmp_id: project.ctmp_id,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Project init failed: ${response.status}`);
+  }
+
+  return true;
+}
+
+export async function fetchProjectDashboard(currentUser:string | null): Promise<ProjectDashboard> {
   const apiBase = getApiBase();
   if (!apiBase) {
     return {
@@ -124,12 +161,55 @@ export async function fetchProjectDashboard(): Promise<ProjectDashboard> {
     };
   }
 
-  const response = await fetch(`${apiBase}/api/dft-ide/projects/dashboard`);
+  if (!currentUser) {
+    return {
+      projects: [],
+      currentProjectId: '',
+      currentUser: '',
+    };
+  }
+
+  // const response = await fetch(`${apiBase}/api/dft-ide/projects/dashboard`);
+  const url = new URL(`${apiBase}/api/dft-ide/projects/`);
+  url.searchParams.append('user_id', currentUser);
+  const response = await fetch(url);
+
   if (!response.ok) {
     throw new Error(`Project API failed: ${response.status}`);
   }
 
-  return response.json() as Promise<ProjectDashboard>;
+  // return response.json() as Promise<ProjectDashboard>;
+  const data = await response.json();
+  const projectDashboard: ProjectDashboard = {
+    projects: data.projects.map((project:DftProject) => ({
+      id: project.id.toString(),
+      ctmp_id: project.ctmp_id,
+      name: project.name,
+      role: project.role,
+      rootPath: project.rootPath || '',
+      local_root: project.local_root,
+      owner: project.owner || '',
+      canManageMembers: canManageProjectMembers(project),
+      updatedAt: project.updatedAt || '',
+      stage: project.stage || '',
+      description: project.description || '',
+      repos: (project.repos || [])
+        .map((repo): ProjectRepoStatus | null => {
+          const key = normalizeProjectRepoKey(repo.key);
+          if (!key) return null;
+          return {
+            ...repo,
+            key,
+            gitlabProjectName: repo.gitlabProjectName || repo.name || '',
+          };
+        })
+        .filter((repo): repo is ProjectRepoStatus => Boolean(repo)),
+    })),
+    currentProjectId: data.currentProjectId || (data.projects.length > 0 ? data.projects[0].id : null),
+    currentUser: currentUser,
+  };
+
+  return projectDashboard;
 }
 
 export async function selectProject(projectId: string): Promise<DftProject> {
@@ -167,7 +247,13 @@ export async function fetchProjectMembers(projectId: string): Promise<ProjectMem
     throw new Error(`Fetch project members failed: ${response.status}`);
   }
 
-  return response.json() as Promise<ProjectMembersResponse>;
+  // return response.json() as Promise<ProjectMembersResponse>;
+  const data = await response.json();
+  const projectMembers: ProjectMembersResponse = {
+    members: data as ProjectMember[],
+  };
+
+  return projectMembers;
 }
 
 export async function addProjectMember(projectId: string, member: ProjectMember): Promise<ProjectMember> {
@@ -182,7 +268,7 @@ export async function addProjectMember(projectId: string, member: ProjectMember)
     return next;
   }
 
-  const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/members`, {
+  const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/members/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(member),
@@ -203,7 +289,7 @@ export async function updateProjectMember(projectId: string, employeeId: string,
     return next;
   }
 
-  const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/members/${encodeURIComponent(employeeId)}`, {
+  const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/members/${encodeURIComponent(employeeId)}/`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(member),
@@ -220,6 +306,9 @@ export async function deleteProjectMember(projectId: string, employeeId: string)
   if (!apiBase) {
     const members = mockProjectMembers[projectId] ?? [];
     const target = members.find((item) => item.employeeId === employeeId);
+    if (!target) {
+      throw new Error('Project member not found');
+    }
     if (target?.ctmp) {
       throw new Error('CTMP member cannot be deleted');
     }
@@ -227,7 +316,7 @@ export async function deleteProjectMember(projectId: string, employeeId: string)
     return { success: true };
   }
 
-  const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/members/${encodeURIComponent(employeeId)}`, {
+  const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/members/${encodeURIComponent(employeeId)}/`, {
     method: 'DELETE',
   });
   if (!response.ok) {
@@ -265,4 +354,23 @@ export async function uploadExecutionData(projectId: string, data: ExecutionData
   }
 
   return response.json() as Promise<{ success: boolean; id?: string }>;
+}
+
+export async function updateProjectRootPath(projectId: string, employeeId: string, porjectRootPath : string): Promise<{ success: boolean }> {
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    console.log('[Mock] Uploading ProjectRootPath data for project:', projectId, porjectRootPath);
+    return { success: true };
+  }
+
+  const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/members/${encodeURIComponent(employeeId)}/local_root/`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ local_root: porjectRootPath }),
+  });
+  if (!response.ok) {
+    throw new Error(`Update project rootPath failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<{ success: boolean}>;
 }

@@ -7,6 +7,7 @@
  */
 
 import vscode from './vscode';
+import { DftProject } from '../services/projectService';
 
 let _reqId = 0;
 /** 等待响应的 Promise 回调池：key = `{command}Response:{requestId}` */
@@ -53,6 +54,14 @@ function ipcRequest(
 }
 
 // ─── 公开 API ──────────────────────────────────────────────
+
+/**
+ * 获取当前用户
+ */
+export async function getCurrentUser(): Promise<string> {
+  const res = await ipcRequest('getCurrentUser')
+  return res.user ? res.user as string : '';
+}
 
 /**
  * 获取当前环境的 Git 信息 (分支、修改状态等)
@@ -146,13 +155,13 @@ export async function readConfig(
   return res.data as Record<string, unknown> ?? null;
 }
 
-export async function readDesignTree(flow?: 'design' | 'verification'): Promise<Record<string, unknown> | null> {
+export async function readDesignTree(flow?: 'hibist' | 'sailor' | 'verification'): Promise<Record<string, unknown> | null> {
   const res = await ipcRequest('readDesignTree', flow ? { flow } : {});
   if (res.error) return null;
   return res.data as Record<string, unknown> ?? null;
 }
 
-export type RepoKey = 'design' | 'verification';
+export type RepoKey = 'data' | 'hibist' | 'sailor' | 'verification';
 
 export interface RepoGitInfo {
   repo: RepoKey;
@@ -252,6 +261,7 @@ export interface LocalConfigInfo {
   defaultPath: string | null;
   isDefault: boolean;
   error?: string;
+  lastSelectedProject?: string;
 }
 
 export async function getLocalConfigInfo(): Promise<LocalConfigInfo> {
@@ -264,6 +274,13 @@ export async function setLocalConfigPath(
 ): Promise<{ success: boolean; error?: string } & LocalConfigInfo> {
   const res = await ipcRequest('setLocalConfigPath', { path });
   return res as unknown as { success: boolean; error?: string } & LocalConfigInfo;
+}
+
+export async function enterProjectWorkspace(
+  project: DftProject
+): Promise<{ success: boolean; projectPath?: string; error?: string }> {
+  const res = await ipcRequest('enterProjectWorkspace', { project }, 300_000);
+  return res as unknown as { success: boolean; projectPath?: string; error?: string };
 }
 
 /**

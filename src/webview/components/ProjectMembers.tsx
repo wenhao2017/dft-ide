@@ -33,6 +33,7 @@ import {
   ProjectMemberRole,
   updateProjectMember,
 } from '../services/projectService';
+import dayjs from 'dayjs';
 
 const { Text, Title } = Typography;
 
@@ -72,7 +73,6 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
     try {
       const data = await fetchProjectMembers(project.id);
       setMembers(data.members);
-      setCanManage(data.canManage);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : '成员列表加载失败');
@@ -180,7 +180,7 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
       dataIndex: 'updatedAt',
       key: 'updatedAt',
       ellipsis: true,
-      render: (value?: string) => value || '-',
+      render: (value?: string) => dayjs(value).format('YYYY-MM-DD HH:mm:ss') || '-',
     },
     {
       title: '操作',
@@ -294,7 +294,7 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
         confirmLoading={saving}
         destroyOnClose
       >
-        <Form form={form} layout="vertical" preserve={false}>
+        <Form form={form} layout="vertical" preserve={true}>
           <Form.Item
             label="工号"
             name="employeeId"

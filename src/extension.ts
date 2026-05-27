@@ -1,8 +1,12 @@
 import * as vscode from 'vscode';
+import {exec, execFile} from 'child_process'
 import * as path from 'path';
+import * as fs from 'fs';
+import * as dotenv from 'dotenv';
 import { submitJob, queryJobStatus } from './services/donauService';
 import { gitService } from './services/gitService';
 import { obsService } from './services/obsService';
+import { DftProject } from './webview/services/projectService';
 
 const VIEW_TYPE = 'dftIde.welcome';
 const GLOBAL_KEY = 'dftIde.hasShownWelcome';
@@ -10,7 +14,7 @@ const LAYOUT_BACKUP_KEY = 'dftIde.layout.previousSettings';
 const LOCAL_STATE_DIR_NAME = '.dft-ide';
 const LOCAL_STATE_SUBDIR = 'local-state';
 const OBS_READONLY_SCHEME = 'dft-obs-readonly';
-const PROJECT_REPOS = ['data', 'design', 'verification'] as const;
+const PROJECT_REPOS = ['data', 'hibist', 'sailor', 'verification'] as const;
 
 let currentPanel: vscode.WebviewPanel | undefined = undefined;
 let activeCategory: string | undefined = undefined;
@@ -21,6 +25,16 @@ const dftDiagnostics = vscode.languages.createDiagnosticCollection('dft-ide');
 const activeJobTimers = new Map<string, ReturnType<typeof setInterval>>();
 
 export function activate(context: vscode.ExtensionContext) {
+  const isDev = context.extensionMode === vscode.ExtensionMode.Development;
+
+  if (isDev) {
+    const envPath = path.join(context.extensionPath, '.env');
+
+    if (fs.existsSync(envPath)) {
+      dotenv.config({ path: envPath });
+    }
+  }
+
   context.subscriptions.push(dftDiagnostics);
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(OBS_READONLY_SCHEME, {
@@ -90,7 +104,52 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand('dftIde.whoami', async function (): Promise<string> {
+      const stdout = await executeShellCommand("whoami");
+      return stdout.split('\\')[1].trim();
+    })
+  );
+
   void initializeDftWorkbench(context);
+}
+
+async function executeShellCommand(command: string, workDir?: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const options = workDir ? { cwd: workDir } : {};
+    exec(command, options, (error, stdout, stderr) => {
+      if (error) {
+        vscode.window.showErrorMessage(`Error: ${error.message}`);
+        reject(error);
+        return;
+      }
+      if (stderr && stderr.includes('error')) {
+        vscode.window.showErrorMessage(`stderr: ${stderr}`);
+        reject(new Error(stderr));
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
+async function executeFileCommand(command: string, args: string[], workDir?: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const options = workDir ? { cwd: workDir } : {};
+    execFile(command, args, options, (error, stdout, stderr) => {
+      if (error) {
+        vscode.window.showErrorMessage(`Error: ${error.message}`);
+        reject(error);
+        return;
+      }
+      if (stderr && stderr.toLowerCase().includes('error')) {
+        vscode.window.showErrorMessage(`stderr: ${stderr}`);
+        reject(new Error(stderr));
+        return;
+      }
+      resolve(stdout);
+    });
+  });
 }
 
 async function initializeDftWorkbench(context: vscode.ExtensionContext): Promise<void> {
@@ -231,12 +290,20 @@ const FLOW_CONFIGS: FlowMenuConfig[] = [
     contextValue: 'dftFlow.common',
   },
   {
-    label: 'Design',
-    icon: 'symbol-color',
+    label: 'Hibist',
+    icon: 'rocket',
+    description: 'hibist · DCG',
+    tooltip: 'Hibist Flow\n─────────────────\n• 公共配置 & 工具版本选择\n• 执行流程 (DCG / DC / TOP-DOWN)\n• 集群资源 (CPU / 内存 / 队列)\n• 宏定义 & 特殊参数\n• 执行日志 & 结果查看\n• 端云协同提交',
+    category: 'Hibist',
+    contextValue: 'dftFlow.hibist',
+  },
+  {
+    label: 'Sailor',
+    icon: 'bell',
     description: 'hibist · sailor · DCG',
-    tooltip: 'Design Flow\n─────────────────\n• 公共配置 & 工具版本选择\n• 执行流程 (DCG / DC / TOP-DOWN)\n• 集群资源 (CPU / 内存 / 队列)\n• 宏定义 & 特殊参数\n• 执行日志 & 结果查看\n• 端云协同提交',
-    category: 'Design',
-    contextValue: 'dftFlow.design',
+    tooltip: 'Sailor Flow\n─────────────────\n• 公共配置 & 工具版本选择\n• 执行流程 (DCG / DC / TOP-DOWN)\n• 集群资源 (CPU / 内存 / 队列)\n• 宏定义 & 特殊参数\n• 执行日志 & 结果查看\n• 端云协同提交',
+    category: 'Sailor',
+    contextValue: 'dftFlow.sailor',
   },
   {
     label: 'Verification',
@@ -304,8 +371,9 @@ class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
 /** 每个 category 对应的 Tab 标题 */
 const CATEGORY_TITLES: Record<string, string> = {
   HOME: 'DFT IDE — 主页',
-  Common: 'DFT IDE — 公共配置',
-  Design: 'DFT IDE — Design Flow',
+  COMMON: 'DFT IDE — 公共配置',
+  Hibist: 'DFT IDE — Hibist Flow',
+  Sailor: 'DFT IDE — Sailor Flow',
   Verification: 'DFT IDE — Verification Flow',
   Formal: 'DFT IDE — Formal',
   STA: 'DFT IDE — STA',
@@ -369,7 +437,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         }
         return;
       }
-      
+
       case 'webviewReady':
         if (pendingWebviewCommand) {
           currentPanel?.webview.postMessage(pendingWebviewCommand);
@@ -386,6 +454,25 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         await context.globalState.update(GLOBAL_KEY, false);
         vscode.window.showInformationMessage('已重置欢迎页状态，下次启动会再次弹出。');
         return;
+
+      case 'getCurrentUser': {
+        const requestId: string = msg.requestId;
+        try {
+          const user = await vscode.commands.executeCommand('dftIde.whoami');
+          currentPanel?.webview.postMessage({
+            command: 'getCurrentUserResponse',
+            requestId,
+            user: user
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'getCurrentUserResponse',
+            requestId,
+            error: String(err)
+          });
+        }
+        return;
+      }
 
       // ── 新增：选择文件/目录路径 ──────────────────────────────
       case 'selectPath': {
@@ -413,7 +500,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         try {
           const uri = vscode.Uri.file(filePath);
           const stat = await vscode.workspace.fs.stat(uri);
-          
+
           if (stat.type === vscode.FileType.Directory) {
             // 如果是目录，则在系统的文件管理器中打开
             await vscode.commands.executeCommand('revealFileInOS', uri);
@@ -643,7 +730,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         const requestId: string = msg.requestId;
         try {
           const repos = await Promise.all(
-            (['design', 'verification'] as const).map((repo) => getRepoGitInfoForWebview(repo))
+            (['hibist', 'sailor', 'data', 'verification'] as const).map((repo) => getRepoGitInfoForWebview(repo))
           );
           currentPanel?.webview.postMessage({
             command: 'getProjectRepoGitInfoResponse',
@@ -747,7 +834,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             requestId,
             success: false,
             state: 'error',
-            repo: typeof msg.repo === 'string' ? msg.repo : 'design',
+            repo: typeof msg.repo === 'string' ? msg.repo : 'hibist',
             error: error instanceof Error ? error.message : String(error)
           });
         }
@@ -897,7 +984,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
 
       case 'saveDesignTree': {
         const requestId: string = msg.requestId;
-        const flow = String(msg.flow ?? 'design');
+        const flow = String(msg.flow ?? 'hibist');
         const data = msg.data as Record<string, unknown>;
         try {
           const result = await saveDesignTreeState(flow, data);
@@ -927,7 +1014,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         const normTable = typeof msg.normTable === 'string' ? msg.normTable.trim() : '';
         try {
           if (!targetRepo) {
-            throw new Error('Please choose Design or Verification repository.');
+            throw new Error('Please choose Hibist or Sailor or Data or Verification repository.');
           }
           const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
           const commitMessage = customMsg || `feat(dft-ide): sync common artifacts to ${targetRepo} [${now}]`;
@@ -990,9 +1077,31 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
+      case 'enterProjectWorkspace': {
+        const requestId: string = msg.requestId;
+        const project = msg.project;
+        try {
+          const projectPath = await initProjectWorkspace(project);
+          currentPanel?.webview.postMessage({
+            command: 'enterProjectWorkspaceResponse',
+            requestId,
+            success: true,
+            projectPath: projectPath
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'enterProjectWorkspaceResponse',
+            requestId,
+            success: false,
+            error: String(err)
+          });
+        }
+        return;
+      }
+
       case 'syncGit': {
         const requestId: string = msg.requestId;
-        const flow    = msg.flow as 'common' | 'design' | 'verification';
+        const flow    = msg.flow as 'common' | 'hibist' | 'sailor' | 'data' | 'verification';
         const push    = Boolean(msg.push);
         const customMsg = typeof msg.message === 'string' ? msg.message : undefined;
         try {
@@ -1160,13 +1269,15 @@ async function createProject(): Promise<void> {
   const projectRoot = vscode.Uri.joinPath(selectedRoot, 'dft-ide-workspace');
 
   const legacyRoot = vscode.Uri.joinPath(projectRoot, 'data');
-  const designRoot = vscode.Uri.joinPath(projectRoot, 'design');
+  const hibistRoot = vscode.Uri.joinPath(projectRoot, 'hibist');
+  const sailorRoot = vscode.Uri.joinPath(projectRoot, 'sailor');
   const verificationRoot = vscode.Uri.joinPath(projectRoot, 'verification');
   const dataRoot = vscode.Uri.joinPath(projectRoot, 'data');
 
   await vscode.workspace.fs.createDirectory(projectRoot);
   await vscode.workspace.fs.createDirectory(legacyRoot);
-  await vscode.workspace.fs.createDirectory(designRoot);
+  await vscode.workspace.fs.createDirectory(hibistRoot);
+  await vscode.workspace.fs.createDirectory(sailorRoot);
   await vscode.workspace.fs.createDirectory(verificationRoot);
   await vscode.workspace.fs.createDirectory(dataRoot);
 
@@ -1176,8 +1287,13 @@ async function createProject(): Promise<void> {
   );
 
   await vscode.workspace.fs.writeFile(
-    vscode.Uri.joinPath(designRoot, 'design.cfg.json'),
+    vscode.Uri.joinPath(hibistRoot, 'hibist.cfg.json'),
     Buffer.from(JSON.stringify({ tool: 'hibist', stage: '85' }, null, 2))
+  );
+
+  await vscode.workspace.fs.writeFile(
+    vscode.Uri.joinPath(sailorRoot, 'sailor.cfg.json'),
+    Buffer.from(JSON.stringify({ tool: 'sailor', stage: '85' }, null, 2))
   );
 
   await vscode.workspace.fs.writeFile(
@@ -1207,7 +1323,8 @@ async function createProject(): Promise<void> {
   const workspaceFile = vscode.Uri.joinPath(projectRoot, 'dft-ide.code-workspace');
   const workspaceContent = {
     folders: [
-      { name: 'design', path: 'design' },
+      { name: 'hibist', path: 'hibist' },
+      { name: 'sailor', path: 'sailor' },
       { name: 'verification', path: 'verification' },
       { name: 'data', path: 'data' }
     ],
@@ -1333,7 +1450,9 @@ function getWebviewHtml(
   );
 
   const nonce = getNonce();
-  const apiBase = vscode.workspace.getConfiguration('dftIde').get<string>('apiBase', '');
+  const apiBase =
+    process.env.DFT_IDE_API_BASE ??
+    vscode.workspace.getConfiguration('dftIde').get<string>('apiBase', '');
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -1432,7 +1551,7 @@ function resolveExecutionCwd(title: string, command: string): string | undefined
   }
 
   const flow = inferDftFlow(title, command);
-  const preferredName = flow === 'verification' ? 'verification' : 'design';
+  const preferredName = flow === 'verification' ? 'verification' : flow;
   const preferredFolder = folders.find((folder) => folder.name.toLowerCase() === preferredName);
   if (preferredFolder) {
     return preferredFolder.uri.fsPath;
@@ -1475,7 +1594,7 @@ function normalizeHistoryFlow(flow: unknown): string {
   return /^[a-z0-9_-]+$/i.test(value) ? value : 'default';
 }
 
-type DftFlowKind = 'design' | 'verification';
+type DftFlowKind = 'hibist' | 'sailor' | 'verification';
 
 interface DftDiagnosticParseOptions {
   flow: DftFlowKind;
@@ -1670,7 +1789,7 @@ async function writeDftDiagnosticsDemoFiles(
   await vscode.workspace.fs.createDirectory(vscode.Uri.file(sourceDir));
   await ensureLocalStateIgnored(projectRoot, path.join(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR));
 
-  if (flow === 'design') {
+  if (flow === 'hibist') {
     const rtlPath = path.join(sourceDir, 'top.v');
     const tclPath = path.join(sourceDir, 'dft_constraints.tcl');
     await vscode.workspace.fs.writeFile(vscode.Uri.file(rtlPath), Buffer.from(createDemoSource(60, 42, 'assign scan_out = missing_port;'), 'utf-8'));
@@ -1715,7 +1834,7 @@ function inferDftFlow(title: string, command: string): DftFlowKind {
   const value = `${title} ${command}`.toLowerCase();
   return value.includes('verification') || value.includes('sim') || value.includes('plan')
     ? 'verification'
-    : 'design';
+    : 'hibist';
 }
 
 function inferDftTool(
@@ -1826,11 +1945,13 @@ async function getLocalConfigInfo(): Promise<{
   effectivePath: string | null;
   defaultPath: string | null;
   isDefault: boolean;
+  lastSelectedProject?: string;
 }> {
   const configuredPath = vscode.workspace.getConfiguration('dftIde').get<string>('localProjectsRoot', '').trim();
   const projectRoot = resolveProjectRoot();
   const defaultPath = projectRoot ? path.join(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR) : null;
   const effectivePath = resolveLocalConfigDirectory() ?? null;
+  const lastSelectedProject = vscode.workspace.getConfiguration('dftIde').get<string>('lastSelectedProject', '').trim();
 
   if (effectivePath) {
     await ensureLocalConfigDirectory(effectivePath);
@@ -1844,6 +1965,7 @@ async function getLocalConfigInfo(): Promise<{
     effectivePath,
     defaultPath,
     isDefault: !configuredPath,
+    lastSelectedProject,
   };
 }
 
@@ -1863,6 +1985,89 @@ async function updateLocalConfigPath(localPath: string): Promise<void> {
   if (projectRoot) {
     await ensureLocalStateIgnored(projectRoot, effectivePath ?? undefined);
   }
+}
+
+async function initProjectWorkspace(project:DftProject): Promise<string> {
+  const localProjectsRoot = vscode.workspace.getConfiguration('dftIde').get<string>('localProjectsRoot', '').trim();
+  if (!localProjectsRoot) {
+    throw new Error('Please set the local projects root before preparing a project.');
+  }
+
+  // const globalConfigFile = vscode.Uri.joinPath(vscode.Uri.file(path.resolve(localProjectsRoot)), '.config');
+  // try {
+  //   await vscode.workspace.fs.stat(globalConfigFile);
+  //   const bytes = await vscode.workspace.fs.readFile(globalConfigFile);
+  //   const globalConfig = JSON.parse(Buffer.from(bytes).toString('utf-8'));
+  //   globalConfig.lastSelectedProject = project.id;
+  //   await writeFileIfMissing(globalConfigFile, JSON.stringify(globalConfig, null, 2));
+  // } catch (error) {
+  //   const globalConfig = {
+  //     lastSelectedProject: project.id
+  //   };
+  //   await writeFileIfMissing(globalConfigFile, JSON.stringify(globalConfig, null, 2));
+  // }
+  await vscode.workspace.getConfiguration('dftIde').update(
+    'lastSelectedProject',
+    project.id,
+    vscode.ConfigurationTarget.Global
+  );
+
+  const projectName = project.name;
+  const projectDirName = toSafeProjectDirectoryName(project.name);
+  const projectPath = path.join(path.resolve(localProjectsRoot), projectDirName);
+  const projectRoot = vscode.Uri.file(projectPath);
+  await vscode.workspace.fs.createDirectory(projectRoot);
+
+  const repoProjectPrefix = toGitLabProjectPrefix(projectName);
+  const repos: Array<{ key: string; gitlabProjectName: string; localPath: string }> = [];
+  const folders: Array<{ name: string; path: string }> = [];
+  for (const repo of PROJECT_REPOS) {
+    const repoItem = project.repos.find((item) => item.key === repo);
+    if (!repoItem) continue;
+    const repoUri = vscode.Uri.joinPath(projectRoot, repoItem.gitlabProjectName);
+    // await vscode.workspace.fs.createDirectory(repoUri);
+    try {
+      await vscode.workspace.fs.stat(repoUri);
+    } catch (error) {
+      // Use the git CLI directly so cloning stays in the current VS Code window.
+      if (!repoItem.http_url_to_repo) {
+        throw new Error(`Missing clone URL for ${repoItem.gitlabProjectName}.`);
+      }
+      await executeFileCommand('git', ['clone', repoItem.http_url_to_repo], projectPath);
+      // vscode.window.showInformationMessage('仓库克隆成功！');
+    }
+    await writeFileIfMissing(
+      vscode.Uri.joinPath(repoUri, 'README.md'),
+      `# ${repoProjectPrefix}_${repo}\n\nLocal placeholder for the GitLab repository \`${repoProjectPrefix}_${repo}\`.\n`
+    );
+    repos.push({
+      key: repo,
+      gitlabProjectName: repoItem.gitlabProjectName,
+      localPath: repoUri.fsPath,
+    });
+    folders.push({
+      name: repo,
+      path: repoItem.gitlabProjectName,
+    });
+  }
+
+  const localStateUri = vscode.Uri.joinPath(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR);
+  await vscode.workspace.fs.createDirectory(localStateUri);
+  await ensureLocalStateIgnored(projectRoot.fsPath, localStateUri.fsPath);
+
+  const workspaceFile = vscode.Uri.joinPath(projectRoot, 'dft-ide.code-workspace');
+  const workspaceContent = {
+    folders: folders,
+    settings: {
+      'workbench.startupEditor': 'none'
+    }
+  };
+  // await vscode.workspace.fs.writeFile(workspaceFile, Buffer.from(JSON.stringify(workspaceContent, null, 2)));
+  await writeFileIfMissing(workspaceFile, JSON.stringify(workspaceContent, null, 2));
+
+  // vscode.window.showInformationMessage(`DFT IDE 项目初始化完成：${projectName}`);
+
+  return projectPath;
 }
 
 async function prepareProjectWorkspace(
@@ -2149,11 +2354,11 @@ function getSyncedArtifactPath(
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-function normalizeProjectRepo(value: unknown): 'design' | 'verification' | undefined {
-  return value === 'design' || value === 'verification' ? value : undefined;
+function normalizeProjectRepo(value: unknown): 'hibist' | 'sailor' | 'data' | 'verification' |  undefined {
+  return value === 'hibist' || value === 'sailor' || value === 'data' || value === 'verification' ? value : undefined;
 }
 
-function getProjectRepoRoot(repo: 'design' | 'verification'): string {
+function getProjectRepoRoot(repo: 'hibist' | 'sailor' | 'data' | 'verification' ): string {
   const folders = vscode.workspace.workspaceFolders ?? [];
   const matchedFolder = folders.find((folder) => folder.name.toLowerCase() === repo);
   if (matchedFolder) {
@@ -2168,8 +2373,8 @@ function getProjectRepoRoot(repo: 'design' | 'verification'): string {
   return path.join(projectRoot, repo);
 }
 
-async function getRepoGitInfoForWebview(repo: 'design' | 'verification'): Promise<{
-  repo: 'design' | 'verification';
+async function getRepoGitInfoForWebview(repo: 'hibist' | 'sailor' | 'data' | 'verification'): Promise<{
+  repo: 'hibist' | 'sailor' | 'data' | 'verification';
   repoRoot?: string;
   branch?: string;
   upstream?: string;
@@ -2204,7 +2409,7 @@ async function getRepoGitInfoForWebview(repo: 'design' | 'verification'): Promis
 type RepoCloudSubmitResult = {
   success: boolean;
   state: 'clean' | 'committed' | 'pushed' | 'needsPull' | 'conflict' | 'gitOperationInProgress' | 'noRepo' | 'noRemote' | 'error';
-  repo: 'design' | 'verification';
+  repo: 'hibist' | 'sailor' | 'data' | 'verification';
   repoRoot?: string;
   branch?: string;
   upstream?: string;
@@ -2215,7 +2420,7 @@ type RepoCloudSubmitResult = {
 };
 
 async function submitRepoToCloud(
-  repo: 'design' | 'verification',
+  repo: 'hibist' | 'sailor' | 'data' | 'verification',
   options: { message?: string; pullBeforePush?: boolean }
 ): Promise<RepoCloudSubmitResult> {
   const repoRoot = getProjectRepoRoot(repo);
@@ -2361,12 +2566,12 @@ async function submitRepoToCloud(
   }
 }
 
-function buildRepoCloudCommitMessage(repo: 'design' | 'verification', customMessage?: string): string {
+function buildRepoCloudCommitMessage(repo: 'hibist' | 'sailor' | 'data' | 'verification', customMessage?: string): string {
   const trimmed = customMessage?.trim();
   if (trimmed) {
     return trimmed;
   }
-  const label = repo === 'design' ? 'design' : 'verification';
+  const label = repo === 'hibist' ? 'hibist' : repo === 'sailor' ? 'sailor' : repo === 'data' ? 'data' : 'verification';
   const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
   return `chore(dft-ide): submit ${label} flow to cloud [${now}]`;
 }
@@ -2394,13 +2599,22 @@ function isRemoteBehindError(message: string): boolean {
 }
 
 async function syncCommonArtifactsToRepo(
-  targetRepo: 'design' | 'verification',
+  targetRepo: 'hibist' | 'sailor' | 'data' | 'verification',
   source: { designTree: string; normTable: string },
   commitMessage: string,
   push: boolean
 ): Promise<{ files: Array<{ label: string; path: string; overwritten: boolean }> }> {
   const repoRoot = getProjectRepoRoot(targetRepo);
-  await vscode.workspace.fs.stat(vscode.Uri.file(repoRoot));
+  // 检查文件夹是否存在，如果不存在则创建
+  try {
+    await vscode.workspace.fs.stat(vscode.Uri.file(repoRoot));
+  } catch (error: any) {
+    if (error.code === 'ENOENT') {
+        await vscode.workspace.fs.createDirectory(vscode.Uri.file(repoRoot));
+    } else {
+        throw error;
+    }
+  }
 
   const commonPath = resolveConfigPath('common');
   if (!commonPath) {
@@ -2441,6 +2655,12 @@ async function syncCommonArtifactsToRepo(
   );
 
   const fileUris = copiedFiles.map((file) => vscode.Uri.file(file.path));
+  const filePath = fileUris.map(uri => uri.fsPath)
+
+  const haschangeFiles = await gitService.hasChangedFiles( filePath ,vscode.Uri.file(repoRoot));
+  if (!haschangeFiles){
+    throw new Error("文件没有变更，无需同步")
+  }
   await gitService.addFiles(fileUris, vscode.Uri.file(repoRoot));
   await gitService.commit(commitMessage, vscode.Uri.file(repoRoot));
   if (push) {
@@ -2530,4 +2750,3 @@ function collectDesignTreeModules(value: unknown): Array<{ key: string; title: s
 }
 
 export function deactivate() {}
-

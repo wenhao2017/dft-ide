@@ -1,6 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Col, Empty, Input, List, Progress, Row, Space, Spin, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Col, Input, Progress, Row, Spin, Tag, Tooltip, message, Form } from "antd";
+import Card from "antd/es/card";
+import Empty from "antd/es/empty";
+import List from "antd/es/list";
+import Space from "antd/es/space";
+import Typography from "antd/es/typography";
+
 import {
+  BellOutlined,
   CheckCircleOutlined,
   CloudSyncOutlined,
   ExperimentOutlined,
@@ -8,16 +15,17 @@ import {
   FolderOpenOutlined,
   LineChartOutlined,
   RocketOutlined,
-  SaveOutlined,
   SettingOutlined,
   TeamOutlined,
 } from '@ant-design/icons';
 import {
+  getCurrentUser,
   getLocalConfigInfo,
   openProjectWorkspace,
   prepareProjectWorkspace,
   selectPath,
   setLocalConfigPath,
+  enterProjectWorkspace,
   type LocalConfigInfo,
 } from '../utils/ipc';
 import useWizardStore from '../store/wizardStore';
@@ -25,9 +33,11 @@ import {
   DftProject,
   canManageProjectMembers,
   fetchProjectDashboard,
+  initProject,
   ProjectDashboard,
   ProjectRepoStatus,
   selectProject,
+  updateProjectRootPath,
 } from '../services/projectService';
 
 const { Paragraph, Text, Title } = Typography;
@@ -49,11 +59,20 @@ const flows = [
     status: 'Ready',
   },
   {
-    key: 'Design',
-    label: 'Design',
-    title: '设计流程',
+    key: 'Hibist',
+    label: 'Hibist',
+    title: 'Hibist设计流程',
     desc: '按模块管理工具版本、执行参数、资源配置和设计结果。',
     icon: <RocketOutlined />,
+    accent: '#7c3aed',
+    status: 'Ready',
+  },
+  {
+    key: 'Sailor',
+    label: 'Sailor',
+    title: 'Sailor设计流程',
+    desc: '按模块管理工具版本、执行参数、资源配置和设计结果。',
+    icon: <BellOutlined />,
     accent: '#7c3aed',
     status: 'Ready',
   },
@@ -95,8 +114,9 @@ function repoTagColor(status: ProjectRepoStatus['status']): string {
 }
 
 const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }) => {
-  const { setFlowContext, setActiveProject } = useWizardStore();
+  const {setFlowContext, setActiveProject, currentUser, setCurrentUser} = useWizardStore();
   const [dashboard, setDashboard] = useState<ProjectDashboard | null>(null);
+  const [projects, setProjects] = useState<DftProject[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [workingProjectId, setWorkingProjectId] = useState<string | null>(null);
@@ -104,60 +124,75 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
   const [initializingProgress, setInitializingProgress] = useState(0);
   const [projectKeyword, setProjectKeyword] = useState('');
   const [localRootInfo, setLocalRootInfo] = useState<LocalConfigInfo | null>(null);
-  const [localProjectsRoot, setLocalProjectsRoot] = useState('');
-  const [savingLocalProjectsRoot, setSavingLocalProjectsRoot] = useState(false);
+  const [projectId, setProjectId] = useState('');
 
   const cardBorder = 'var(--vscode-panel-border, rgba(127,127,127,0.18))';
   const panelBg = isDark
     ? 'color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 96%, white)'
     : 'color-mix(in srgb, var(--vscode-editor-background, #fff) 92%, transparent)';
 
+  // const currentProject = useMemo(() => {
+  //   if (!dashboard?.currentProjectId) return null;
+  //   return projects?.find((item) => item.id === dashboard.currentProjectId) ?? null;
+  // }, [dashboard, projects]);
+
   const currentProject = useMemo(() => {
-    if (!dashboard?.currentProjectId) return null;
-    return dashboard.projects.find((item) => item.id === dashboard.currentProjectId) ?? null;
-  }, [dashboard]);
+    if (!dashboard) return null;
+    dashboard.currentProjectId = projectId;
+    return dashboard.projects.find((item) => item.id === projectId) ?? null;
+  }, [projectId, dashboard]);
 
   const filteredProjects = useMemo(() => {
     const keyword = projectKeyword.trim().toLowerCase();
-    const projects = dashboard?.projects ?? [];
     if (!keyword) return projects;
-    return projects.filter((project) =>
+    return projects?.filter((project) =>
       [project.name, project.id, project.owner, project.role].some((text) => text.toLowerCase().includes(keyword))
     );
-  }, [dashboard, projectKeyword]);
+  }, [dashboard, projects, projectKeyword]);
+
+  const fetchProjectData = async () => {
+    setLoadingProjects(true);
+    try {
+      const data = await fetchProjectDashboard(currentUser);
+      setDashboard(data);
+      setProjects(data.projects);
+      setProjectError(null);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : '项目列表加载失败');
+    } finally {
+      setLoadingProjects(false);
+    }
+  };
 
   useEffect(() => {
     let disposed = false;
 
-    fetchProjectDashboard()
-      .then((data) => {
-        if (disposed) return;
-        setDashboard(data);
-        setProjectError(null);
-      })
-      .catch((error) => {
-        if (disposed) return;
-        setProjectError(error instanceof Error ? error.message : '项目列表加载失败');
-      })
-      .finally(() => {
-        if (!disposed) {
-          setLoadingProjects(false);
-        }
-      });
+    fetchProjectData();
 
     return () => {
       disposed = true;
     };
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     let disposed = false;
+
+    getCurrentUser()
+      .then((user) => {
+        if (disposed) return;
+        setCurrentUser(user);
+      })
+      .catch((error) => {
+        if (!disposed) {
+          message.warning(error instanceof Error ? error.message : '当前用户读取失败');
+        }
+      });
 
     getLocalConfigInfo()
       .then((info) => {
         if (disposed) return;
         setLocalRootInfo(info);
-        setLocalProjectsRoot(info.configuredPath);
+        setProjectId(info.lastSelectedProject??'');
       })
       .catch((error) => {
         if (!disposed) {
@@ -173,31 +208,65 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
   const enterProject = async (project: DftProject, rootPath?: string) => {
     setWorkingProjectId(project.id);
     try {
-      const selected = await selectProject(project.id);
-      const targetRoot = rootPath ?? selected.rootPath;
-      const openResult = await openProjectWorkspace(targetRoot);
-      if (!openResult.success) {
-        message.error(openResult.error ?? '项目工作区打开失败');
+      if(!project.local_root && !rootPath) {
+        chooseProjectsRoot(project, true);
         return;
       }
-      setActiveProject({
-        id: selected.id,
-        name: selected.name,
-        rootPath: targetRoot,
-      });
-      setDashboard((prev) => prev ? { ...prev, currentProjectId: selected.id } : prev);
-      if (onNavigate) {
-        onNavigate('Common');
+      const result = await enterProjectWorkspace(project);
+      if (result.success && result.projectPath) {
+        const openResult = await openProjectWorkspace(result.projectPath);
+        if (!openResult.success) {
+          message.error(openResult.error ?? '项目工作区打开失败');
+          return;
+        }
+        setActiveProject({
+          id: project.id,
+          name: project.name,
+          rootPath: result.projectPath,
+          role: project.role,
+          canManageMembers: project.canManageMembers,
+        });
+        setDashboard((prev) => prev ? { ...prev, currentProjectId: project.id } : prev);
+        if (onNavigate) {
+          onNavigate('Common');
+        } else {
+          setFlowContext({ category: 'Common', projectId: project.id });
+        }
+        message.success('进入项目成功');
       } else {
-        setFlowContext({ category: 'Common', projectId: selected.id });
+        message.error(result.error ?? '进入项目失败');
       }
+
     } finally {
       setWorkingProjectId(null);
     }
   };
 
+  const setProjectRoot = async (project: DftProject, porjectRootPath: string) => {
+    setProjects(projects?.map(item => 
+      item.id === project.id ? { ...item, rootPath: porjectRootPath } : item
+    ));
+    // 请求后端保存项目目录数据
+    try {
+      await updateProjectRootPath(project.id, currentUser ,porjectRootPath);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '项目目录保存失败');
+    }
+  };
+
   const isProjectInitialized = (project: DftProject) =>
-    project.repos.every((repo) => repo.status === 'ready');
+    project.repos.length > 0 && project.repos.every((repo) => repo.status === 'ready');
+
+  const initializeProject2 = async (project: DftProject) => {
+    setInitializingProjectId(project.ctmp_id?.toString() ?? '');
+    try {
+      await initProject(project);
+      fetchProjectData();
+    }
+    finally {
+      setInitializingProjectId(null);
+    }
+  }
 
   const initializeProject = async (project: DftProject) => {
     if (isProjectInitialized(project)) return;
@@ -257,26 +326,13 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
     }
   };
 
-  const chooseLocalProjectsRoot = async () => {
+  const chooseProjectsRoot = async (project: DftProject, doEnter=false) => {
     const selected = await selectPath('folder');
     if (selected) {
-      setLocalProjectsRoot(selected);
-    }
-  };
-
-  const saveLocalProjectsRoot = async (nextPath = localProjectsRoot) => {
-    setSavingLocalProjectsRoot(true);
-    try {
-      const result = await setLocalConfigPath(nextPath.trim());
-      if (result.success) {
-        setLocalRootInfo(result);
-        setLocalProjectsRoot(result.configuredPath);
-        message.success(result.configuredPath ? '本地项目托管目录已保存' : '已清空本地项目托管目录');
-      } else {
-        message.error(result.error ?? '本地项目托管目录保存失败');
+      setProjectRoot(project, selected);
+      if (doEnter) {
+        enterProject(project, selected);
       }
-    } finally {
-      setSavingLocalProjectsRoot(false);
     }
   };
 
@@ -285,10 +341,6 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
       <div
         className="welcome-hero-grid"
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 7fr) minmax(340px, 5fr)',
-          alignItems: 'stretch',
-          gap: 18,
           marginBottom: 18,
         }}
       >
@@ -321,7 +373,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
               </Title>
               <Paragraph
                 type="secondary"
-                style={{ margin: '12px 0 0', maxWidth: 760, fontSize: 15, lineHeight: 1.8 }}
+                style={{ margin: '12px 0 0', fontSize: 15, lineHeight: 1.8 }}
               >
                 从项目列表进入本地 DFT 工作区。每个项目对应 GitLab 三个仓库：
                 <Text code>项目名_data</Text>、<Text code>项目名_design</Text>、
@@ -348,7 +400,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                 当前用户
               </Text>
               <Text strong style={{ fontSize: 16, lineHeight: 1.2, color: '#ea580c', letterSpacing: 0 }}>
-                {dashboard?.currentUser ?? 'w00445630'}
+                {currentUser}
               </Text>
             </div>
             <Space size={12} wrap>
@@ -368,47 +420,13 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
             </Space>
           </Space>
         </div>
-
-        <Card
-          title="本地项目托管目录"
-          style={{ borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
-        >
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.7 }}>
-              选择一个空间充足的本地目录，项目会默认准备到该目录下。页面状态始终保存到项目根目录的
-              <Text code>.dft-ide/local-state</Text>。
-            </Text>
-            <Space.Compact style={{ width: '100%' }}>
-              <Input
-                value={localProjectsRoot}
-                onChange={(event) => setLocalProjectsRoot(event.target.value)}
-                placeholder="例如 D:/dft/projects"
-                allowClear
-              />
-              <Button icon={<FolderOpenOutlined />} onClick={chooseLocalProjectsRoot}>
-                选择
-              </Button>
-              <Button
-                type="primary"
-                icon={<SaveOutlined />}
-                loading={savingLocalProjectsRoot}
-                onClick={() => saveLocalProjectsRoot()}
-              >
-                保存
-              </Button>
-            </Space.Compact>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              当前项目状态目录：{localRootInfo?.effectivePath ?? '打开项目后自动生成'}
-            </Text>
-          </Space>
-        </Card>
       </div>
 
       <div
         className="welcome-content-grid"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(0, 7fr) minmax(340px, 5fr)',
+          gridTemplateColumns: 'minmax(0, 9fr) minmax(340px, 3fr)',
           alignItems: 'stretch',
           gap: 18,
           marginBottom: 18,
@@ -449,34 +467,53 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                 return (
                 <List.Item
                   actions={[
-                    <Button
-                      key="initialize"
-                      type="primary"
-                      disabled={isProjectInitialized(project)}
-                      loading={initializingProjectId === project.id}
-                      onClick={() => initializeProject(project)}
-                    >
-                      初始化
-                    </Button>,
-                    <Tooltip key="members" title={canManageMembers ? '管理项目成员' : '当前项目不是 DFTM 角色，不能管理成员'}>
-                      <span>
+                    <div style={{ minWidth: 300}}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, paddingBottom: 12 }}>
                         <Button
-                          icon={<TeamOutlined />}
-                          disabled={!canManageMembers}
-                          onClick={() => onManageMembers?.(project)}
+                          key="initialize"
+                          type="primary"
+                          disabled={isProjectInitialized(project)}
+                          loading={initializingProjectId === project.ctmp_id?.toString()}
+                          onClick={() => initializeProject2(project)}
+                          style={{ flex: 1}}
                         >
-                          管理成员
+                          初始化
                         </Button>
-                      </span>
-                    </Tooltip>,
-                    <Button
-                      key="enter"
-                      loading={workingProjectId === project.id}
-                      onClick={() => enterProject(project)}
-                    >
-                      进入
-                    </Button>,
-                  ]}
+                        <Tooltip key="members" title={canManageMembers ? '管理项目成员' : '当前项目未初始化或不是 DFTM 角色，不能管理成员'}>
+                          <span>
+                            <Button
+                              icon={<TeamOutlined />}
+                              disabled={!canManageMembers}
+                              onClick={() => onManageMembers?.(project)}
+                              style={{ flex: 1}}
+                            >
+                              管理成员
+                            </Button>
+                          </span>
+                        </Tooltip>
+                        <Button
+                          key="enter"
+                          disabled={!isProjectInitialized(project)}
+                          loading={workingProjectId === project.id}
+                          onClick={() => enterProject(project)}
+                          style={{ flex: 1}}
+                        >
+                          进入
+                        </Button>
+                      </div>
+                      <Form layout="horizontal" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
+                        <Form.Item label="项目目录" style={{ marginBottom: 16 }}>
+                          <Input
+                            value={project.local_root}
+                            onChange={(event) => setProjectRoot(project, event.target.value)}
+                            placeholder="请选择项目目录"
+                            suffix={<FolderOpenOutlined onClick={() => chooseProjectsRoot(project)}/>}
+                            allowClear
+                          />
+                        </Form.Item>
+                      </Form>
+                    </div>
+                    ]}
                   style={{ padding: '14px 18px' }}
                 >
                   <List.Item.Meta
@@ -521,7 +558,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
           <Space direction="vertical" size={14} style={{ width: '100%' }}>
             {[
               ['项目平台', '首页按当前用户展示可参与项目、角色和项目阶段。'],
-              ['GitLab', '每个项目固定映射 data、design、verification 三个仓库。'],
+              ['GitLab', '每个项目固定映射 data、hibist、sailor、verification 四个仓库。'],
               ['Local Root', '用户选择本地托管目录后，项目克隆到该目录下的独立 project root。'],
               ['Local State', '配置状态默认跟随 project root，统一保存在 .dft-ide/local-state。'],
             ].map(([name, desc]) => (
