@@ -255,6 +255,54 @@ export async function saveDesignTree(
   return res as { success: boolean; filePath?: string; mode?: string; error?: string };
 }
 
+export interface FlowConfigFileInfo {
+  key: string;
+  moduleName: string;
+  fileName: string;
+  filePath: string;
+  updatedAt?: number;
+  size?: number;
+}
+
+export async function listFlowConfigFiles(
+  flow: 'hibist' | 'sailor' | 'verification'
+): Promise<{ success: boolean; configs: FlowConfigFileInfo[]; configsDir?: string; error?: string }> {
+  const res = await ipcRequest('listFlowConfigFiles', { flow });
+  return res as unknown as { success: boolean; configs: FlowConfigFileInfo[]; configsDir?: string; error?: string };
+}
+
+export async function duplicateFlowConfigFile(
+  flow: 'hibist' | 'sailor' | 'verification',
+  moduleName: string
+): Promise<{ success: boolean; config?: FlowConfigFileInfo; error?: string }> {
+  const res = await ipcRequest('duplicateFlowConfigFile', { flow, moduleName });
+  return res as unknown as { success: boolean; config?: FlowConfigFileInfo; error?: string };
+}
+
+export async function renameFlowConfigFile(
+  flow: 'hibist' | 'sailor' | 'verification',
+  moduleName: string,
+  nextModuleName: string
+): Promise<{ success: boolean; config?: FlowConfigFileInfo; error?: string }> {
+  const res = await ipcRequest('renameFlowConfigFile', { flow, moduleName, nextModuleName });
+  return res as unknown as { success: boolean; config?: FlowConfigFileInfo; error?: string };
+}
+
+export async function deleteFlowConfigFile(
+  flow: 'hibist' | 'sailor' | 'verification',
+  moduleName: string
+): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('deleteFlowConfigFile', { flow, moduleName });
+  return res as { success: boolean; error?: string };
+}
+
+export async function generateDefaultFlowConfigs(
+  flow: 'hibist' | 'sailor' | 'verification'
+): Promise<{ success: boolean; configs: FlowConfigFileInfo[]; configsDir?: string; created: number; error?: string }> {
+  const res = await ipcRequest('generateDefaultFlowConfigs', { flow });
+  return res as unknown as { success: boolean; configs: FlowConfigFileInfo[]; configsDir?: string; created: number; error?: string };
+}
+
 export interface LocalConfigInfo {
   configuredPath: string;
   effectivePath: string | null;

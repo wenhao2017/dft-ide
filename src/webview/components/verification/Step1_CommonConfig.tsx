@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Form, Button, Radio, Typography, Badge, Spin } from 'antd';
+import { Form, Button, Radio, Typography, Badge, Spin, message } from 'antd';
 import {
   SaveOutlined,
   RightOutlined,
@@ -9,7 +9,7 @@ import {
 import { useVscodePath } from '../../hooks/useVscodePath';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 import PathInput from '../shared/PathInput';
-import { getGitInfo } from '../../utils/ipc';
+import { generateDefaultFlowConfigs, getGitInfo } from '../../utils/ipc';
 import useWizardStore from '../../store/wizardStore';
 import CollapsibleSection from '../shared/CollapsibleSection';
 
@@ -26,6 +26,7 @@ const Step1CommonConfig: React.FC<{ onNext: () => void; moduleKey?: string }> = 
 
   const [currentBranch, setCurrentBranch] = useState<string>('');
   const [exitType, setExitType] = useState<string>('sim');
+  const [generating, setGenerating] = useState(false);
   const updatePayload = useWizardStore((state) => state.updatePayload);
 
   // ── 配置持久化 Hook ─────────────────────────────────
@@ -80,6 +81,20 @@ const Step1CommonConfig: React.FC<{ onNext: () => void; moduleKey?: string }> = 
       return;
     }
     handleSave({ moduleKey, step1: data });
+  };
+
+  const onGenerateDefaults = async () => {
+    setGenerating(true);
+    try {
+      const result = await generateDefaultFlowConfigs('verification');
+      if (!result.success) {
+        message.error(result.error ?? '产生默认配置失败');
+        return;
+      }
+      message.success(`已生成 ${result.created} 个默认 cfg，目录：${result.configsDir ?? 'configs'}`);
+    } finally {
+      setGenerating(false);
+    }
   };
 
   return (
@@ -137,7 +152,7 @@ const Step1CommonConfig: React.FC<{ onNext: () => void; moduleKey?: string }> = 
           </CollapsibleSection>
 
           <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 32 }}>
-            <Button icon={<FileAddOutlined />}>产生默认配置</Button>
+            <Button icon={<FileAddOutlined />} loading={generating} onClick={onGenerateDefaults}>产生默认配置</Button>
             <Badge dot={hasUnsaved} offset={[-4, 4]}>
               <Button icon={<SaveOutlined />} loading={saving} onClick={onSave}>
                 保存

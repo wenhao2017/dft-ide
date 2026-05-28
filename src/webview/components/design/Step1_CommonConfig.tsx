@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Badge, Button, Form, Select, Space, Spin, Typography } from 'antd';
+import { Badge, Button, Form, Select, Space, Spin, Typography, message } from 'antd';
 import {
   BranchesOutlined,
   FileAddOutlined,
@@ -9,7 +9,7 @@ import {
 import { useVscodePath } from '../../hooks/useVscodePath';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 import PathInput from '../shared/PathInput';
-import { getGitInfo } from '../../utils/ipc';
+import { generateDefaultFlowConfigs, getGitInfo } from '../../utils/ipc';
 import useWizardStore from '../../store/wizardStore';
 import CollapsibleSection from '../shared/CollapsibleSection';
 
@@ -33,6 +33,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
   const fmlCfg = useVscodePath();
 
   const [currentBranch, setCurrentBranch] = useState<string>('');
+  const [generating, setGenerating] = useState(false);
   const updatePayload = useWizardStore((state) => state.updatePayload);
 
   const { savedData, loading, saving, hasUnsaved, handleSave } =
@@ -84,6 +85,20 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
       return;
     }
     void handleSave({ moduleKey, step1: data });
+  };
+
+  const onGenerateDefaults = async () => {
+    setGenerating(true);
+    try {
+      const result = await generateDefaultFlowConfigs(flowKey as 'hibist' | 'sailor');
+      if (!result.success) {
+        message.error(result.error ?? '生成默认配置失败');
+        return;
+      }
+      message.success(`已生成 ${result.created} 个默认 cfg，目录：${result.configsDir ?? 'configs'}`);
+    } finally {
+      setGenerating(false);
+    }
   };
 
   return (
@@ -138,7 +153,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
           <CollapsibleSection title="归一化表格转 cfg">
             <Form.Item label="命令入口">
               <Space size="middle" wrap>
-                <Button icon={<FileAddOutlined />}>生成默认配置</Button>
+                <Button icon={<FileAddOutlined />} loading={generating} onClick={onGenerateDefaults}>生成默认配置</Button>
                 <Text type="secondary">根据归一化表格生成当前流程的默认 cfg。</Text>
               </Space>
             </Form.Item>

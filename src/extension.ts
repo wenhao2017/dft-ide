@@ -1005,6 +1005,137 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
+      case 'listFlowConfigFiles': {
+        const requestId: string = msg.requestId;
+        const flow = normalizeConfigFlow(msg.flow);
+        try {
+          if (!flow) {
+            throw new Error('Unsupported flow for config files.');
+          }
+          const result = await listFlowConfigFiles(flow);
+          currentPanel?.webview.postMessage({
+            command: 'listFlowConfigFilesResponse',
+            requestId,
+            success: true,
+            ...result
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'listFlowConfigFilesResponse',
+            requestId,
+            success: false,
+            configs: [],
+            error: String(err)
+          });
+        }
+        return;
+      }
+
+      case 'duplicateFlowConfigFile': {
+        const requestId: string = msg.requestId;
+        const flow = normalizeConfigFlow(msg.flow);
+        const moduleName = typeof msg.moduleName === 'string' ? msg.moduleName : '';
+        try {
+          if (!flow) {
+            throw new Error('Unsupported flow for config files.');
+          }
+          const config = await duplicateFlowConfigFile(flow, moduleName);
+          currentPanel?.webview.postMessage({
+            command: 'duplicateFlowConfigFileResponse',
+            requestId,
+            success: true,
+            config
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'duplicateFlowConfigFileResponse',
+            requestId,
+            success: false,
+            error: String(err)
+          });
+        }
+        return;
+      }
+
+      case 'renameFlowConfigFile': {
+        const requestId: string = msg.requestId;
+        const flow = normalizeConfigFlow(msg.flow);
+        const moduleName = typeof msg.moduleName === 'string' ? msg.moduleName : '';
+        const nextModuleName = typeof msg.nextModuleName === 'string' ? msg.nextModuleName : '';
+        try {
+          if (!flow) {
+            throw new Error('Unsupported flow for config files.');
+          }
+          const config = await renameFlowConfigFile(flow, moduleName, nextModuleName);
+          currentPanel?.webview.postMessage({
+            command: 'renameFlowConfigFileResponse',
+            requestId,
+            success: true,
+            config
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'renameFlowConfigFileResponse',
+            requestId,
+            success: false,
+            error: String(err)
+          });
+        }
+        return;
+      }
+
+      case 'deleteFlowConfigFile': {
+        const requestId: string = msg.requestId;
+        const flow = normalizeConfigFlow(msg.flow);
+        const moduleName = typeof msg.moduleName === 'string' ? msg.moduleName : '';
+        try {
+          if (!flow) {
+            throw new Error('Unsupported flow for config files.');
+          }
+          await deleteFlowConfigFile(flow, moduleName);
+          currentPanel?.webview.postMessage({
+            command: 'deleteFlowConfigFileResponse',
+            requestId,
+            success: true
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'deleteFlowConfigFileResponse',
+            requestId,
+            success: false,
+            error: String(err)
+          });
+        }
+        return;
+      }
+
+      case 'generateDefaultFlowConfigs': {
+        const requestId: string = msg.requestId;
+        const flow = normalizeConfigFlow(msg.flow);
+        try {
+          if (!flow) {
+            throw new Error('Unsupported flow for config files.');
+          }
+          const result = await generateDefaultFlowConfigs(flow);
+          currentPanel?.webview.postMessage({
+            command: 'generateDefaultFlowConfigsResponse',
+            requestId,
+            success: true,
+            ...result
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'generateDefaultFlowConfigsResponse',
+            requestId,
+            success: false,
+            configs: [],
+            created: 0,
+            error: String(err)
+          });
+        }
+        return;
+      }
+
       case 'syncCommonArtifacts': {
         const requestId: string = msg.requestId;
         const targetRepo = normalizeProjectRepo(msg.targetRepo);
@@ -1541,7 +1672,7 @@ function resolveProjectRoot(): string | undefined {
     return [...parents][0];
   }
 
-  return folders[0].uri.fsPath;
+  return path.dirname(folders[0].uri.fsPath);
 }
 
 function resolveExecutionCwd(title: string, command: string): string | undefined {
@@ -2358,9 +2489,22 @@ function normalizeProjectRepo(value: unknown): 'hibist' | 'sailor' | 'data' | 'v
   return value === 'hibist' || value === 'sailor' || value === 'data' || value === 'verification' ? value : undefined;
 }
 
+function normalizeConfigFlow(value: unknown): 'hibist' | 'sailor' | 'verification' | undefined {
+  return value === 'hibist' || value === 'sailor' || value === 'verification' ? value : undefined;
+}
+
+interface FlowConfigFileInfo {
+  key: string;
+  moduleName: string;
+  fileName: string;
+  filePath: string;
+  updatedAt?: number;
+  size?: number;
+}
+
 function getProjectRepoRoot(repo: 'hibist' | 'sailor' | 'data' | 'verification' ): string {
   const folders = vscode.workspace.workspaceFolders ?? [];
-  const matchedFolder = folders.find((folder) => folder.name.toLowerCase() === repo);
+  const matchedFolder = folders.find((folder) => isRepoFolderName(folder.name, repo));
   if (matchedFolder) {
     return matchedFolder.uri.fsPath;
   }
@@ -2371,6 +2515,341 @@ function getProjectRepoRoot(repo: 'hibist' | 'sailor' | 'data' | 'verification' 
   }
 
   return path.join(projectRoot, repo);
+}
+
+async function getFlowConfigsDirectory(flow: 'hibist' | 'sailor' | 'verification'): Promise<string> {
+  const repoRoot = await resolveProjectRepoRoot(flow);
+  return path.join(repoRoot, 'configs');
+}
+
+async function resolveProjectRepoRoot(repo: 'hibist' | 'sailor' | 'data' | 'verification'): Promise<string> {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  const matchedFolder = folders.find((folder) => isRepoFolderName(folder.name, repo));
+  if (matchedFolder) {
+    return matchedFolder.uri.fsPath;
+  }
+
+  const projectRoot = resolveProjectRoot();
+  if (projectRoot) {
+    const siblingRepo = await findSiblingRepoDirectory(projectRoot, repo);
+    if (siblingRepo) {
+      return siblingRepo;
+    }
+    const direct = path.join(projectRoot, repo);
+    if (await pathExists(direct)) {
+      return direct;
+    }
+    const bySuffix = await findRepoDirectory(projectRoot, repo);
+    if (bySuffix) {
+      return bySuffix;
+    }
+  }
+
+  const localProjectsRoot = vscode.workspace.getConfiguration('dftIde').get<string>('localProjectsRoot', '').trim();
+  if (localProjectsRoot) {
+    const projectId = vscode.workspace.getConfiguration('dftIde').get<string>('lastSelectedProject', '').trim();
+    const candidates = await findLocalProjectRoots(localProjectsRoot, projectId);
+    for (const candidate of candidates) {
+      const repoDir = await findRepoDirectory(candidate, repo);
+      if (repoDir) {
+        return repoDir;
+      }
+    }
+  }
+
+  if (projectRoot) {
+    return path.join(projectRoot, repo);
+  }
+
+  throw new Error('No DFT project workspace or local project root is available.');
+}
+
+function isRepoFolderName(name: string, repo: 'hibist' | 'sailor' | 'data' | 'verification'): boolean {
+  const normalized = name.toLowerCase();
+  return normalized === repo || normalized.endsWith(`_${repo}`);
+}
+
+async function findSiblingRepoDirectory(currentPath: string, repo: 'hibist' | 'sailor' | 'data' | 'verification'): Promise<string | undefined> {
+  const currentName = path.basename(currentPath).toLowerCase();
+  if (!PROJECT_REPOS.some((item) => isRepoFolderName(currentName, item))) {
+    return undefined;
+  }
+  return findRepoDirectory(path.dirname(currentPath), repo);
+}
+
+async function findLocalProjectRoots(localProjectsRoot: string, projectId: string): Promise<string[]> {
+  const root = path.resolve(localProjectsRoot);
+  const normalizedProjectId = projectId ? toConfigPathSegment(projectId) : '';
+  const roots: string[] = [];
+
+  if (normalizedProjectId) {
+    const direct = path.join(root, normalizedProjectId);
+    if (await pathExists(direct)) {
+      roots.push(direct);
+    }
+  }
+
+  try {
+    const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(root));
+    for (const [name, type] of entries) {
+      if (type !== vscode.FileType.Directory) {
+        continue;
+      }
+      const fullPath = path.join(root, name);
+      if (!normalizedProjectId || toConfigPathSegment(name).includes(normalizedProjectId)) {
+        if (!roots.some((item) => normalizeFsPath(item) === normalizeFsPath(fullPath))) {
+          roots.push(fullPath);
+        }
+      }
+    }
+  } catch {
+    // Keep the direct candidate only.
+  }
+
+  return roots;
+}
+
+async function findRepoDirectory(projectRoot: string, repo: 'hibist' | 'sailor' | 'data' | 'verification'): Promise<string | undefined> {
+  const direct = path.join(projectRoot, repo);
+  if (await pathExists(direct)) {
+    return direct;
+  }
+
+  try {
+    const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(projectRoot));
+    const match = entries.find(([name, type]) =>
+      type === vscode.FileType.Directory && name.toLowerCase().endsWith(`_${repo}`)
+    );
+    return match ? path.join(projectRoot, match[0]) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function listFlowConfigFiles(flow: 'hibist' | 'sailor' | 'verification'): Promise<{
+  configs: FlowConfigFileInfo[];
+  configsDir: string;
+}> {
+  const configsDir = await getFlowConfigsDirectory(flow);
+  await ensureLocalConfigDirectory(configsDir);
+  const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(configsDir));
+  const configs: FlowConfigFileInfo[] = [];
+
+  for (const [name, type] of entries) {
+    if (type !== vscode.FileType.File || path.extname(name).toLowerCase() !== '.cfg') {
+      continue;
+    }
+    const filePath = path.join(configsDir, name);
+    const stat = await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+    configs.push(toFlowConfigFileInfo(filePath, stat));
+  }
+
+  configs.sort((a, b) => a.moduleName.localeCompare(b.moduleName));
+  return { configs, configsDir };
+}
+
+async function duplicateFlowConfigFile(
+  flow: 'hibist' | 'sailor' | 'verification',
+  moduleName: string
+): Promise<FlowConfigFileInfo> {
+  const configsDir = await getFlowConfigsDirectory(flow);
+  const source = resolveCfgPath(configsDir, moduleName);
+  const stat = await vscode.workspace.fs.stat(vscode.Uri.file(source));
+  if (stat.type !== vscode.FileType.File) {
+    throw new Error(`Config is not a file: ${moduleName}`);
+  }
+
+  const targetModule = await makeUniqueCfgModuleName(configsDir, `${path.basename(moduleName, '.cfg')}_copy`);
+  const target = resolveCfgPath(configsDir, targetModule);
+  const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(source));
+  await vscode.workspace.fs.writeFile(vscode.Uri.file(target), bytes);
+  const targetStat = await vscode.workspace.fs.stat(vscode.Uri.file(target));
+  return toFlowConfigFileInfo(target, targetStat);
+}
+
+async function renameFlowConfigFile(
+  flow: 'hibist' | 'sailor' | 'verification',
+  moduleName: string,
+  nextModuleName: string
+): Promise<FlowConfigFileInfo> {
+  const configsDir = await getFlowConfigsDirectory(flow);
+  const source = resolveCfgPath(configsDir, moduleName);
+  const target = resolveCfgPath(configsDir, nextModuleName);
+  if (normalizeFsPath(source) === normalizeFsPath(target)) {
+    const stat = await vscode.workspace.fs.stat(vscode.Uri.file(source));
+    return toFlowConfigFileInfo(source, stat);
+  }
+  if (await pathExists(target)) {
+    throw new Error(`Config already exists: ${path.basename(target)}`);
+  }
+  await vscode.workspace.fs.rename(vscode.Uri.file(source), vscode.Uri.file(target));
+  const stat = await vscode.workspace.fs.stat(vscode.Uri.file(target));
+  return toFlowConfigFileInfo(target, stat);
+}
+
+async function deleteFlowConfigFile(
+  flow: 'hibist' | 'sailor' | 'verification',
+  moduleName: string
+): Promise<void> {
+  const configsDir = await getFlowConfigsDirectory(flow);
+  await vscode.workspace.fs.delete(vscode.Uri.file(resolveCfgPath(configsDir, moduleName)));
+}
+
+async function generateDefaultFlowConfigs(flow: 'hibist' | 'sailor' | 'verification'): Promise<{
+  configs: FlowConfigFileInfo[];
+  configsDir: string;
+  created: number;
+}> {
+  const configsDir = await getFlowConfigsDirectory(flow);
+  await ensureLocalConfigDirectory(configsDir);
+  const modules = await readModulesFromNormalizedTable(flow);
+  let created = 0;
+
+  for (const moduleName of modules) {
+    const filePath = resolveCfgPath(configsDir, moduleName);
+    if (await pathExists(filePath)) {
+      continue;
+    }
+    const content = [
+      `# Auto-generated default ${flow} config`,
+      `module = ${moduleName}`,
+      `flow = ${flow}`,
+      ''
+    ].join('\n');
+    await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), Buffer.from(content, 'utf-8'));
+    created += 1;
+  }
+
+  const listed = await listFlowConfigFiles(flow);
+  return { ...listed, created };
+}
+
+function resolveCfgPath(configsDir: string, moduleName: string): string {
+  const clean = sanitizeCfgModuleName(moduleName);
+  return path.join(configsDir, `${clean}.cfg`);
+}
+
+function sanitizeCfgModuleName(value: string): string {
+  const clean = path.basename(value.trim().replace(/\.cfg$/i, '')).replace(/[^a-zA-Z0-9_.-]+/g, '_').replace(/^_+|_+$/g, '');
+  if (!clean) {
+    throw new Error('Module name is required.');
+  }
+  return clean;
+}
+
+async function makeUniqueCfgModuleName(configsDir: string, base: string): Promise<string> {
+  const cleanBase = sanitizeCfgModuleName(base);
+  let candidate = cleanBase;
+  let index = 1;
+  while (await pathExists(resolveCfgPath(configsDir, candidate))) {
+    candidate = `${cleanBase}_${index++}`;
+  }
+  return candidate;
+}
+
+function toFlowConfigFileInfo(filePath: string, stat: vscode.FileStat): FlowConfigFileInfo {
+  const fileName = path.basename(filePath);
+  const moduleName = path.basename(fileName, '.cfg');
+  return {
+    key: moduleName,
+    moduleName,
+    fileName,
+    filePath,
+    updatedAt: stat.mtime,
+    size: stat.size
+  };
+}
+
+async function readModulesFromNormalizedTable(flow: 'hibist' | 'sailor' | 'verification'): Promise<string[]> {
+  const normTablePath = await resolveNormalizedTablePath(flow);
+  const modules = new Set<string>();
+
+  if (normTablePath) {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(normTablePath));
+      const text = Buffer.from(bytes).toString('utf-8');
+      const parsed = JSON.parse(text);
+      collectModuleNames(parsed, modules);
+    } catch {
+      // The generator stays useful even when the mock table is absent or incomplete.
+    }
+  }
+
+  if (modules.size === 0) {
+    modules.add('top_abc');
+  }
+
+  return [...modules].map(sanitizeCfgModuleName).sort((a, b) => a.localeCompare(b));
+}
+
+async function resolveNormalizedTablePath(flow: 'hibist' | 'sailor' | 'verification'): Promise<string | undefined> {
+  const commonPath = resolveConfigPath('common');
+  const common = commonPath ? await readJsonFile(commonPath) : null;
+  const synced = getSyncedArtifactPath(common, flow, 'normTable');
+  if (synced && await pathExists(synced)) {
+    return synced;
+  }
+
+  const dataForm = isRecord(common?.data) ? common.data : undefined;
+  const configured = [
+    dataForm?.normTable,
+    common?.dataNormTable,
+    common?.normTable
+  ].find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  if (configured) {
+    const resolved = path.isAbsolute(configured)
+      ? configured
+      : path.resolve(resolveProjectRoot() ?? path.dirname(commonPath ?? ''), configured);
+    if (await pathExists(resolved)) {
+      return resolved;
+    }
+  }
+
+  try {
+    const dataRoot = await resolveProjectRepoRoot('data');
+    const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(dataRoot));
+    const match = entries.find(([name, type]) =>
+      type === vscode.FileType.File && /^normalized-table\.(json|csv|md|txt)$/i.test(name)
+    );
+    return match ? path.join(dataRoot, match[0]) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function collectModuleNames(value: unknown, modules: Set<string>): void {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectModuleNames(item, modules));
+    return;
+  }
+  if (!isRecord(value)) {
+    return;
+  }
+
+  const moduleKeys = [
+    'moduleName',
+    'module_name',
+    'module',
+    'moduleId',
+    'module_id',
+    'block',
+    'blockName',
+    'block_name',
+    'designModule',
+    'design_module'
+  ];
+  for (const key of moduleKeys) {
+    const candidate = value[key];
+    if (typeof candidate === 'string' && candidate.trim()) {
+      modules.add(candidate.trim());
+    }
+  }
+
+  Object.values(value).forEach((item) => {
+    if (typeof item === 'object' && item !== null) {
+      collectModuleNames(item, modules);
+    }
+  });
 }
 
 async function getRepoGitInfoForWebview(repo: 'hibist' | 'sailor' | 'data' | 'verification'): Promise<{
