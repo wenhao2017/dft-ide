@@ -30,25 +30,12 @@ import {
 } from '@ant-design/icons';
 const { Text, Title } = Typography;
 
-type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'stopped' | 'skipped';
-
-interface PipelineTask {
-  id: string;
-  name: string;
-  command: string;
-  status: TaskStatus;
-  startedAt?: string;
-  finishedAt?: string;
-  duration?: string;
-  attempts: number;
-  description: string;
-  logs: string[];
-}
-
-interface PipelineLink {
-  source: string;
-  target: string;
-}
+import {
+  TaskStatus,
+  PipelineTask,
+  PipelineLink,
+  pipelineFlowConfigs,
+} from './pipelineMockData';
 
 interface PipelineNodeData extends Record<string, unknown> {
   task: PipelineTask;
@@ -68,6 +55,7 @@ interface RuntimeState {
 
 interface PipelineRuntimeViewProps {
   flowLabel?: string;
+  flowKey?: 'hibist' | 'sailor' | 'verification';
   onClose?: () => void;
   autoStart?: boolean;
 }
@@ -93,25 +81,6 @@ const initialRuntimeState: RuntimeState = {
 };
 
 const now = () => new Date().toLocaleTimeString();
-
-const taskLog = (message: string) => `[${now()}] ${message}`;
-
-const makeTask = (
-  id: string,
-  name: string,
-  command: string,
-  description: string,
-  status: TaskStatus = 'pending',
-): PipelineTask => ({
-  id,
-  name,
-  command,
-  status,
-  attempts: 1,
-  description,
-  startedAt: status === 'running' ? now() : undefined,
-  logs: [taskLog(`${name} 已创建，初始状态：${statusMeta[status].label}。`)],
-});
 
 function PipelineTaskNode({ data }: NodeProps<Node<PipelineNodeData>>) {
   const { task, selected, onSelect, onRerun, onStop } = data;
@@ -229,8 +198,27 @@ function layoutGraph(
   return { nodes, edges };
 }
 
-const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({ flowLabel = 'DFT', onClose, autoStart }) => {
-  const [runtime, setRuntime] = useState<RuntimeState>(initialRuntimeState);
+const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
+  flowLabel = 'DFT',
+  flowKey,
+  onClose,
+  autoStart,
+}) => {
+  const activeFlowKey =
+    flowKey ??
+    (flowLabel === '验证' || flowLabel === 'Lander'
+      ? 'verification'
+      : flowLabel === 'Sailor'
+        ? 'sailor'
+        : 'hibist');
+
+  const config = pipelineFlowConfigs[activeFlowKey];
+
+  const [runtime, setRuntime] = useState<RuntimeState>({
+    ...initialRuntimeState,
+    logs: [`流水线运行态已就绪，点击“启动流水线”开始接收 ${config.title} 事件流。`],
+  });
+
   const timers = useRef<number[]>([]);
   const autoStarted = useRef(false);
 
@@ -246,162 +234,73 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({ flowLabel = '
     timers.current.push(timer);
   }, []);
 
-  const appendLog = useCallback((line: string) => {
-    setRuntime((prev) => ({ ...prev, logs: [...prev.logs, taskLog(line)] }));
-  }, []);
-
-  const patchTask = useCallback((
-    id: string,
-    patch: Partial<PipelineTask> | ((task: PipelineTask) => Partial<PipelineTask>),
-  ) => {
-    setRuntime((prev) => ({
-      ...prev,
-      tasks: prev.tasks.map((task) => {
-        if (task.id !== id) return task;
-        const nextPatch = typeof patch === 'function' ? patch(task) : patch;
-        return {
-          ...task,
-          ...nextPatch,
-          logs: nextPatch.logs ?? task.logs,
-        };
-      }),
-    }));
-  }, []);
-
-  const addTasks = useCallback((tasks: PipelineTask[], links: PipelineLink[]) => {
-    setRuntime((prev) => ({
-      ...prev,
-      tasks: [...prev.tasks, ...tasks],
-      links: [...prev.links, ...links],
-      selectedTaskId: prev.selectedTaskId ?? tasks[0]?.id,
-    }));
-  }, []);
-
   const startPipeline = useCallback(() => {
     clearTimers();
-    const root = makeTask('pipeline', `${flowLabel}流水线`, 'dft-pipeline run', '顶层流水线运行会话。', 'running');
+
+    const makeTask = (
+      id: string,
+      name: string,
+      command: string,
+      description: string,
+      status: TaskStatus = 'pending',
+    ): PipelineTask => ({
+      id,
+      name,
+      command,
+      status,
+      attempts: 1,
+      description,
+      startedAt: status === 'running' ? now() : undefined,
+      logs: [`[${now()}] ${config.logPrefix} ${name} 已创建，初始状态：${statusMeta[status].label}。`],
+    });
+
+    const initialTasks = config.getInitialTasks(makeTask);
+    const initialLinks = config.getInitialLinks();
+
     setRuntime({
-      tasks: [root],
-      links: [],
-      logs: [taskLog(`${flowLabel}流水线已启动。`), taskLog('主任务已生成。')],
-      selectedTaskId: root.id,
+      tasks: initialTasks,
+      links: initialLinks,
+      logs: [`[${now()}] ${config.logPrefix} 流水线已启动。`],
+      selectedTaskId: initialTasks[0]?.id,
       runState: 'running',
     });
 
-    schedule(650, () => {
-      appendLog('发现动态子任务：validate_inputs、prepare_workspace、run_job。');
-      addTasks(
-        [
-          makeTask('validate_inputs', 'validate_inputs', 'python validate.py', '校验路径、配置和运行参数。', 'running'),
-          makeTask('prepare_workspace', 'prepare_workspace', 'mkdir -p work/logs', '创建运行目录和日志目录。', 'pending'),
-          makeTask('run_job', 'run_job', 'bsub < run_job.sh', '提交主 DFT 执行任务。', 'pending'),
-        ],
-        [
-          { source: 'pipeline', target: 'validate_inputs' },
-          { source: 'pipeline', target: 'prepare_workspace' },
-          { source: 'pipeline', target: 'run_job' },
-        ],
-      );
+    config.timeline.forEach((event) => {
+      schedule(event.delay, () => {
+        event.action({
+          appendLog: (msg) => {
+            const formatted = msg.startsWith(config.logPrefix) ? msg : `${config.logPrefix} ${msg}`;
+            setRuntime((prev) => ({ ...prev, logs: [...prev.logs, `[${now()}] ${formatted}`] }));
+          },
+          addTasks: (newTasks, newLinks) => {
+            setRuntime((prev) => ({
+              ...prev,
+              tasks: [...prev.tasks, ...newTasks],
+              links: [...prev.links, ...newLinks],
+            }));
+          },
+          patchTask: (id, patch) => {
+            setRuntime((prev) => ({
+              ...prev,
+              tasks: prev.tasks.map((task) => {
+                if (task.id !== id) return task;
+                const nextPatch = typeof patch === 'function' ? patch(task) : patch;
+                return {
+                  ...task,
+                  ...nextPatch,
+                  logs: nextPatch.logs ?? task.logs,
+                };
+              }),
+            }));
+          },
+          setRunState: (state) => {
+            setRuntime((prev) => ({ ...prev, runState: state }));
+          },
+          getNow: now,
+        });
+      });
     });
-
-    schedule(1600, () => {
-      appendLog('validate_inputs 校验完成。');
-      patchTask('validate_inputs', (task) => ({
-        status: 'success',
-        finishedAt: now(),
-        duration: '0.9s',
-        logs: [...task.logs, taskLog('必要输入均已通过校验。')],
-      }));
-      patchTask('prepare_workspace', (task) => ({
-        status: 'running',
-        startedAt: now(),
-        logs: [...task.logs, taskLog('开始准备运行工作区。')],
-      }));
-    });
-
-    schedule(2500, () => {
-      appendLog('prepare_workspace 完成，run_job 开始运行。');
-      patchTask('prepare_workspace', (task) => ({
-        status: 'success',
-        finishedAt: now(),
-        duration: '0.8s',
-        logs: [...task.logs, taskLog('运行目录已准备完成。')],
-      }));
-      patchTask('run_job', (task) => ({
-        status: 'running',
-        startedAt: now(),
-        logs: [...task.logs, taskLog('主任务已提交到模拟调度器。')],
-      }));
-    });
-
-    schedule(3400, () => {
-      appendLog('run_job 动态分叉出 module_a、module_b、module_c。');
-      addTasks(
-        [
-          makeTask('module_a', 'module_a', 'run_module --name module_a', '执行 module_a 检查。', 'running'),
-          makeTask('module_b', 'module_b', 'run_module --name module_b', '执行 module_b 检查。', 'running'),
-          makeTask('module_c', 'module_c', 'run_module --name module_c', '执行 module_c 检查。', 'running'),
-          makeTask('collect_reports', 'collect_reports', 'python collect_reports.py', '模块任务结束后收集报告。', 'pending'),
-        ],
-        [
-          { source: 'run_job', target: 'module_a' },
-          { source: 'run_job', target: 'module_b' },
-          { source: 'run_job', target: 'module_c' },
-          { source: 'module_a', target: 'collect_reports' },
-          { source: 'module_b', target: 'collect_reports' },
-          { source: 'module_c', target: 'collect_reports' },
-        ],
-      );
-    });
-
-    schedule(4600, () => {
-      appendLog('module_a 执行成功。');
-      patchTask('module_a', (task) => ({
-        status: 'success',
-        finishedAt: now(),
-        duration: '1.2s',
-        logs: [...task.logs, taskLog('module_a 结果正常。')],
-      }));
-    });
-
-    schedule(5200, () => {
-      appendLog('module_b 触发断言错误，任务失败。');
-      patchTask('module_b', (task) => ({
-        status: 'failed',
-        finishedAt: now(),
-        duration: '1.8s',
-        logs: [...task.logs, taskLog('错误：pattern_017 触发断言失败。')],
-      }));
-      patchTask('collect_reports', (task) => ({
-        status: 'skipped',
-        finishedAt: now(),
-        logs: [...task.logs, taskLog('因 module_b 失败，暂时跳过报告收集。')],
-      }));
-    });
-
-    schedule(5900, () => {
-      appendLog('module_c 执行成功，流水线等待失败任务处理。');
-      patchTask('module_c', (task) => ({
-        status: 'success',
-        finishedAt: now(),
-        duration: '2.3s',
-        logs: [...task.logs, taskLog('module_c 完成，仅有普通告警。')],
-      }));
-      patchTask('run_job', (task) => ({
-        status: 'failed',
-        finishedAt: now(),
-        duration: '3.4s',
-        logs: [...task.logs, taskLog('子任务 module_b 失败。')],
-      }));
-      patchTask('pipeline', (task) => ({
-        status: 'failed',
-        finishedAt: now(),
-        duration: '5.9s',
-        logs: [...task.logs, taskLog('流水线存在一条失败分支。')],
-      }));
-      setRuntime((prev) => ({ ...prev, runState: 'completed' }));
-    });
-  }, [addTasks, appendLog, clearTimers, flowLabel, patchTask, schedule]);
+  }, [activeFlowKey, clearTimers, schedule, config]);
 
   useEffect(() => {
     if (!autoStart || autoStarted.current) {
@@ -412,84 +311,50 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({ flowLabel = '
   }, [autoStart, startPipeline]);
 
   const stopTask = useCallback((id: string) => {
-    patchTask(id, (task) => ({
-      status: 'stopped',
-      finishedAt: now(),
-      logs: [...task.logs, taskLog('用户手动停止任务。')],
+    const logMsg = `[${now()}] ${config.logPrefix} 用户手动停止任务。`;
+    setRuntime((prev) => ({
+      ...prev,
+      tasks: prev.tasks.map((task) => {
+        if (task.id !== id) return task;
+        return {
+          ...task,
+          status: 'stopped',
+          finishedAt: now(),
+          logs: [...task.logs, logMsg],
+        };
+      }),
+      logs: [...prev.logs, `[${now()}] ${config.logPrefix} 任务 ${id} 已由用户手动停止。`],
     }));
-    appendLog(`${id} 已由用户手动停止。`);
-  }, [appendLog, patchTask]);
+  }, [config.logPrefix]);
 
   const rerunTask = useCallback((id: string) => {
-    patchTask(id, (task) => ({
-      status: 'running',
-      attempts: task.attempts + 1,
-      startedAt: now(),
-      finishedAt: undefined,
-      logs: [...task.logs, taskLog('已触发重跑。')],
-    }));
-    appendLog(`${id} 已触发重跑。`);
-
-    schedule(1100, () => {
-      patchTask(id, (task) => ({
-        status: 'success',
-        finishedAt: now(),
-        duration: '1.1s',
-        logs: [...task.logs, taskLog('重跑成功。')],
-      }));
-      appendLog(`${id} 重跑成功。`);
-
-      setRuntime((prev) => {
-        const nextTasks = prev.tasks.map((task) => {
-          if (task.id === 'collect_reports' && task.status === 'skipped') {
-            return {
-              ...task,
-              status: 'running' as TaskStatus,
-              startedAt: now(),
-              logs: [...task.logs, taskLog('失败分支恢复后，继续执行报告收集。')],
-            };
-          }
-          if (task.id === 'run_job' || task.id === 'pipeline') {
-            return {
-              ...task,
-              status: 'running' as TaskStatus,
-              logs: [...task.logs, taskLog('等待恢复后的分支完成。')],
-            };
-          }
-          return task;
-        });
-        return { ...prev, tasks: nextTasks, runState: 'running' };
-      });
-
-      schedule(900, () => {
+    config.onRerun(id, {
+      appendLog: (msg) => {
+        const formatted = msg.startsWith(config.logPrefix) ? msg : `${config.logPrefix} ${msg}`;
+        setRuntime((prev) => ({ ...prev, logs: [...prev.logs, `[${now()}] ${formatted}`] }));
+      },
+      patchTask: (taskId, patch) => {
         setRuntime((prev) => ({
           ...prev,
-          runState: 'completed',
           tasks: prev.tasks.map((task) => {
-            if (task.id === 'collect_reports') {
-              return {
-                ...task,
-                status: 'success',
-                finishedAt: now(),
-                duration: '0.9s',
-                logs: [...task.logs, taskLog('报告收集完成。')],
-              };
-            }
-            if (task.id === 'run_job' || task.id === 'pipeline') {
-              return {
-                ...task,
-                status: 'success',
-                finishedAt: now(),
-                logs: [...task.logs, taskLog('流水线恢复后成功完成。')],
-              };
-            }
-            return task;
+            if (task.id !== taskId) return task;
+            const nextPatch = typeof patch === 'function' ? patch(task) : patch;
+            return {
+              ...task,
+              ...nextPatch,
+              logs: nextPatch.logs ?? task.logs,
+            };
           }),
-          logs: [...prev.logs, taskLog('流水线已恢复并成功完成。')],
         }));
-      });
+      },
+      setRunState: (state) => {
+        setRuntime((prev) => ({ ...prev, runState: state }));
+      },
+      getNow: now,
+      schedule,
+      setRuntime,
     });
-  }, [appendLog, patchTask, schedule]);
+  }, [activeFlowKey, schedule, config]);
 
   const stopAll = useCallback(() => {
     clearTimers();
@@ -502,7 +367,7 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({ flowLabel = '
             ...task,
             status: 'stopped',
             finishedAt: now(),
-            logs: [...task.logs, taskLog('已被“停止全部”中止。')],
+            logs: [...task.logs, `[${now()}] ${config.logPrefix} 已被“停止全部”中止。`],
           };
         }
         if (task.status === 'pending') {
@@ -510,14 +375,14 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({ flowLabel = '
             ...task,
             status: 'skipped',
             finishedAt: now(),
-            logs: [...task.logs, taskLog('因“停止全部”跳过。')],
+            logs: [...task.logs, `[${now()}] ${config.logPrefix} 因“停止全部”跳过。`],
           };
         }
         return task;
       }),
-      logs: [...prev.logs, taskLog('已触发“停止全部”。')],
+      logs: [...prev.logs, `[${now()}] ${config.logPrefix} 已触发“停止全部”。`],
     }));
-  }, [clearTimers]);
+  }, [clearTimers, config.logPrefix]);
 
   const selectTask = useCallback((id: string) => {
     setRuntime((prev) => ({ ...prev, selectedTaskId: id }));
@@ -535,8 +400,8 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({ flowLabel = '
   const failedCount = runtime.tasks.filter((task) => task.status === 'failed').length;
   const runningCount = runtime.tasks.filter((task) => task.status === 'running').length;
   const canStopAll = runtime.tasks.some((task) => task.status === 'running' || task.status === 'pending');
-  const terminalTitle = `${flowLabel}流水线运行环境`;
-  const terminalCommand = `echo [DFT IDE] ${flowLabel}流水线运行终端已打开`;
+  const terminalTitle = config.terminalTitle;
+  const terminalCommand = config.terminalCommand;
   const terminalCommandUri = buildExecutionTerminalCommandUri(terminalTitle, terminalCommand);
 
   return (
@@ -781,7 +646,7 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({ flowLabel = '
       <header className="pipeline-header">
         <div style={{ minWidth: 0 }}>
           <Title level={4} style={{ margin: 0 }}>
-            {flowLabel}流水线运行态
+            {config.title}运行态
           </Title>
           <Text type="secondary">左到右展示任务依赖；点击节点查看详情，失败节点可重跑，运行节点可停止。</Text>
         </div>

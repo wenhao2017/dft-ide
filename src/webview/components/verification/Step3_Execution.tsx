@@ -34,7 +34,8 @@ const Step3Execution: React.FC<{ onNext: () => void; onPrev: () => void }> = ({
 
       {runtimeOpen && (
         <PipelineRuntimeView
-          flowLabel="验证"
+          flowKey="verification"
+          flowLabel="Lander"
           onClose={() => setRuntimeOpen(false)}
         />
       )}

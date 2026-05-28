@@ -8,10 +8,13 @@ const { Text } = Typography;
 interface Props {
   onNext: () => void;
   onPrev: () => void;
+  category?: string;
 }
 
-const Step3Execution: React.FC<Props> = ({ onNext, onPrev }) => {
+const Step3Execution: React.FC<Props> = ({ onNext, onPrev, category }) => {
   const [runtimeOpen, setRuntimeOpen] = useState(false);
+  const repo = category?.toLowerCase() === 'sailor' ? 'sailor' : 'hibist';
+  const flowLabel = repo === 'sailor' ? 'Sailor' : 'DFTM';
 
   return (
     <div>
@@ -36,7 +39,8 @@ const Step3Execution: React.FC<Props> = ({ onNext, onPrev }) => {
 
       {runtimeOpen && (
         <PipelineRuntimeView
-          flowLabel="设计"
+          flowKey={repo as 'hibist' | 'sailor'}
+          flowLabel={flowLabel}
           onClose={() => setRuntimeOpen(false)}
         />
       )}

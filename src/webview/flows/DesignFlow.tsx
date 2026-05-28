@@ -40,7 +40,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
     {
       title: '执行配置',
       description: '脚本与任务',
-      content: <Step3Execution onNext={nextStep} onPrev={prevStep} />,
+      content: <Step3Execution onNext={nextStep} onPrev={prevStep} category={category} />,
     },
     {
       title: '结果查看',
