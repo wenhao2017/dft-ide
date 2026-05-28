@@ -85,6 +85,16 @@
           "default": "",
           "description": "Optional debug user id. Leave empty to use whoami in production-like environments, with w00445630 as the development fallback."
         },
+        "dftIde.donau.mode": {
+          "type": "string",
+          "enum": [
+            "mock",
+            "real",
+            "auto"
+          ],
+          "default": "mock",
+          "description": "Donau resource loading mode. Mock is the development default; real runs dacct/dqueue/dconfig; auto falls back to mock on command errors."
+        },
         "dftIde.lastSelectedProject": {
           "type": "string",
           "default": "",

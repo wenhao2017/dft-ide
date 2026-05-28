@@ -5,7 +5,6 @@ import {
   Button,
   Radio,
   Typography,
-  Select,
   Row,
   Col,
   Tabs,
@@ -22,6 +21,7 @@ import {
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 import ControlledPathInput from '../shared/ControlledPathInput';
 import CollapsibleSection from '../shared/CollapsibleSection';
+import DonauResourcePicker from '../shared/DonauResourcePicker';
 
 const { Text } = Typography;
 
@@ -37,6 +37,8 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category 
   const [activeTab, setActiveTab] = useState('task');
   const [taskForm] = Form.useForm();
   const [designForm] = Form.useForm();
+  const selectedAccount = Form.useWatch('clusterGroup', taskForm);
+  const selectedQueue = Form.useWatch('clusterQueue', taskForm);
 
   // ── 配置持久化 Hook ─────────────────────────────────
   // 注意：Step2 与 Step1 同属 design flow，但字段不同，合并到同一个文件中
@@ -57,6 +59,15 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category 
       designForm.setFieldsValue(source.step2Design);
     }
   }, [savedData, taskForm, designForm, moduleKey]);
+
+  useEffect(() => {
+    if (!taskForm.getFieldValue('clusterGroup')) {
+      taskForm.setFieldValue('clusterGroup', 'ug_dft.HIS-HIS-ASIC-HISC-DFT-PLAT-WS');
+    }
+    if (!taskForm.getFieldValue('clusterQueue')) {
+      taskForm.setFieldValue('clusterQueue', 'normal');
+    }
+  }, [taskForm]);
 
   const collectFormData = (): Record<string, unknown> => ({
     // 只写 step2 字段，保留 step1 字段（merge 在 extension 侧）
@@ -110,20 +121,32 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category 
       </div>
 
       <CollapsibleSection title="集群配置">
-        <Row gutter={16}>
-          <Col span={12}>
+        <Row gutter={16} align="bottom">
+          <Col flex="1 1 260px">
             <Form.Item label="群组" name="clusterGroup">
-              <Select
+              <Input readOnly
                 placeholder="下拉选择群组"
-                options={[{ value: 'g1', label: 'Group_A' }]}
               />
             </Form.Item>
           </Col>
-          <Col span={12}>
+          <Col flex="1 1 220px">
             <Form.Item label="队列" name="clusterQueue">
-              <Select
+              <Input readOnly
                 placeholder="下拉选择队列"
-                options={[{ value: 'q1', label: 'Queue_Fast' }]}
+              />
+            </Form.Item>
+          </Col>
+          <Col flex="0 0 180px">
+            <Form.Item label=" ">
+              <DonauResourcePicker
+                account={typeof selectedAccount === 'string' ? selectedAccount : undefined}
+                queue={typeof selectedQueue === 'string' ? selectedQueue : undefined}
+                onChange={({ account, queue }) => {
+                  taskForm.setFieldsValue({
+                    clusterGroup: account,
+                    clusterQueue: queue,
+                  });
+                }}
               />
             </Form.Item>
           </Col>

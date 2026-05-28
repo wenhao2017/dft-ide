@@ -66,6 +66,48 @@ export async function getCurrentUser(): Promise<string> {
 /**
  * 获取当前环境的 Git 信息 (分支、修改状态等)
  */
+export interface DonauAccount {
+  name: string;
+  submitName: string;
+  runningJobsLimit: number;
+  runningJobsCount: number;
+  pendingJobsLimit: number;
+  pendingJobsCount: number;
+  sstoppedJobsCount: number;
+}
+
+export interface DonauQueue {
+  name: string;
+  submitName: string;
+  status: string;
+  runningJobsLimit: number;
+  runningJobsCount: number;
+  pendingJobsCount: number;
+  sstoppedJobsCount: number;
+  description?: string;
+}
+
+export async function getDonauResources(): Promise<{
+  success: boolean;
+  source: 'mock' | 'real';
+  accounts: DonauAccount[];
+  queues: DonauQueue[];
+  fallbackReason?: string;
+  error?: string;
+  cancelled?: boolean;
+}> {
+  const res = await ipcRequest('getDonauResources', {}, 120_000);
+  return res as unknown as {
+    success: boolean;
+    source: 'mock' | 'real';
+    accounts: DonauAccount[];
+    queues: DonauQueue[];
+    fallbackReason?: string;
+    error?: string;
+    cancelled?: boolean;
+  };
+}
+
 export async function getGitInfo(): Promise<Record<string, unknown>> {
   return await ipcRequest('getGitInfo');
 }

@@ -3,7 +3,7 @@ import {exec, execFile} from 'child_process'
 import * as path from 'path';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
-import { submitJob, queryJobStatus } from './services/donauService';
+import { submitJob, queryJobStatus, getDonauResources } from './services/donauService';
 import { gitService } from './services/gitService';
 import { obsService } from './services/obsService';
 import { DftProject } from './webview/services/projectService';
@@ -475,6 +475,29 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       }
 
       // ── 新增：选择文件/目录路径 ──────────────────────────────
+      case 'getDonauResources': {
+        const requestId: string = msg.requestId;
+        try {
+          const result = await getDonauResources();
+          currentPanel?.webview.postMessage({
+            command: 'getDonauResourcesResponse',
+            requestId,
+            ...result,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'getDonauResourcesResponse',
+            requestId,
+            success: false,
+            source: 'real',
+            accounts: [],
+            queues: [],
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
       case 'selectPath': {
         const requestId: string = msg.requestId;
         const targetType = msg.targetType || 'file';
