@@ -53,11 +53,7 @@ const flowMeta: Record<string, { title: string; subtitle: string; accent: string
     subtitle: '围绕 Sailor 工具链完成环境准备、模块配置、执行编排和结果查看。',
     accent: '#0ea5e9',
   },
-  Design: {
-    title: 'Design 工作流配置',
-    subtitle: '把设计任务从环境准备、工具配置、执行到结果查看串成稳定闭环。',
-    accent: '#7c3aed',
-  },
+
   Verification: {
     title: 'Verification 工作流配置',
     subtitle: '围绕验证工具链、用例执行和报告分析沉淀标准化验证流程。',

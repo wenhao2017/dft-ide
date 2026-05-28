@@ -84,10 +84,10 @@ const Step4Result: React.FC<Props> = ({ onNext, onPrev, category }) => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Space size="large">
           <Link>
-            <FileTextOutlined /> design/synth.log
+            <FileTextOutlined /> {flowKey}/synth.log
           </Link>
           <Link>
-            <FileTextOutlined /> design/opt.log
+            <FileTextOutlined /> {flowKey}/opt.log
           </Link>
         </Space>
 

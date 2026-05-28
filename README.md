@@ -1,20 +1,20 @@
 # DFT IDE
 
-DFT IDE is a VS Code extension that turns VS Code into a local DFT workflow console. It provides a project home page, DFT flow navigation, Common configuration, Design and Verification workflow pages, project/workspace opening helpers, local page-state persistence, Git-assisted sync, OBS viewer integration, execution helpers, and reserved backend API integration points.
+DFT IDE is a VS Code extension that turns VS Code into a local DFT workflow console. It provides a project home page, DFT flow navigation, Common configuration, Design (Hibist/Sailor) and Verification workflow pages, project/workspace opening helpers, local page-state persistence, Git-assisted sync, OBS viewer integration, execution helpers, and reserved backend API integration points.
 
-The current codebase is still a demo/foundation rather than a complete production IDE. It is structured so different projects can load different Common, Design, Verification, Formal, and STA contexts over time.
+The current codebase is still a demo/foundation rather than a complete production IDE. It is structured so different projects can load different Common, Hibist, Sailor, Verification, Formal, and STA contexts over time.
 
 ## Features
 
 - Custom DFT IDE Activity Bar container and flow Tree View.
 - React webview home page with project search, selection, local-state path settings, and quick flow entry.
 - Common flow for shared paths, design tree location, normalized table location, OBS common data, and Git sync.
-- Design and Verification flows built on a shared `FlowShell`, including module scope selection through a shared design tree panel.
+- Design (Hibist/Sailor) and Verification flows built on a shared `FlowShell`, including module scope selection through a shared design tree panel.
 - File/folder picking, local path validation, file opening, OBS path support, and read-only OBS preview documents through webview IPC.
 - File-based page-state persistence under `.dft-ide/local-state`, or a user-configured base path through `dftIde.localConfigPath`.
 - Config save/read helpers that shallow-merge JSON so independent steps can persist separate fields.
 - Design tree persistence from an explicit design-tree file, with fallback draft storage in Common local state.
-- Module-level config skeleton generation for Design/Verification after saving a design tree.
+- Module-level config skeleton generation for Hibist/Sailor/Verification after saving a design tree.
 - Git integration through VS Code's built-in Git extension: branch/status lookup, changed-file preview, add/commit/push, and opening the Source Control view.
 - Execution helpers for opening VS Code terminals, tracking mock job status, cancelling mock jobs, and storing recent execution history locally.
 - OBS viewer launching with SpaceToken retrieval and AES-128-CBC `fs-signature` generation.
@@ -89,7 +89,7 @@ Run in VS Code:
 1. Open this repository in VS Code.
 2. Run `npm run compile`, or keep `npm run watch` running.
 3. Press `F5` and use the `Run DFT IDE Extension` launch config.
-4. Open the DFT IDE Activity Bar view and choose Home, Common, Design, or Verification.
+4. Open the DFT IDE Activity Bar view and choose Home, Common, Hibist, Sailor, or Verification.
 
 Package as VSIX:
 
@@ -130,7 +130,7 @@ The webview receives initial globals injected by `getWebviewHtml()`:
 - `window.DFT_IDE_API_BASE`
 - `window.DFT_IDE_INITIAL_VIEW`
 
-`App.tsx` handles theme adaptation, top-level routing, and rendering `Welcome`, `CommonFlow`, `DesignFlow`, `VerificationFlow`, or the older wizard fallback. Formal and STA currently appear as planned entries and can follow the Design/Verification pattern later.
+`App.tsx` handles theme adaptation, top-level routing, and rendering `Welcome`, `CommonFlow`, `DesignFlow` (renders Hibist/Sailor), `VerificationFlow`, or the older wizard fallback. Formal and STA currently appear as planned entries and can follow the Hibist/Sailor/Verification pattern later.
 
 Shared webview state lives in `src/webview/store/wizardStore.ts`:
 
@@ -175,20 +175,22 @@ When a custom base is configured, the extension scopes data by project name plus
 
 ```text
 common -> .dft-ide/local-state/common.json
-design -> .dft-ide/local-state/design.json
+hibist -> .dft-ide/local-state/hibist.json
+sailor -> .dft-ide/local-state/sailor.json
 verification -> .dft-ide/local-state/verification.json
-design/<module>/config -> .dft-ide/local-state/design/<module>/config.json
+hibist/<module>/config -> .dft-ide/local-state/hibist/<module>/config.json
+sailor/<module>/config -> .dft-ide/local-state/sailor/<module>/config.json
 ```
 
 `mergeConfigFile()` shallow-merges new data into existing JSON so separate steps do not overwrite unrelated fields.
 
 ## Design Tree
 
-Design and Verification use `src/webview/components/shared/DesignTreePanel.tsx` to select and maintain module scope.
+Hibist/Sailor and Verification use `src/webview/components/shared/DesignTreePanel.tsx` to select and maintain module scope.
 
 If Common config contains `designTree`, the extension resolves it as a file path, or as a directory containing `design_tree.mock.json`. Saving the tree writes to that file. If no design-tree path is configured, the tree is stored as `designTreeDraft` inside Common local state.
 
-Saving a design tree also updates Design/Verification module config skeletons, including module keys, titles, types, active module key, and per-module config files.
+Saving a design tree also updates Hibist/Sailor/Verification module config skeletons, including module keys, titles, types, active module key, and per-module config files.
 
 ## Git Integration
 

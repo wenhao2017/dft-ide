@@ -8,7 +8,7 @@ DFT IDE is a VS Code extension that turns VS Code into a local DFT workflow cons
 
 - A custom Activity Bar container and Tree View for DFT flows.
 - A React webview home page and flow pages.
-- Common, Design, and Verification workflow screens.
+- Common, Hibist, Sailor, and Verification workflow screens.
 - Project creation/opening helpers for local DFT workspaces.
 - Local page-state persistence under `.dft-ide/local-state` or a user-configured base path.
 - IPC bridges from the webview to VS Code APIs for path picking, path validation, file opening, config persistence, design-tree persistence, Git sync, OBS viewer actions, execution history, terminal opening, and mock job submission/cancellation.
@@ -75,7 +75,7 @@ src/services/           Extension-host services: Git, OBS, and Donau mock servic
 src/webview/main.tsx    React webview entry point
 src/webview/App.tsx     Webview theme, routing, and top-level layout
 src/webview/components/ UI components grouped by flow or shared usage
-src/webview/flows/      Common, Design, and Verification flow containers
+src/webview/flows/      Common, Design (Hibist/Sailor), and Verification flow containers
 src/webview/hooks/      Shared React hooks
 src/webview/services/   Webview-side API clients
 src/webview/store/      Zustand store
@@ -122,7 +122,7 @@ Flow entries in the left Tree View are configured in `FLOW_CONFIGS` in `src/exte
 - Ant Design theme setup based on VS Code theme classes.
 - Top-level flow routing.
 - Handling `showWelcome` and `loadFlow` messages.
-- Rendering `Welcome`, `CommonFlow`, `DesignFlow`, `VerificationFlow`, or the older wizard demo fallback.
+- Rendering `Welcome`, `CommonFlow`, `DesignFlow` (renders Hibist/Sailor), `VerificationFlow`, or the older wizard demo fallback.
 
 Shared state lives in `src/webview/store/wizardStore.ts`:
 
@@ -161,9 +161,11 @@ When `dftIde.localConfigPath` is configured, the extension scopes data by projec
 Examples:
 
 - `common` -> `common.json`
-- `design` -> `design.json`
+- `hibist` -> `hibist.json`
+- `sailor` -> `sailor.json`
 - `verification` -> `verification.json`
-- `design/<module>/config` -> `design/<module>/config.json`
+- `hibist/<module>/config` -> `hibist/<module>/config.json`
+- `sailor/<module>/config` -> `sailor/<module>/config.json`
 - `verification/<module>/config` -> `verification/<module>/config.json`
 
 `mergeConfigFile()` shallow-merges new data into existing JSON so different steps can persist separate fields without replacing the whole file.
@@ -222,7 +224,7 @@ Typical places to update:
 6. Reuse `FlowShell` for step-based flows unless the UX requires a different structure.
 7. Use `useFlowConfig()` and IPC helpers for persistence instead of hard-coding project data in UI components.
 
-Formal and STA currently exist as planned navigation entries and can follow the Design/Verification pattern.
+Formal and STA currently exist as planned navigation entries and can follow the Hibist/Sailor/Verification pattern.
 
 ## Packaging Notes
 

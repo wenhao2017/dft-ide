@@ -375,10 +375,10 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                 type="secondary"
                 style={{ margin: '12px 0 0', fontSize: 15, lineHeight: 1.8 }}
               >
-                从项目列表进入本地 DFT 工作区。每个项目对应 GitLab 三个仓库：
-                <Text code>项目名_data</Text>、<Text code>项目名_design</Text>、
-                <Text code>项目名_verification</Text>，本地目录固定为
-                <Text code>data/design/verification</Text>。
+                从项目列表进入本地 DFT 工作区。每个项目对应 GitLab 四个仓库：
+                <Text code>项目名_data</Text>、<Text code>项目名_hibist</Text>、
+                <Text code>项目名_sailor</Text>、<Text code>项目名_verification</Text>，本地目录固定为
+                <Text code>data/hibist/sailor/verification</Text>。
               </Paragraph>
             </div>
             <div

@@ -285,7 +285,7 @@ const FLOW_CONFIGS: FlowMenuConfig[] = [
     label: 'Common',
     icon: 'settings-gear',
     description: 'Git · OBS · Paths',
-    tooltip: '公共配置\n─────────────────\n• Git 设计/验证分支管理\n• Design Tree 路径配置\n• OBS 存储与公共数据下载\n• 归一化表格路径',
+    tooltip: '公共配置\n─────────────────\n• Git 仓库分支管理\n• Design Tree 路径配置\n• OBS 存储与公共数据下载\n• 归一化表格路径',
     category: 'Common',
     contextValue: 'dftFlow.common',
   },
@@ -1355,7 +1355,7 @@ async function runVscodeDemo(action: unknown): Promise<void> {
       return;
     case 'quickPick': {
       const picked = await vscode.window.showQuickPick(
-        ['Common 配置', 'Design 工作流', 'Verification 工作流'],
+        ['Common 配置', 'Hibist 工作流', 'Sailor 工作流', 'Verification 工作流'],
         { placeHolder: '选择要进入的 DFT 功能区' }
       );
       if (picked) {

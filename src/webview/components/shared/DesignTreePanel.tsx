@@ -718,7 +718,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
             设计树
           </Text>
           <Title level={5} style={{ margin: 0, fontSize: 15 }}>
-            {flowLabel === 'Design' ? '设计模块范围' : '验证模块范围'}
+            {flow !== 'verification' ? '设计模块范围' : '验证模块范围'}
           </Title>
           <Text
             type="secondary"
@@ -779,7 +779,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
           </Space>
           <Badge
             color={accent}
-            text={flowLabel === 'Design' ? '设计配置范围' : '验证配置范围'}
+            text={flow !== 'verification' ? '设计配置范围' : '验证配置范围'}
           />
           <Button
             block
@@ -806,7 +806,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
 
       <Modal
         open={fullscreen}
-        title={flowLabel === 'Design' ? '设计树' : '验证设计树'}
+        title={flow !== 'verification' ? '设计树' : '验证设计树'}
         width="min(980px, 92vw)"
         footer={null}
         onCancel={() => setFullscreen(false)}
