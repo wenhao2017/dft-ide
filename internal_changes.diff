@@ -1,0 +1,503 @@
+diff --git a/package.json b/package.json
+index 14f311a..bbf3c74 100644
+--- a/package.json
++++ b/package.json
+@@ -154,6 +154,11 @@
+           "type": "boolean",
+           "default": false,
+           "description": "Hide the VS Code Activity Bar while using the DFT IDE layout."
++        },
++        "dftIde.gitlabHost": {
++          "type": "string",
++          "default": "http://7.227.4.70/test11",
++          "description": "gitlab host."
+         }
+       }
+     }
+diff --git a/src/extension.ts b/src/extension.ts
+index e749dc3..4a7e811 100644
+--- a/src/extension.ts
++++ b/src/extension.ts
+@@ -15,6 +15,7 @@ const LOCAL_STATE_DIR_NAME = '.dft-ide';
+ const LOCAL_STATE_SUBDIR = 'local-state';
+ const OBS_READONLY_SCHEME = 'dft-obs-readonly';
+ const PROJECT_REPOS = ['data', 'hibist', 'sailor', 'verification'] as const;
++const GITLAB_HOST = 'http://7.227.4.70/test11';
+ 
+ let currentPanel: vscode.WebviewPanel | undefined = undefined;
+ let activeCategory: string | undefined = undefined;
+@@ -1383,6 +1384,29 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+         return;
+       }
+ 
++      case 'openGitlabHost': {
++        const requestId: string = msg.requestId;
++        const repoGitName = normalizeHistoryFlow(msg.repoGitName);
++        const config = vscode.workspace.getConfiguration('dftIde');
++        const gitlabHost = config.get<string>('gitlabHost', GITLAB_HOST);
++  
++        try {
++          const targetUrl = vscode.Uri.parse(`${gitlabHost}/${repoGitName}`);
++          // 调用 API 打开地址
++          const success = await vscode.env.openExternal(targetUrl);
++          currentPanel?.webview.postMessage({
++            command: 'openGitlabHostResponse', requestId,
++            success: success,
++          });
++        } catch (err) {
++          currentPanel?.webview.postMessage({
++            command: 'openGitlabHostResponse', requestId,
++            success: false, error: String(err)
++          });
++        }
++        return;
++      }
++
+       default:
+         return;
+     }
+diff --git a/src/webview/components/design/Step1_CommonConfig.tsx b/src/webview/components/design/Step1_CommonConfig.tsx
+index 0b9be9e..8a4bf00 100644
+--- a/src/webview/components/design/Step1_CommonConfig.tsx
++++ b/src/webview/components/design/Step1_CommonConfig.tsx
+@@ -1,15 +1,19 @@
+ import React, { useEffect, useState } from 'react';
+-import { Badge, Button, Form, Select, Space, Spin, Typography, message } from 'antd';
++import { Badge, Button, Form, Select, Space, Spin, Typography, message, Row, Col, Card, Radio, Input } from 'antd';
+ import {
+   BranchesOutlined,
+   FileAddOutlined,
++  FileOutlined,
++  FolderOpenOutlined,
++  MinusCircleOutlined,
++  PlusOutlined,
+   RightOutlined,
+   SaveOutlined,
+ } from '@ant-design/icons';
+-import { useVscodePath } from '../../hooks/useVscodePath';
++import { useVscodePath, VscodePathState } from '../../hooks/useVscodePath';
+ import { useFlowConfig } from '../../hooks/useFlowConfig';
+ import PathInput from '../shared/PathInput';
+-import { generateDefaultFlowConfigs, getGitInfo } from '../../utils/ipc';
++import { generateDefaultFlowConfigs, getGitInfo, selectPath } from '../../utils/ipc';
+ import useWizardStore from '../../store/wizardStore';
+ import CollapsibleSection from '../shared/CollapsibleSection';
+ 
+@@ -21,19 +25,33 @@ interface Props {
+   category: string;
+ }
+ 
++export interface NormalizeCfg {
++  commandCfg: string;
++  jsonCfg: string;
++}
++
++const pageStyle: React.CSSProperties = {
++  padding: 4,
++  color: 'var(--vscode-foreground)',
++};
++
+ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => {
+   const flowKey = category.toLowerCase();
+   const project = useVscodePath();
+-  const commonPath = useVscodePath();
+   const workPath = useVscodePath();
+   const sailorCfg = useVscodePath();
+-  const defaultCfg = useVscodePath();
+-  const atpgCfg = useVscodePath();
+-  const staCfg = useVscodePath();
+-  const fmlCfg = useVscodePath();
++  // const commandCfg = useVscodePath();
++  // const jsonCfg = useVscodePath();
++  // const staCfg = useVscodePath();
++  // const fmlCfg = useVscodePath();
+ 
+   const [currentBranch, setCurrentBranch] = useState<string>('');
++  // 初始化时加载数据
++  const [normalizeCfgs, setNormalizeCfgs] = useState<NormalizeCfg[]>([
++    {commandCfg: '', jsonCfg: ''}
++  ]);
+   const [generating, setGenerating] = useState(false);
++  const [normalizeIndex, setNormalizeIndex] = useState<number>(0);
+   const updatePayload = useWizardStore((state) => state.updatePayload);
+ 
+   const { savedData, loading, saving, hasUnsaved, handleSave } =
+@@ -54,28 +72,23 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+   }, [updatePayload]);
+ 
+   useEffect(() => {
+-    if (!savedData) return;
++    if (!savedData) {
++      //初始化表格数据
++      return;
++    } 
+     const source = (savedData.step1 as Record<string, unknown> | undefined) ?? savedData;
+     if (source.project) project.setValue(String(source.project));
+-    if (source.commonPath) commonPath.setValue(String(source.commonPath));
+     if (source.workPath) workPath.setValue(String(source.workPath));
+     if (source.sailorCfg) sailorCfg.setValue(String(source.sailorCfg));
+-    if (source.defaultCfg) defaultCfg.setValue(String(source.defaultCfg));
+-    if (source.atpgCfg) atpgCfg.setValue(String(source.atpgCfg));
+-    if (source.staCfg) staCfg.setValue(String(source.staCfg));
+-    if (source.fmlCfg) fmlCfg.setValue(String(source.fmlCfg));
++    
+   // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [savedData, moduleKey]);
+ 
+   const collectFormData = () => ({
+     project: project.value,
+-    commonPath: commonPath.value,
+     workPath: workPath.value,
+     sailorCfg: sailorCfg.value,
+-    defaultCfg: defaultCfg.value,
+-    atpgCfg: atpgCfg.value,
+-    staCfg: staCfg.value,
+-    fmlCfg: fmlCfg.value,
++   
+   });
+ 
+   const onSave = () => {
+@@ -87,6 +100,40 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+     void handleSave({ moduleKey, step1: data });
+   };
+ 
++  const handleChange = (e: Event) => {
++    setNormalizeIndex(e.target?.value);
++  }
++
++  const addNormalizeCfg = () => {
++    setNormalizeCfgs([...normalizeCfgs, {commandCfg: '', jsonCfg: ''}]);
++  }
++
++  const removeNormalizeCfg = (index: number) => {
++    setNormalizeCfgs(prevItems => [...prevItems.slice(0, index), ...prevItems.slice(index + 1)]);
++    if(index < normalizeIndex) setNormalizeIndex(normalizeIndex - 1);
++    if(index === normalizeIndex) setNormalizeIndex(0);
++  }
++
++  const chooseNormalCfg = async (index: number, type: number) => {
++    const selected = await selectPath('file');
++    if (selected) setNormalCfg(index, selected, type);
++  };
++
++  const setNormalCfg = async (index: number, value: string, type: number) => {
++    setNormalizeCfgs(normalizeCfgs.map((item, i) => {
++      if (i === index) return type === 1 ? { ...item, commandCfg: value } : { ...item, jsonCfg: value };
++      return item;
++    }));
++  };
++
++  const configHeader = (
++    <Row style={{ marginBottom: 4 }}>
++      <Col span={1}></Col>
++      <Col span={11} style={{ marginLeft: 4 }}>{"命令入口"}</Col>
++      <Col span={11} style={{ marginLeft: 4 }}>{"配置json文件"}</Col>
++    </Row>
++  )
++
+   const onGenerateDefaults = async () => {
+     setGenerating(true);
+     try {
+@@ -103,72 +150,126 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+ 
+   return (
+     <Spin spinning={loading} tip="读取配置中...">
+-      <div style={{ padding: '8px 0' }}>
+-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
+-          <Button shape="round" icon={<BranchesOutlined />} style={{ cursor: 'default' }}>
+-            {currentBranch || '获取分支中...'}
+-          </Button>
+-        </div>
+-
+-        <Form layout="horizontal" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }} style={{ maxWidth: 920 }}>
+-          <Form.Item label="project.cshrc">
+-            <PathInput
+-              state={project}
+-              placeholder="请选择 project.cshrc"
+-              showOpen
+-              showSelectFile
+-            />
+-          </Form.Item>
+-
+-          <Form.Item label="COMMON_PATH">
+-            <PathInput
+-              state={commonPath}
+-              placeholder="请选择 COMMON_PATH 目录"
+-              showOpen
+-              showSelectFolder
+-            />
+-          </Form.Item>
+-
+-          <Form.Item label={`common ${category} cfg`}>
+-            <PathInput
+-              state={sailorCfg}
+-              placeholder={`请选择 common ${category} cfg`}
+-              showOpen
+-              showSelectFile
+-            />
+-          </Form.Item>
+-
+-          <Form.Item label="选择领域">
+-            <Select
+-              allowClear
+-              placeholder="请选择领域"
+-              options={[
+-                { label: '领域 1', value: 'domain-1' },
+-                { label: '领域 2', value: 'domain-2' },
+-                { label: '领域 3', value: 'domain-3' },
+-              ]}
+-            />
+-          </Form.Item>
+-
+-          <CollapsibleSection title="归一化表格转 cfg">
+-            <Form.Item label="命令入口">
+-              <Space size="middle" wrap>
+-                <Button icon={<FileAddOutlined />} loading={generating} onClick={onGenerateDefaults}>生成默认配置</Button>
+-                <Text type="secondary">根据归一化表格生成当前流程的默认 cfg。</Text>
+-              </Space>
++      <Form layout="horizontal" labelCol={{ span: 4 }} wrapperCol={{ span: 20 }}>
++        <div style={pageStyle}>
++          <Card size="small" style={{ marginBottom: 14 }} bodyStyle={{ padding: 18 }}>
++            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
++              <Button shape="round" icon={<BranchesOutlined />} style={{ cursor: 'default' }}>
++                {currentBranch || '获取分支中...'}
++              </Button>
++            </div>
++            <Form.Item label="project.cshrc">
++              <PathInput
++                state={project}
++                pathSources={['local']}
++                placeholder="请选择 project.cshrc"
++                showOpen
++                showSelectFile
++              />
+             </Form.Item>
+ 
+-            <Form.Item label="配置 JSON 文件" style={{ marginBottom: 0 }}>
++            <Form.Item label={`common ${category} cfg`}>
+               <PathInput
+-                state={defaultCfg}
+-                placeholder="请选择或输入配置 JSON 文件"
++                state={sailorCfg}
++                pathSources={['local']}
++                placeholder={`请选择 common ${category} cfg`}
+                 showOpen
+                 showSelectFile
+               />
+             </Form.Item>
+-          </CollapsibleSection>
+ 
+-          <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 32, flexWrap: 'wrap' }}>
++            <Form.Item label="选择领域">
++              <Select
++                allowClear
++                placeholder="请选择领域"
++                options={[
++                  { label: '领域 1', value: 'domain-1' },
++                  { label: '领域 2', value: 'domain-2' },
++                  { label: '领域 3', value: 'domain-3' },
++                ]}
++              />
++            </Form.Item>
++          </Card>
++          <Card size="small" style={{ marginBottom: 14 }} bodyStyle={{ padding: 18 }}>
++            <CollapsibleSection title="归一化表格转 cfg">
++              {configHeader}
++              {normalizeCfgs.map((normalizeCfg, index) => {
++                return(
++                  <Row key={index} gutter={8} style={{ marginBottom: 16 }}>
++                    <Col span={1}>
++                      <Space>
++                        <Radio checked={normalizeIndex === index} onChange={handleChange} value={index}></Radio>
++                      </Space>
++                    </Col>
++                    <Col span={11} className="dft-path-input">
++                      <Input
++                        value={normalizeCfg.commandCfg}
++                        onChange={(event) => setNormalCfg(index, event.target.value, 1)}
++                        placeholder="请选择命令入口"
++                        style={{ padding: 0}}
++                        allowClear
++                        suffix={
++                          <Space.Compact>
++                            <Button
++                              aria-label="打开"
++                              icon={<FileOutlined />}
++                              onClick={() => chooseNormalCfg(index, 1)}
++                              style={{ flex: '0 0 auto', width: 30, paddingInline: 4 }}
++                            />
++                            <Button
++                              aria-label="打开"
++                              icon={<FolderOpenOutlined />}
++                              onClick={() => chooseNormalCfg(index, 1)}
++                              style={{ flex: '0 0 auto', width: 30, paddingInline: 4 }}
++                            />
++                          </Space.Compact>
++                        }
++                      />
++                    </Col>
++                    <Col span={11} className="dft-path-input">
++                      <Input
++                        value={normalizeCfg.jsonCfg}
++                        onChange={(event) => setNormalCfg(index, event.target.value, 2)}
++                        placeholder="请选择json文件"
++                        style={{ padding: 0}}
++                        allowClear
++                        suffix={
++                          <Space.Compact>
++                            <Button
++                              aria-label="打开"
++                              icon={<FileOutlined />}
++                              onClick={() => chooseNormalCfg(index, 2)}
++                              style={{ flex: '0 0 auto', width: 30, paddingInline: 4 }}
++                            />
++                            <Button
++                              aria-label="打开"
++                              icon={<FolderOpenOutlined />}
++                              onClick={() => chooseNormalCfg(index, 2)}
++                              style={{ flex: '0 0 auto', width: 30, paddingInline: 4 }}
++                            />
++                          </Space.Compact>
++                        }
++                      />
++                    </Col>
++                    <Col span={1}>
++                      <Button
++                        type="text"
++                        danger
++                        icon={<MinusCircleOutlined />}
++                        onClick={() => removeNormalizeCfg(index)}
++                      />
++                    </Col>
++                  </Row>
++                );
++              })}
++              <Button type="dashed" onClick={() => addNormalizeCfg()} block icon={<PlusOutlined />}>
++                添加
++              </Button>
++            </CollapsibleSection>
++          </Card>
++
++          <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
++            <Button icon={<FileAddOutlined />}>产生默认配置</Button>
+             <Badge dot={hasUnsaved} offset={[-4, 4]}>
+               <Button icon={<SaveOutlined />} loading={saving} onClick={onSave}>
+                 保存
+@@ -178,8 +279,8 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+               下一页 <RightOutlined />
+             </Button>
+           </div>
+-        </Form>
+-      </div>
++        </div>
++      </Form>
+     </Spin>
+   );
+ };
+diff --git a/src/webview/flows/CommonFlow.tsx b/src/webview/flows/CommonFlow.tsx
+index b663a22..59145c8 100644
+--- a/src/webview/flows/CommonFlow.tsx
++++ b/src/webview/flows/CommonFlow.tsx
+@@ -29,6 +29,7 @@ import {
+   SyncOutlined,
+   UploadOutlined,
+   ExclamationCircleOutlined,
++  GitlabOutlined,
+ } from '@ant-design/icons';
+ import { useVscodePath } from '../hooks/useVscodePath';
+ import { useFlowConfig } from '../hooks/useFlowConfig';
+@@ -42,6 +43,7 @@ import {
+   syncCommonArtifacts,
+   RepoGitInfo,
+   RepoKey,
++  openGitlabHost,
+ } from '../utils/ipc';
+ 
+ const { Text, Title, Paragraph } = Typography;
+@@ -361,6 +363,15 @@ const CommonFlow: React.FC = () => {
+     }
+   };
+ 
++  const openGitlab = async (repo: RepoKey) => {
++    const repoGitNames = `${repoInfo[repo].repoRoot}`.split("\\");
++    const repoGitName = repoGitNames.length > 0 ? repoGitNames[repoGitNames.length - 1] : "";
++    const result = await openGitlabHost(repoGitName);
++      if (!result.success) {
++        message.error(result.error ?? '无法打开浏览器，请检查系统默认设置!');
++      }
++  };
++
+   const submitBranchAction = async () => {
+     const branchName = branchModal.value.trim();
+     if (!branchName) {
+@@ -387,14 +398,14 @@ const CommonFlow: React.FC = () => {
+     ? activeProject.id !== '0' && (activeProject.canManageMembers ?? activeProject.role?.toUpperCase() === 'DFTM')
+     : false;
+ 
+-  const repoMenu = (repo: RepoKey, group: Number): MenuProps['items'] => [
++  const repoMenu = (repo: RepoKey, group: number): MenuProps['items'] => [
+     { key: 'pull', icon: <CloudSyncOutlined />, label: '更新到最新', onClick: () => runAction(repo, 'pull') },
+     {
+       key: 'push',
+       icon: <UploadOutlined />,
+       label: '上传本地提交',
+       onClick: () => runAction(repo, 'push'),
+-      disabled: !canManageMembers && group == 1,
++      // disabled: !canManageMembers && group == 1,
+     },
+     { type: 'divider' },
+     {
+@@ -411,6 +422,7 @@ const CommonFlow: React.FC = () => {
+     },
+     { type: 'divider' },
+     { key: 'openScm', icon: <FileSyncOutlined />, label: '打开 VS Code Git 面板', onClick: () => runAction(repo, 'openScm') },
++    { key: 'openGitlab', icon: <GitlabOutlined />, label: '打开 Git 地址', onClick: () => openGitlab(repo) },
+   ];
+ 
+   const openConfirmModal = async () => {
+@@ -448,7 +460,7 @@ const CommonFlow: React.FC = () => {
+     message.error(result.error ?? '同步失败');
+   };
+ 
+-  const setSelectedRepoByGroup = (repo: RepoKey, group: Number) => {
++  const setSelectedRepoByGroup = (repo: RepoKey, group: number) => {
+     if (group == 1) {
+       setSelectedDataRepo(repo);
+     } else {
+@@ -474,7 +486,7 @@ const CommonFlow: React.FC = () => {
+     </div>
+   );
+ 
+-  const renderRepoCard = (repo: RepoKey, group: Number) => {
++  const renderRepoCard = (repo: RepoKey, group: number) => {
+     const info = repoInfo[repo];
+     const active = group == 1 ? selectedDataRepo === repo : selectedRepo === repo;
+     const hasError = Boolean(info?.error);
+@@ -705,7 +717,7 @@ const CommonFlow: React.FC = () => {
+                   fontWeight: 700,
+                   boxShadow: '0 6px 16px rgba(22,119,255,0.24)',
+                 }}
+-                disabled={syncDirection === 'targetToData' && !canManageMembers }
++                // disabled={syncDirection === 'targetToData' && !canManageMembers }
+               >
+                 {primaryButtonText}
+               </Button>
+diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
+index 0300f1e..b9665c0 100644
+--- a/src/webview/utils/ipc.ts
++++ b/src/webview/utils/ipc.ts
+@@ -489,3 +489,14 @@ export async function getExecutionHistory(
+   const res = await ipcRequest('getExecutionHistory', { flow });
+   return res as { success: boolean; history: ExecutionHistoryRecord[]; error?: string };
+ }
++
++/**
++ * 打开 Gitlab 主页。
++ */
++export async function openGitlabHost(
++  repoGitName: string
++): Promise<{ success: boolean; error?: string }> {
++  const res = await ipcRequest('openGitlabHost', { repoGitName });
++  return res as { success: boolean; history: ExecutionHistoryRecord[]; error?: string };
++}
++
