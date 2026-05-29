@@ -313,6 +313,14 @@ export async function listFlowConfigFiles(
   return res as unknown as { success: boolean; configs: FlowConfigFileInfo[]; configsDir?: string; error?: string };
 }
 
+export async function createFlowConfigFile(
+  flow: 'hibist' | 'sailor' | 'verification',
+  moduleName: string
+): Promise<{ success: boolean; config?: FlowConfigFileInfo; error?: string }> {
+  const res = await ipcRequest('createFlowConfigFile', { flow, moduleName });
+  return res as unknown as { success: boolean; config?: FlowConfigFileInfo; error?: string };
+}
+
 export async function duplicateFlowConfigFile(
   flow: 'hibist' | 'sailor' | 'verification',
   moduleName: string

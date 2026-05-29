@@ -1055,6 +1055,32 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
+      case 'createFlowConfigFile': {
+        const requestId: string = msg.requestId;
+        const flow = normalizeConfigFlow(msg.flow);
+        const moduleName = typeof msg.moduleName === 'string' ? msg.moduleName : '';
+        try {
+          if (!flow) {
+            throw new Error('Unsupported flow for config files.');
+          }
+          const config = await createFlowConfigFile(flow, moduleName);
+          currentPanel?.webview.postMessage({
+            command: 'createFlowConfigFileResponse',
+            requestId,
+            success: true,
+            config
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'createFlowConfigFileResponse',
+            requestId,
+            success: false,
+            error: String(err)
+          });
+        }
+        return;
+      }
+
       case 'duplicateFlowConfigFile': {
         const requestId: string = msg.requestId;
         const flow = normalizeConfigFlow(msg.flow);
@@ -2807,6 +2833,26 @@ async function listFlowConfigFiles(flow: 'hibist' | 'sailor' | 'verification'): 
 
   configs.sort((a, b) => a.moduleName.localeCompare(b.moduleName));
   return { configs, configsDir };
+}
+
+async function createFlowConfigFile(
+  flow: 'hibist' | 'sailor' | 'verification',
+  moduleName: string
+): Promise<FlowConfigFileInfo> {
+  const configsDir = await getFlowConfigsDirectory(flow);
+  const target = resolveCfgPath(configsDir, moduleName);
+  if (await pathExists(target)) {
+    throw new Error(`Config already exists: ${path.basename(target)}`);
+  }
+  const content = [
+    `# Auto-generated default ${flow} config`,
+    `module = ${moduleName}`,
+    `flow = ${flow}`,
+    ''
+  ].join('\n');
+  await vscode.workspace.fs.writeFile(vscode.Uri.file(target), Buffer.from(content, 'utf-8'));
+  const targetStat = await vscode.workspace.fs.stat(vscode.Uri.file(target));
+  return toFlowConfigFileInfo(target, targetStat);
 }
 
 async function duplicateFlowConfigFile(
