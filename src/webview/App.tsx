@@ -68,13 +68,13 @@ const flowMeta: Record<string, { title: string; subtitle: string; accent: string
 
 // 优化6：内部 Tab 导航配置
 const flowTabs: Array<{ key: string; label: string; icon: React.ReactNode }> = [
-  { key: 'HOME', label: '首页', icon: <HomeOutlined /> },
-  { key: 'Common', label: 'Common', icon: <SettingOutlined /> },
-  { key: 'Hibist', label: 'Hibist', icon: <RocketOutlined /> },
-  { key: 'Sailor', label: 'Sailor', icon: <BellOutlined /> },
-  { key: 'Verification', label: 'Verification', icon: <CheckCircleOutlined /> },
-  { key: 'Formal', label: 'Formal', icon: <ExperimentOutlined /> },
-  { key: 'STA', label: 'STA', icon: <LineChartOutlined /> },
+  { key: 'HOME', label: '项目主页', icon: <HomeOutlined /> },
+  { key: 'Common', label: '公共配置', icon: <SettingOutlined /> },
+  { key: 'Hibist', label: '设计流程 (Hibist)', icon: <RocketOutlined /> },
+  { key: 'Sailor', label: '设计流程 (Sailor)', icon: <ThunderboltOutlined /> },
+  { key: 'Verification', label: '仿真验证 (Lander)', icon: <CheckCircleOutlined /> },
+  { key: 'Formal', label: '形式验证', icon: <ExperimentOutlined /> },
+  { key: 'STA', label: '静态时序', icon: <LineChartOutlined /> },
 ];
 
 const disabledTabs = new Set(['Formal', 'STA']);

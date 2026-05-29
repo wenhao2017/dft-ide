@@ -275,57 +275,57 @@ interface FlowMenuConfig {
 
 const FLOW_CONFIGS: FlowMenuConfig[] = [
   {
-    label: '主页',
+    label: '项目主页',
     icon: 'home',
-    description: 'Project Console',
-    tooltip: 'DFT IDE 项目主页',
+    description: 'Overview',
+    tooltip: 'DFT IDE 项目管理主页',
     category: 'HOME',
     contextValue: 'dftFlow.home',
   },
   {
-    label: 'Common',
+    label: '公共配置',
     icon: 'settings-gear',
-    description: 'Git · OBS · Paths',
-    tooltip: '公共配置\n─────────────────\n• Git 仓库分支管理\n• Design Tree 路径配置\n• OBS 存储与公共数据下载\n• 归一化表格路径',
+    description: 'Global Settings',
+    tooltip: '公共配置\n─────────────────\n• Git 仓库分支管理\n• Design Tree 路径配置\n• 归一化表格及公共数据配置',
     category: 'Common',
     contextValue: 'dftFlow.common',
   },
   {
-    label: 'Hibist',
+    label: '设计流程 (Hibist)',
     icon: 'rocket',
-    description: 'hibist · DCG',
-    tooltip: 'Hibist Flow\n─────────────────\n• 公共配置 & 工具版本选择\n• 执行流程 (DCG / DC / TOP-DOWN)\n• 集群资源 (CPU / 内存 / 队列)\n• 宏定义 & 特殊参数\n• 执行日志 & 结果查看\n• 端云协同提交',
+    description: 'Design Flow',
+    tooltip: 'Hibist Flow\n─────────────────\n• 工具版本与执行流程管理\n• 集群资源与参数配置\n• 日志查看与结果提交',
     category: 'Hibist',
     contextValue: 'dftFlow.hibist',
   },
   {
-    label: 'Sailor',
-    icon: 'bell',
-    description: 'hibist · sailor · DCG',
-    tooltip: 'Sailor Flow\n─────────────────\n• 公共配置 & 工具版本选择\n• 执行流程 (DCG / DC / TOP-DOWN)\n• 集群资源 (CPU / 内存 / 队列)\n• 宏定义 & 特殊参数\n• 执行日志 & 结果查看\n• 端云协同提交',
+    label: '设计流程 (Sailor)',
+    icon: 'circuit-board',
+    description: 'Design Flow',
+    tooltip: 'Sailor Flow\n─────────────────\n• 工具版本与执行流程管理\n• 集群资源与参数配置\n• 日志查看与结果提交',
     category: 'Sailor',
     contextValue: 'dftFlow.sailor',
   },
   {
-    label: 'Verification',
+    label: '仿真验证 (Lander)',
     icon: 'verified-filled',
-    description: 'sailor · VCS · sim',
-    tooltip: 'Verification Flow\n─────────────────\n• 验证工具配置 & 版本管理\n• 仿真执行参数\n• 覆盖率报告查看\n• Donau HPC 作业提交',
+    description: 'Verification Flow',
+    tooltip: 'Verification Flow\n─────────────────\n• 验证工具配置与仿真执行\n• 覆盖率报告查看与 HPC 作业提交',
     category: 'Verification',
     contextValue: 'dftFlow.verification',
   },
   {
-    label: 'Formal',
-    icon: 'beaker',
-    description: '— Coming Soon',
+    label: '形式验证',
+    icon: 'shield',
+    description: 'Formal (Coming Soon)',
     tooltip: 'Formal Verification\n─────────────────\n形式化验证工具链（开发中）',
     category: 'Formal',
     contextValue: 'dftFlow.formal',
   },
   {
-    label: 'STA',
+    label: '静态时序',
     icon: 'graph',
-    description: '— Coming Soon',
+    description: 'STA (Coming Soon)',
     tooltip: 'Static Timing Analysis\n─────────────────\n静态时序分析配置（开发中）',
     category: 'STA',
     contextValue: 'dftFlow.sta',
@@ -346,7 +346,14 @@ class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
 
   private createMenuItem(cfg: FlowMenuConfig): vscode.TreeItem {
     const item = new vscode.TreeItem(cfg.label, vscode.TreeItemCollapsibleState.None);
-    item.iconPath = new vscode.ThemeIcon(cfg.icon);
+    
+    let colorId = 'charts.blue';
+    if (cfg.category === 'Hibist') colorId = 'charts.purple';
+    else if (cfg.category === 'Sailor') colorId = 'charts.blue';
+    else if (cfg.category === 'Verification') colorId = 'charts.green';
+    else if (cfg.category === 'Formal' || cfg.category === 'STA') colorId = 'descriptionForeground';
+
+    item.iconPath = new vscode.ThemeIcon(cfg.icon, new vscode.ThemeColor(colorId));
     item.description = cfg.description;
     item.tooltip = new vscode.MarkdownString(
       `**$(${cfg.icon}) ${cfg.label}**\n\n${cfg.tooltip.replace(/\n/g, '\n\n')}`
