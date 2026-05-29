@@ -522,7 +522,6 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                       <Space wrap>
                         <Text strong>{project.name}</Text>
                         <Tag>{project.role}</Tag>
-                        <Tag color="processing">Stage {project.stage}</Tag>
                         {project.id === dashboard?.currentProjectId && <Tag color="green">上次项目</Tag>}
                       </Space>
                     }
@@ -552,15 +551,15 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
         </Card>
 
         <Card
-          title="项目准入模型"
+          title="项目准入与工作模式"
           style={{ height: '100%', borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
         >
           <Space direction="vertical" size={14} style={{ width: '100%' }}>
             {[
-              ['项目平台', '首页按当前用户展示可参与项目、角色和项目阶段。'],
-              ['GitLab', '每个项目固定映射 data、hibist、sailor、verification 四个仓库。'],
-              ['Local Root', '用户选择本地托管目录后，项目克隆到该目录下的独立 project root。'],
-              ['Local State', '配置状态默认跟随 project root，统一保存在 .dft-ide/local-state。'],
+              ['项目平台', '按当前用户展示可参与的 DFT 项目与角色，支持本地托管路径配置及项目一键初始化。'],
+              ['多仓映射', '每个项目对应 GitLab 的 data 公共仓与 hibist/sailor/verification 三个执行仓，在本地呈子目录组织。'],
+              ['工作区结构', '项目初始化时，IDE 将自动拉取四仓并生成多文件夹工作区文件（.code-workspace）以进行统一管理。'],
+              ['状态托管', '本地页面配置与 Design Tree 数据默认托管于工作区下的 .dft-ide/local-state 目录中并自动被 Git 忽略。'],
             ].map(([name, desc]) => (
               <div
                 key={name}
