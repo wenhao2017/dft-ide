@@ -489,3 +489,13 @@ export async function getExecutionHistory(
   const res = await ipcRequest('getExecutionHistory', { flow });
   return res as { success: boolean; history: ExecutionHistoryRecord[]; error?: string };
 }
+
+/**
+ * 打开 GitLab 仓库主页。
+ */
+export async function openGitlabHost(
+  repoGitName: string
+): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('openGitlabHost', { repoGitName });
+  return res as { success: boolean; error?: string };
+}

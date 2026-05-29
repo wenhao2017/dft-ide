@@ -29,6 +29,7 @@ import {
   SyncOutlined,
   UploadOutlined,
   ExclamationCircleOutlined,
+  GitlabOutlined,
 } from '@ant-design/icons';
 import { useVscodePath } from '../hooks/useVscodePath';
 import { useFlowConfig } from '../hooks/useFlowConfig';
@@ -42,6 +43,7 @@ import {
   syncCommonArtifacts,
   RepoGitInfo,
   RepoKey,
+  openGitlabHost,
 } from '../utils/ipc';
 
 const { Text, Title, Paragraph } = Typography;
@@ -387,14 +389,29 @@ const CommonFlow: React.FC = () => {
     ? activeProject.id !== '0' && (activeProject.canManageMembers ?? activeProject.role?.toUpperCase() === 'DFTM')
     : false;
 
-  const repoMenu = (repo: RepoKey, group: Number): MenuProps['items'] => [
+  const openGitlab = async (repo: RepoKey) => {
+    const repoRoot = repoInfo[repo]?.repoRoot ?? '';
+    const repoGitNames = repoRoot.split(/[\\/]/).filter(Boolean);
+    const repoGitName = repoGitNames.length > 0 ? repoGitNames[repoGitNames.length - 1] : '';
+    if (!repoGitName) {
+      message.error('无法识别仓库名称');
+      return;
+    }
+
+    const result = await openGitlabHost(repoGitName);
+    if (!result.success) {
+      message.error(result.error ?? '无法打开浏览器，请检查系统默认设置!');
+    }
+  };
+
+  const repoMenu = (repo: RepoKey, group: number): MenuProps['items'] => [
     { key: 'pull', icon: <CloudSyncOutlined />, label: '更新到最新', onClick: () => runAction(repo, 'pull') },
     {
       key: 'push',
       icon: <UploadOutlined />,
       label: '上传本地提交',
       onClick: () => runAction(repo, 'push'),
-      disabled: !canManageMembers && group == 1,
+      // disabled: !canManageMembers && group == 1,
     },
     { type: 'divider' },
     {
@@ -411,6 +428,7 @@ const CommonFlow: React.FC = () => {
     },
     { type: 'divider' },
     { key: 'openScm', icon: <FileSyncOutlined />, label: '打开 VS Code Git 面板', onClick: () => runAction(repo, 'openScm') },
+    { key: 'openGitlab', icon: <GitlabOutlined />, label: '打开 Git 地址', onClick: () => openGitlab(repo) },
   ];
 
   const openConfirmModal = async () => {
@@ -448,7 +466,7 @@ const CommonFlow: React.FC = () => {
     message.error(result.error ?? '同步失败');
   };
 
-  const setSelectedRepoByGroup = (repo: RepoKey, group: Number) => {
+  const setSelectedRepoByGroup = (repo: RepoKey, group: number) => {
     if (group == 1) {
       setSelectedDataRepo(repo);
     } else {
@@ -474,7 +492,7 @@ const CommonFlow: React.FC = () => {
     </div>
   );
 
-  const renderRepoCard = (repo: RepoKey, group: Number) => {
+  const renderRepoCard = (repo: RepoKey, group: number) => {
     const info = repoInfo[repo];
     const active = group == 1 ? selectedDataRepo === repo : selectedRepo === repo;
     const hasError = Boolean(info?.error);
@@ -705,7 +723,7 @@ const CommonFlow: React.FC = () => {
                   fontWeight: 700,
                   boxShadow: '0 6px 16px rgba(22,119,255,0.24)',
                 }}
-                disabled={syncDirection === 'targetToData' && !canManageMembers }
+                // disabled={syncDirection === 'targetToData' && !canManageMembers }
               >
                 {primaryButtonText}
               </Button>

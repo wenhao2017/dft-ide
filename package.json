@@ -154,6 +154,11 @@
           "type": "boolean",
           "default": false,
           "description": "Hide the VS Code Activity Bar while using the DFT IDE layout."
+        },
+        "dftIde.gitlabHost": {
+          "type": "string",
+          "default": "http://7.227.4.70/test11",
+          "description": "gitlab host."
         }
       }
     }

@@ -73,7 +73,7 @@ const flows = [
     title: 'Sailor设计流程',
     desc: '按模块管理工具版本、执行参数、资源配置和设计结果。',
     icon: <BellOutlined />,
-    accent: '#7c3aed',
+    accent: '#0ea5e9',
     status: 'Ready',
   },
   {

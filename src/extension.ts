@@ -15,6 +15,7 @@ const LOCAL_STATE_DIR_NAME = '.dft-ide';
 const LOCAL_STATE_SUBDIR = 'local-state';
 const OBS_READONLY_SCHEME = 'dft-obs-readonly';
 const PROJECT_REPOS = ['data', 'hibist', 'sailor', 'verification'] as const;
+const GITLAB_HOST = 'http://7.227.4.70/test11';
 
 let currentPanel: vscode.WebviewPanel | undefined = undefined;
 let activeCategory: string | undefined = undefined;
@@ -1378,6 +1379,31 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           currentPanel?.webview.postMessage({
             command: 'getExecutionHistoryResponse', requestId,
             success: false, error: String(err)
+          });
+        }
+        return;
+      }
+
+      case 'openGitlabHost': {
+        const requestId: string = msg.requestId;
+        const repoGitName = normalizeHistoryFlow(msg.repoGitName);
+        const config = vscode.workspace.getConfiguration('dftIde');
+        const gitlabHost = config.get<string>('gitlabHost', GITLAB_HOST).replace(/\/+$/, '');
+
+        try {
+          const targetUrl = vscode.Uri.parse(`${gitlabHost}/${repoGitName}`);
+          const success = await vscode.env.openExternal(targetUrl);
+          currentPanel?.webview.postMessage({
+            command: 'openGitlabHostResponse',
+            requestId,
+            success,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'openGitlabHostResponse',
+            requestId,
+            success: false,
+            error: String(err),
           });
         }
         return;
