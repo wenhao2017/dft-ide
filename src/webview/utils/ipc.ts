@@ -499,3 +499,51 @@ export async function openGitlabHost(
   const res = await ipcRequest('openGitlabHost', { repoGitName });
   return res as { success: boolean; error?: string };
 }
+
+export async function prepareCommonArtifactSync(options: {
+  targetRepo: string;
+  sourceDesignTree: string;
+  sourceNormTable: string;
+  targetDesignTree: string;
+  targetNormTable: string;
+  direction: string;
+}): Promise<{
+  success: boolean;
+  precheck: any;
+  diffSummary: any;
+  diffItems: any[];
+  availableStrategies: string[];
+  error?: string;
+}> {
+  const res = await ipcRequest('prepareCommonArtifactSync', options, 60_000);
+  return res as any;
+}
+
+export async function applyCommonArtifactSync(options: {
+  targetRepo: string;
+  strategy: string;
+  direction: string;
+  sourceDesignTree: string;
+  sourceNormTable: string;
+  targetDesignTree: string;
+  targetNormTable: string;
+  decisions: any[];
+  stageAfterApply?: boolean;
+}): Promise<{
+  success: boolean;
+  report: string;
+  files: any[];
+  error?: string;
+}> {
+  const res = await ipcRequest('applyCommonArtifactSync', options, 90_000);
+  return res as any;
+}
+
+export async function openVsCodeDiff(options: {
+  sourcePath: string;
+  targetPath: string;
+  title: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('openVsCodeDiff', options);
+  return res as any;
+}

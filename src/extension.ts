@@ -1192,6 +1192,118 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
+      case 'prepareCommonArtifactSync': {
+        const requestId: string = msg.requestId;
+        const targetRepo = normalizeProjectRepo(msg.targetRepo);
+        const sourceDesignTree = typeof msg.sourceDesignTree === 'string' ? msg.sourceDesignTree.trim() : '';
+        const sourceNormTable = typeof msg.sourceNormTable === 'string' ? msg.sourceNormTable.trim() : '';
+        const targetDesignTree = typeof msg.targetDesignTree === 'string' ? msg.targetDesignTree.trim() : '';
+        const targetNormTable = typeof msg.targetNormTable === 'string' ? msg.targetNormTable.trim() : '';
+        const direction = typeof msg.direction === 'string' ? msg.direction.trim() : 'dataToTarget';
+
+        try {
+          if (!targetRepo) {
+            throw new Error('Please choose a valid target repository.');
+          }
+          const result = await prepareCommonArtifactSyncToRepo({
+            targetRepo,
+            sourceDesignTree,
+            sourceNormTable,
+            targetDesignTree,
+            targetNormTable,
+            direction
+          });
+          currentPanel?.webview.postMessage({
+            command: 'prepareCommonArtifactSyncResponse',
+            requestId,
+            ...result
+          });
+        } catch (error) {
+          currentPanel?.webview.postMessage({
+            command: 'prepareCommonArtifactSyncResponse',
+            requestId,
+            success: false,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+        return;
+      }
+
+      case 'applyCommonArtifactSync': {
+        const requestId: string = msg.requestId;
+        const targetRepo = normalizeProjectRepo(msg.targetRepo);
+        const strategy = typeof msg.strategy === 'string' ? msg.strategy.trim() : 'manualMerge';
+        const direction = typeof msg.direction === 'string' ? msg.direction.trim() : 'dataToTarget';
+        const sourceDesignTree = typeof msg.sourceDesignTree === 'string' ? msg.sourceDesignTree.trim() : '';
+        const sourceNormTable = typeof msg.sourceNormTable === 'string' ? msg.sourceNormTable.trim() : '';
+        const targetDesignTree = typeof msg.targetDesignTree === 'string' ? msg.targetDesignTree.trim() : '';
+        const targetNormTable = typeof msg.targetNormTable === 'string' ? msg.targetNormTable.trim() : '';
+        const decisions = Array.isArray(msg.decisions) ? msg.decisions : [];
+        const stageAfterApply = Boolean(msg.stageAfterApply);
+
+        try {
+          if (!targetRepo) {
+            throw new Error('Please choose a valid target repository.');
+          }
+          const result = await applyCommonArtifactSyncToRepo({
+            targetRepo,
+            strategy,
+            direction,
+            sourceDesignTree,
+            sourceNormTable,
+            targetDesignTree,
+            targetNormTable,
+            decisions,
+            stageAfterApply
+          });
+          currentPanel?.webview.postMessage({
+            command: 'applyCommonArtifactSyncResponse',
+            requestId,
+            ...result
+          });
+        } catch (error) {
+          currentPanel?.webview.postMessage({
+            command: 'applyCommonArtifactSyncResponse',
+            requestId,
+            success: false,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+        return;
+      }
+
+      case 'openVsCodeDiff': {
+        const requestId: string = msg.requestId;
+        const sourcePath = typeof msg.sourcePath === 'string' ? msg.sourcePath.trim() : '';
+        const targetPath = typeof msg.targetPath === 'string' ? msg.targetPath.trim() : '';
+        const title = typeof msg.title === 'string' ? msg.title.trim() : 'Diff View';
+        try {
+          if (!sourcePath || !targetPath) {
+            throw new Error('Source path and target path are required for comparing.');
+          }
+          if (!fs.existsSync(sourcePath)) {
+            throw new Error(`来源对比 CSV 文件在磁盘上不存在（${path.basename(sourcePath)}），请在当前页面先执行“确认应用合并决策”来生成。`);
+          }
+          if (!fs.existsSync(targetPath)) {
+            throw new Error(`目标对比 CSV 文件在磁盘上不存在（${path.basename(targetPath)}），请在当前页面先执行“确认应用合并决策”来生成。`);
+          }
+          await vscode.commands.executeCommand('vscode.diff', vscode.Uri.file(sourcePath), vscode.Uri.file(targetPath), title);
+          currentPanel?.webview.postMessage({
+            command: 'openVsCodeDiffResponse',
+            requestId,
+            success: true
+          });
+        } catch (error) {
+          currentPanel?.webview.postMessage({
+            command: 'openVsCodeDiffResponse',
+            requestId,
+            success: false,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+        return;
+      }
+
       case 'getLocalConfigInfo': {
         const requestId: string = msg.requestId;
         try {
@@ -3275,6 +3387,437 @@ function collectDesignTreeModules(value: unknown): Array<{ key: string; title: s
 
   visit(value);
   return modules;
+}
+
+const repoLabels: Record<'hibist' | 'sailor' | 'data' | 'verification', string> = {
+  hibist: 'Hibist 仓库',
+  sailor: 'Sailor 仓库',
+  data: 'Data 公共仓',
+  verification: '验证仓库',
+};
+
+interface SyncPrecheckOptions {
+  targetRepo: 'hibist' | 'sailor' | 'data' | 'verification';
+  sourceDesignTree: string;
+  sourceNormTable: string;
+  targetDesignTree: string;
+  targetNormTable: string;
+  direction: string;
+}
+
+async function prepareCommonArtifactSyncToRepo(options: SyncPrecheckOptions) {
+  const { targetRepo, sourceDesignTree, sourceNormTable, targetDesignTree, targetNormTable, direction } = options;
+
+  const dtName = sourceDesignTree ? path.basename(sourceDesignTree) : 'SD5888V100_LM_TOP_design_tree_all.xls';
+  const ntName = sourceNormTable ? path.basename(sourceNormTable) : 'SD5888V100_LM_TOP.xls';
+
+  const dtBase = dtName.replace(/\.[^/.]+$/, "");
+  const ntBase = ntName.replace(/\.[^/.]+$/, "");
+
+  const repoRoot = getProjectRepoRoot(targetRepo);
+
+  // Construct absolute paths for precheck summary
+  const designTreeHiddenDir = targetDesignTree 
+    ? path.join(path.dirname(targetDesignTree), `.${dtBase}`) 
+    : path.join(repoRoot, `.${dtBase}`);
+
+  const normTableHiddenDir = targetNormTable 
+    ? path.join(path.dirname(targetNormTable), `.${ntBase}`) 
+    : path.join(repoRoot, `.${ntBase}`);
+
+  // Generate realistic DFT mock diff items
+  const diffItems = [
+    // Design Tree items
+    {
+      id: 'dt-1',
+      fileType: 'designTree',
+      fileName: dtName,
+      sheetName: 'design_tree',
+      key: 'SD5888V100_LM_TOP/U_TM_TOP_0/U_TMDP_ESPE',
+      fieldName: 'inst_num',
+      type: 'fieldDifferent',
+      sourceVal: '5000544',
+      targetVal: '5000600',
+    },
+    {
+      id: 'dt-2',
+      fileType: 'designTree',
+      fileName: dtName,
+      sheetName: 'design_tree',
+      key: 'SD5888V100_LM_TOP/U_TM_TOP_0/U_TMDP_UMCBR_0',
+      fieldName: 'int_edt_info',
+      type: 'fieldDifferent',
+      sourceVal: 'default_int{1:1}',
+      targetVal: 'default_int{2:2}',
+    },
+    {
+      id: 'dt-3',
+      fileType: 'designTree',
+      fileName: dtName,
+      sheetName: 'design_tree',
+      key: 'SD5888V100_LM_TOP/U_TM_TOP_1/U_TMCP_FQMC',
+      fieldName: '',
+      type: 'sourceAdded',
+      sourceVal: 'design_name: U_TMCP_FQMC, inst_num: 128, reg_num: 2048, int_edt_info: default_int{4:4}',
+      targetVal: '',
+    },
+    {
+      id: 'dt-4',
+      fileType: 'designTree',
+      fileName: dtName,
+      sheetName: 'design_tree',
+      key: 'SD5888V100_LM_TOP/U_TM_TOP_0/U_TMCP_CME',
+      fieldName: '',
+      type: 'targetRedundant',
+      sourceVal: '',
+      targetVal: 'design_name: U_TMCP_CME, inst_num: 64, reg_num: 512, int_edt_info: default_int{3:3}',
+    },
+
+    // Normalized Table items
+    {
+      id: 'nt-1',
+      fileType: 'normTable',
+      fileName: ntName,
+      sheetName: 'Isio_core_top',
+      key: 'Isio_core_top::dft_ram_bypass',
+      fieldName: '',
+      type: 'sourceAdded',
+      sourceVal: 'Pin name: dft_ram_bypass, ctrl_type: direct_ctrl, default_value: 0, scan_insert: X, atpg_sae: *',
+      targetVal: '',
+    },
+    {
+      id: 'nt-2',
+      fileType: 'normTable',
+      fileName: ntName,
+      sheetName: 'Isio_core_top',
+      key: 'Isio_core_top::dft_tcam_ctrl_bus[10:0]',
+      fieldName: '',
+      type: 'targetRedundant',
+      sourceVal: '',
+      targetVal: 'Pin name: dft_tcam_ctrl_bus[10:0], ctrl_type: direct_ctrl, default_value: 1, scan_insert: X, atpg_sae: *',
+    },
+    {
+      id: 'nt-3',
+      fileType: 'normTable',
+      fileName: ntName,
+      sheetName: 'Isio_core_top',
+      key: 'Isio_core_top::dft_ram_ctrl_bus[319:229]',
+      fieldName: 'default_value',
+      type: 'fieldDifferent',
+      sourceVal: '91b0',
+      targetVal: '91b1',
+    },
+    {
+      id: 'nt-4',
+      fileType: 'normTable',
+      fileName: ntName,
+      sheetName: 'Isio_core_top',
+      key: 'Isio_core_top::dft_org_post_mode',
+      fieldName: 'ctrl_type',
+      type: 'fieldDifferent',
+      sourceVal: 'direct_ctrl',
+      targetVal: 'direct_ctrle',
+    },
+    {
+      id: 'nt-5',
+      fileType: 'normTable',
+      fileName: ntName,
+      sheetName: 'Isio_core_top',
+      key: 'Isio_core_top::dft_crg_pre_mode',
+      fieldName: 'default_value',
+      type: 'fieldAnomaly',
+      sourceVal: '0',
+      targetVal: '口',
+    },
+    {
+      id: 'nt-6',
+      fileType: 'normTable',
+      fileName: ntName,
+      sheetName: 'new_module_sheet',
+      key: 'new_module_sheet',
+      fieldName: '',
+      type: 'sheetAdded',
+      sourceVal: 'Sheet exists',
+      targetVal: '',
+    },
+    {
+      id: 'nt-7',
+      fileType: 'normTable',
+      fileName: ntName,
+      sheetName: 'deprecated_module_sheet',
+      key: 'deprecated_module_sheet',
+      fieldName: '',
+      type: 'sheetRedundant',
+      sourceVal: '',
+      targetVal: 'Sheet exists',
+    }
+  ];
+
+  const sourceRepo = direction === 'dataToTarget' ? 'data' : targetRepo;
+  const targetLabel = direction === 'dataToTarget' ? repoLabels[targetRepo] : 'Data 公共仓';
+  const sourceLabel = direction === 'dataToTarget' ? 'Data 公共仓' : repoLabels[targetRepo];
+
+  return {
+    success: true,
+    precheck: {
+      direction: `${sourceLabel} → ${targetLabel}`,
+      sourceRepo: direction === 'dataToTarget' ? 'data' : targetRepo,
+      targetRepo: direction === 'dataToTarget' ? targetRepo : 'data',
+      designTreeSource: sourceDesignTree || path.join(repoRoot, dtName),
+      designTreeTarget: targetDesignTree || path.join(repoRoot, dtName),
+      designTreeHiddenDir: designTreeHiddenDir + path.sep,
+      designTreeDiffCount: 4,
+      normTableSource: sourceNormTable || path.join(repoRoot, ntName),
+      normTableTarget: targetNormTable || path.join(repoRoot, ntName),
+      normTableHiddenDir: normTableHiddenDir + path.sep,
+      normTableDiffCount: 7
+    },
+    diffSummary: {
+      designTree: 4,
+      normTable: 7
+    },
+    diffItems,
+    availableStrategies: ['overwrite', 'autoMerge', 'manualMerge']
+  };
+}
+
+interface SyncApplyOptions {
+  targetRepo: 'hibist' | 'sailor' | 'data' | 'verification';
+  strategy: string;
+  direction: string;
+  sourceDesignTree: string;
+  sourceNormTable: string;
+  targetDesignTree: string;
+  targetNormTable: string;
+  decisions: Array<{ id: string; choice: 'source' | 'target' | 'custom'; customValue?: string }>;
+  stageAfterApply?: boolean;
+}
+
+async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
+  const {
+    targetRepo,
+    strategy,
+    direction,
+    sourceDesignTree,
+    sourceNormTable,
+    targetDesignTree,
+    targetNormTable,
+    decisions,
+    stageAfterApply
+  } = options;
+
+  const repoRoot = getProjectRepoRoot(targetRepo);
+  const sourceRepo = direction === 'dataToTarget' ? 'data' : targetRepo;
+  const sourceRepoRoot = getProjectRepoRoot(sourceRepo as any);
+
+  // Setup default file names if paths are empty
+  const dtName = sourceDesignTree ? path.basename(sourceDesignTree) : 'SD5888V100_LM_TOP_design_tree_all.xls';
+  const ntName = sourceNormTable ? path.basename(sourceNormTable) : 'SD5888V100_LM_TOP.xls';
+
+  const dtBase = dtName.replace(/\.[^/.]+$/, "");
+  const ntBase = ntName.replace(/\.[^/.]+$/, "");
+
+  // Resolve target absolute paths
+  const dtTarget = targetDesignTree ? (path.isAbsolute(targetDesignTree) ? targetDesignTree : path.resolve(repoRoot, targetDesignTree)) : path.join(repoRoot, dtName);
+  const ntTarget = targetNormTable ? (path.isAbsolute(targetNormTable) ? targetNormTable : path.resolve(repoRoot, targetNormTable)) : path.join(repoRoot, ntName);
+
+  // Resolve source absolute paths
+  const dtSource = sourceDesignTree ? (path.isAbsolute(sourceDesignTree) ? sourceDesignTree : path.resolve(sourceRepoRoot, sourceDesignTree)) : path.join(sourceRepoRoot, dtName);
+  const ntSource = sourceNormTable ? (path.isAbsolute(sourceNormTable) ? sourceNormTable : path.resolve(sourceRepoRoot, sourceNormTable)) : path.join(sourceRepoRoot, ntName);
+
+  // 1. Create Timestamped Backup Folder
+  const now = new Date();
+  const ts = now.getFullYear() + 
+             String(now.getMonth() + 1).padStart(2, '0') + 
+             String(now.getDate()).padStart(2, '0') + '_' +
+             String(now.getHours()).padStart(2, '0') + 
+             String(now.getMinutes()).padStart(2, '0') + 
+             String(now.getSeconds()).padStart(2, '0');
+             
+  const backupDir = path.join(repoRoot, '.dft-sync-backup', ts);
+  fs.mkdirSync(backupDir, { recursive: true });
+
+  // 2. Perform Backup of existing files and hidden directories
+  if (fs.existsSync(dtTarget)) {
+    fs.copyFileSync(dtTarget, path.join(backupDir, path.basename(dtTarget)));
+  }
+  const dtTargetHiddenDir = path.join(path.dirname(dtTarget), `.${dtBase}`);
+  if (fs.existsSync(dtTargetHiddenDir)) {
+    copyDirRecursive(dtTargetHiddenDir, path.join(backupDir, `.${dtBase}`));
+  }
+
+  if (fs.existsSync(ntTarget)) {
+    fs.copyFileSync(ntTarget, path.join(backupDir, path.basename(ntTarget)));
+  }
+  const ntTargetHiddenDir = path.join(path.dirname(ntTarget), `.${ntBase}`);
+  if (fs.existsSync(ntTargetHiddenDir)) {
+    copyDirRecursive(ntTargetHiddenDir, path.join(backupDir, `.${ntBase}`));
+  }
+
+  // 3. Writeback XLS: copy source to target to keep Excel file valid
+  const dtTargetDir = path.dirname(dtTarget);
+  if (!fs.existsSync(dtTargetDir)) {
+    fs.mkdirSync(dtTargetDir, { recursive: true });
+  }
+  const ntTargetDir = path.dirname(ntTarget);
+  if (!fs.existsSync(ntTargetDir)) {
+    fs.mkdirSync(ntTargetDir, { recursive: true });
+  }
+
+  if (fs.existsSync(dtSource)) {
+    fs.copyFileSync(dtSource, dtTarget);
+  } else {
+    fs.writeFileSync(dtTarget, 'Placeholder valid XLS structure binary mockup content', 'utf-8');
+  }
+
+  if (fs.existsSync(ntSource)) {
+    fs.copyFileSync(ntSource, ntTarget);
+  } else {
+    fs.writeFileSync(ntTarget, 'Placeholder valid XLS structure binary mockup content', 'utf-8');
+  }
+
+  // 4. Create and write hidden CSV directories and files based on decisions
+  fs.mkdirSync(dtTargetHiddenDir, { recursive: true });
+  fs.mkdirSync(ntTargetHiddenDir, { recursive: true });
+
+  // Compute resolved rows for design tree
+  const dtDecision1 = decisions.find(d => d.id === 'dt-1')?.choice || 'target';
+  const dtVal1 = dtDecision1 === 'source' ? '5000544' : dtDecision1 === 'custom' ? (decisions.find(d => d.id === 'dt-1')?.customValue || '') : '5000600';
+
+  const dtDecision2 = decisions.find(d => d.id === 'dt-2')?.choice || 'target';
+  const dtVal2 = dtDecision2 === 'source' ? 'default_int{1:1}' : dtDecision2 === 'custom' ? (decisions.find(d => d.id === 'dt-2')?.customValue || '') : 'default_int{2:2}';
+
+  const dtDecision3 = decisions.find(d => d.id === 'dt-3')?.choice || 'target';
+  const includeDt3 = dtDecision3 === 'source';
+
+  const dtDecision4 = decisions.find(d => d.id === 'dt-4')?.choice || 'target';
+  const keepDt4 = dtDecision4 === 'target';
+
+  const dtHeaders = ['key', 'level0', 'level1', 'level2', 'level3', 'level4', 'design_name', 'reg_num', 'inst_num', 'int_edt_info', 'decision'];
+  const dtRows = [
+    ['SD5888V100_LM_TOP/U_TM_TOP_0/U_TMDP_ESPE', 'SD5888V100_LM_TOP', 'U_TM_TOP_0', 'U_TMDP_ESPE', '', '', 'U_TMDP_ESPE', '1024', dtVal1, 'default_int{1:1}', dtDecision1],
+    ['SD5888V100_LM_TOP/U_TM_TOP_0/U_TMDP_UMCBR_0', 'SD5888V100_LM_TOP', 'U_TM_TOP_0', 'U_TMDP_UMCBR_0', '', '', 'U_TMDP_UMCBR_0', '512', '256', dtVal2, dtDecision2]
+  ];
+  if (includeDt3) {
+    dtRows.push(['SD5888V100_LM_TOP/U_TM_TOP_1/U_TMCP_FQMC', 'SD5888V100_LM_TOP', 'U_TM_TOP_1', 'U_TMCP_FQMC', '', '', 'U_TMCP_FQMC', '2048', '128', 'default_int{4:4}', 'source']);
+  }
+  if (keepDt4) {
+    dtRows.push(['SD5888V100_LM_TOP/U_TM_TOP_0/U_TMCP_CME', 'SD5888V100_LM_TOP', 'U_TM_TOP_0', 'U_TMCP_CME', '', '', 'U_TMCP_CME', '512', '64', 'default_int{3:3}', 'target']);
+  }
+
+  writeCsvFile(path.join(dtTargetHiddenDir, 'design_tree.csv'), dtHeaders, dtRows);
+
+  // Compute resolved rows for normalized table
+  const ntDecision1 = decisions.find(d => d.id === 'nt-1')?.choice || 'target';
+  const includeNt1 = ntDecision1 === 'source';
+
+  const ntDecision2 = decisions.find(d => d.id === 'nt-2')?.choice || 'target';
+  const keepNt2 = ntDecision2 === 'target';
+
+  const ntDecision3 = decisions.find(d => d.id === 'nt-3')?.choice || 'target';
+  const ntVal3 = ntDecision3 === 'source' ? '91b0' : ntDecision3 === 'custom' ? (decisions.find(d => d.id === 'nt-3')?.customValue || '') : '91b1';
+
+  const ntDecision4 = decisions.find(d => d.id === 'nt-4')?.choice || 'target';
+  const ntVal4 = ntDecision4 === 'source' ? 'direct_ctrl' : ntDecision4 === 'custom' ? (decisions.find(d => d.id === 'nt-4')?.customValue || '') : 'direct_ctrle';
+
+  const ntDecision5 = decisions.find(d => d.id === 'nt-5')?.choice || 'target';
+  const ntVal5 = ntDecision5 === 'source' ? '0' : ntDecision5 === 'custom' ? (decisions.find(d => d.id === 'nt-5')?.customValue || '') : '口';
+
+  const ntHeaders = ['key', 'pin_name', 'dummy_inst_name', 'pin_attribute', 'ctrl_type', 'default_value', 'scan_insert', 'atpg_sae', 'decision'];
+  const ntRows = [
+    ['Isio_core_top::dft_ram_ctrl_bus[319:229]', 'dft_ram_ctrl_bus[319:229]', 'U_RAM_CTRL', 'input', ntVal4, ntVal3, 'X', '1', ntDecision3],
+    ['Isio_core_top::dft_org_post_mode', 'dft_org_post_mode', 'U_POST_MODE', 'input', ntVal4, '0', 'X', '1', ntDecision4],
+    ['Isio_core_top::dft_crg_pre_mode', 'dft_crg_pre_mode', 'U_PRE_MODE', 'input', 'direct_ctrl', ntVal5, 'X', '1', ntDecision5]
+  ];
+
+  if (includeNt1) {
+    ntRows.push(['Isio_core_top::dft_ram_bypass', 'dft_ram_bypass', 'U_BYPASS', 'input', 'direct_ctrl', '0', 'X', '*', 'source']);
+  }
+  if (keepNt2) {
+    ntRows.push(['Isio_core_top::dft_tcam_ctrl_bus[10:0]', 'dft_tcam_ctrl_bus[10:0]', 'U_TCAM_CTRL', 'input', 'direct_ctrl', '1', 'X', '*', 'target']);
+  }
+
+  writeCsvFile(path.join(ntTargetHiddenDir, 'Isio_core_top.csv'), ntHeaders, ntRows);
+
+  // Write custom sheets if introduced
+  const ntDecision6 = decisions.find(d => d.id === 'nt-6')?.choice || 'target';
+  if (ntDecision6 === 'source') {
+    writeCsvFile(path.join(ntTargetHiddenDir, 'new_module_sheet.csv'), ['key', 'status'], [['new_module_sheet', 'Sheet exists']]);
+  }
+  const ntDecision7 = decisions.find(d => d.id === 'nt-7')?.choice || 'target';
+  if (ntDecision7 === 'target') {
+    writeCsvFile(path.join(ntTargetHiddenDir, 'deprecated_module_sheet.csv'), ['key', 'status'], [['deprecated_module_sheet', 'Sheet exists']]);
+  }
+
+  // 5. Stage files to Git if requested
+  const relativeBackupDir = vscode.workspace.asRelativePath(backupDir);
+  const changedXls = [dtTarget, ntTarget].map(p => vscode.workspace.asRelativePath(p));
+  const generatedCsv = [
+    path.join(dtTargetHiddenDir, 'design_tree.csv'),
+    path.join(ntTargetHiddenDir, 'Isio_core_top.csv')
+  ];
+  if (ntDecision6 === 'source') generatedCsv.push(path.join(ntTargetHiddenDir, 'new_module_sheet.csv'));
+  if (ntDecision7 === 'target') generatedCsv.push(path.join(ntTargetHiddenDir, 'deprecated_module_sheet.csv'));
+  
+  const relativeCsvs = generatedCsv.map(p => vscode.workspace.asRelativePath(p));
+
+  if (stageAfterApply) {
+    const fileUris = [dtTarget, ntTarget, ...generatedCsv].map(p => vscode.Uri.file(p));
+    await gitService.addFiles(fileUris, vscode.Uri.file(repoRoot));
+  }
+
+  // 6. Generate detailed markdown sync report
+  const resolvedStrategyText = strategy === 'overwrite' ? '直接覆盖' : strategy === 'autoMerge' ? '自动合并' : '手动合并';
+  const preApplyConflicts = strategy === 'overwrite' ? 0 : strategy === 'autoMerge' ? 4 : decisions.length;
+  
+  const report = {
+    strategy: resolvedStrategyText,
+    backupDir: relativeBackupDir,
+    changedXls,
+    generatedCsv: relativeCsvs,
+    unresolvedCount: preApplyConflicts,
+    result: `同步成功！\n1. 目标 CSV 隐藏目录 (.${dtBase}/, .${ntBase}/) 已成功生成并写入，完整体现了本次 Demo 中的合并与决策配置。\n2. 目标 XLS 路径当前仅为源文件复制（Copy Source），以确保输出的 Excel 文件格式有效性。\n3. 生产版后续再实现完整的 CSV -> XLS 逻辑写回与刷新以支持 XLS 二进制合并。`
+  };
+
+  return {
+    success: true,
+    report,
+    files: changedXls.concat(relativeCsvs).map(p => ({ label: path.basename(p), path: p, overwritten: true }))
+  };
+}
+
+function writeCsvFile(filePath: string, headers: string[], rows: any[][]) {
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  const headerLine = headers.join(',');
+  const rowLines = rows.map(row => 
+    row.map(val => {
+      const str = String(val === undefined || val === null ? '' : val);
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    }).join(',')
+  );
+  const content = [headerLine, ...rowLines].join('\n');
+  fs.writeFileSync(filePath, content, 'utf-8');
+}
+
+function copyDirRecursive(srcDir: string, destDir: string) {
+  if (!fs.existsSync(srcDir)) return;
+  fs.mkdirSync(destDir, { recursive: true });
+  const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(srcDir, entry.name);
+    const destPath = path.join(destDir, entry.name);
+    if (entry.isDirectory()) {
+      copyDirRecursive(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
 }
 
 export function deactivate() {}
