@@ -1,0 +1,1310 @@
+diff --git a/.env.example b/.env.example
+index 6a52b82..71bb762 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1 +1 @@
+-DFT_IDE_API_BASE = http://localhost:8888/api
++DFT_IDE_API_BASE = http://localhost:8000
+diff --git a/.gitignore b/.gitignore
+index 4c23000..05a1861 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -30,4 +30,8 @@ lerna-debug.log*
+ .dft-ide/
+ 
+ .env
+-package-lock.json
+\ No newline at end of file
++package-lock.json
++
++tools/*
++!tools/README.md
++!tools/scripts
+diff --git a/.vscode/launch.json b/.vscode/launch.json
+index 48fca48..ce26f83 100644
+--- a/.vscode/launch.json
++++ b/.vscode/launch.json
+@@ -13,6 +13,15 @@
+         "${workspaceFolder}/out/**/*.js"
+       ],
+       "preLaunchTask": "npm: compile"
++    },
++    {
++      "name": "Attach DFT IDE Extension (VSCode 1.85.1)",
++      "type": "extensionHost",
++      "request": "attach",
++      "port": 9333,
++      "outFiles": [
++        "${workspaceFolder}/out/**/*.js"
++      ]
+     }
+   ]
+-}
+\ No newline at end of file
++}
+diff --git a/.vscodeignore b/.vscodeignore
+index 7d7b81f..a1f55e7 100644
+--- a/.vscodeignore
++++ b/.vscodeignore
+@@ -13,3 +13,5 @@ build.log
+ tsconfig.json
+ package-lock.json
+ out/**/*.map
++tools/**
++offline-vsix/**
+diff --git a/src/extension.ts b/src/extension.ts
+index 186d1f7..e153a7a 100644
+--- a/src/extension.ts
++++ b/src/extension.ts
+@@ -108,7 +108,7 @@ export function activate(context: vscode.ExtensionContext) {
+   context.subscriptions.push(
+     vscode.commands.registerCommand('dftIde.whoami', async function (): Promise<string> {
+       const stdout = await executeShellCommand("whoami");
+-      return stdout.split('\\')[1].trim();
++      return stdout.split('\\')[1].trim().toLowerCase();
+     })
+   );
+ 
+@@ -2313,24 +2313,11 @@ async function updateLocalConfigPath(localPath: string): Promise<void> {
+ }
+ 
+ async function initProjectWorkspace(project:DftProject): Promise<string> {
+-  const localProjectsRoot = vscode.workspace.getConfiguration('dftIde').get<string>('localProjectsRoot', '').trim();
+-  if (!localProjectsRoot) {
+-    throw new Error('Please set the local projects root before preparing a project.');
++  const projectLocalRoot = project.rootPath.trim();
++  if (!projectLocalRoot) {
++    throw new Error('Please set the project local root before entering a project.');
+   }
+ 
+-  // const globalConfigFile = vscode.Uri.joinPath(vscode.Uri.file(path.resolve(localProjectsRoot)), '.config');
+-  // try {
+-  //   await vscode.workspace.fs.stat(globalConfigFile);
+-  //   const bytes = await vscode.workspace.fs.readFile(globalConfigFile);
+-  //   const globalConfig = JSON.parse(Buffer.from(bytes).toString('utf-8'));
+-  //   globalConfig.lastSelectedProject = project.id;
+-  //   await writeFileIfMissing(globalConfigFile, JSON.stringify(globalConfig, null, 2));
+-  // } catch (error) {
+-  //   const globalConfig = {
+-  //     lastSelectedProject: project.id
+-  //   };
+-  //   await writeFileIfMissing(globalConfigFile, JSON.stringify(globalConfig, null, 2));
+-  // }
+   await vscode.workspace.getConfiguration('dftIde').update(
+     'lastSelectedProject',
+     project.id,
+@@ -2339,7 +2326,7 @@ async function initProjectWorkspace(project:DftProject): Promise<string> {
+ 
+   const projectName = project.name;
+   const projectDirName = toSafeProjectDirectoryName(project.name);
+-  const projectPath = path.join(path.resolve(localProjectsRoot), projectDirName);
++  const projectPath = path.join(path.resolve(projectLocalRoot), projectDirName);
+   const projectRoot = vscode.Uri.file(projectPath);
+   await vscode.workspace.fs.createDirectory(projectRoot);
+ 
+@@ -2350,7 +2337,6 @@ async function initProjectWorkspace(project:DftProject): Promise<string> {
+     const repoItem = project.repos.find((item) => item.key === repo);
+     if (!repoItem) continue;
+     const repoUri = vscode.Uri.joinPath(projectRoot, repoItem.gitlabProjectName);
+-    // await vscode.workspace.fs.createDirectory(repoUri);
+     try {
+       await vscode.workspace.fs.stat(repoUri);
+     } catch (error) {
+@@ -2359,7 +2345,6 @@ async function initProjectWorkspace(project:DftProject): Promise<string> {
+         throw new Error(`Missing clone URL for ${repoItem.gitlabProjectName}.`);
+       }
+       await executeFileCommand('git', ['clone', repoItem.http_url_to_repo], projectPath);
+-      // vscode.window.showInformationMessage('仓库克隆成功！');
+     }
+     await writeFileIfMissing(
+       vscode.Uri.joinPath(repoUri, 'README.md'),
+@@ -2378,6 +2363,8 @@ async function initProjectWorkspace(project:DftProject): Promise<string> {
+ 
+   const localStateUri = vscode.Uri.joinPath(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR);
+   await vscode.workspace.fs.createDirectory(localStateUri);
++  await writeDefaultLocalState(localStateUri, repos);
++
+   await ensureLocalStateIgnored(projectRoot.fsPath, localStateUri.fsPath);
+ 
+   const workspaceFile = vscode.Uri.joinPath(projectRoot, 'dft-ide.code-workspace');
+@@ -2387,14 +2374,44 @@ async function initProjectWorkspace(project:DftProject): Promise<string> {
+       'workbench.startupEditor': 'none'
+     }
+   };
+-  // await vscode.workspace.fs.writeFile(workspaceFile, Buffer.from(JSON.stringify(workspaceContent, null, 2)));
+   await writeFileIfMissing(workspaceFile, JSON.stringify(workspaceContent, null, 2));
+ 
+-  // vscode.window.showInformationMessage(`DFT IDE 项目初始化完成：${projectName}`);
+-
+   return projectPath;
+ }
+ 
++async function writeDefaultLocalState(localStateUri: vscode.Uri, repos: {
++  key: string,
++  gitlabProjectName: string,
++  localPath: string,
++}[]) {
++  for (const repo of repos) {
++    if (repo.key === 'data') continue;
++
++    const stateUri = vscode.Uri.joinPath(localStateUri, repo.key + '.json');
++    let content = '{}';
++    try {
++      const bytes = await vscode.workspace.fs.readFile(stateUri);
++      content = Buffer.from(bytes).toString('utf-8');
++    } catch {
++      content = '{}';
++    }
++    const stateObject = JSON.parse(content);
++
++    if (!stateObject.project) {
++      const cshrcFilePath = path.join(repo.localPath, 'project.cshrc');
++      const isExists = await pathExists(cshrcFilePath);
++      if (isExists) stateObject.project = cshrcFilePath;
++    }
++    if (!stateObject.sailorCfg) {
++      const cfgFilePath = path.join(repo.localPath, 'common.cfg');
++      const isExists = await pathExists(cfgFilePath);
++      if (isExists) stateObject.sailorCfg = cfgFilePath;
++    }
++
++    await writeFileIfMissing(stateUri, JSON.stringify(stateObject, null, 2));
++  }
++}
++
+ async function prepareProjectWorkspace(
+   projectName: string,
+   projectKey: string
+diff --git a/src/webview/components/ProjectMembers.tsx b/src/webview/components/ProjectMembers.tsx
+index a312ad0..bbf4a6e 100644
+--- a/src/webview/components/ProjectMembers.tsx
++++ b/src/webview/components/ProjectMembers.tsx
+@@ -28,7 +28,10 @@ import {
+   canManageProjectMembers,
+   deleteProjectMember,
+   DftProject,
++  fetchUsers,
++  fetchSingleUser,
+   fetchProjectMembers,
++  UserInfo,
+   ProjectMember,
+   ProjectMemberRole,
+   updateProjectMember,
+@@ -43,7 +46,7 @@ interface Props {
+ }
+ 
+ type MemberFormValue = {
+-  employeeId: string;
++  employeeIds: string[];
+   role: ProjectMemberRole;
+   ctmp: boolean;
+ };
+@@ -54,6 +57,7 @@ const roleOptions: Array<{ label: string; value: ProjectMemberRole }> = [
+ ];
+ 
+ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
++  const [users, setUsers] = useState<UserInfo[]>([]);
+   const [members, setMembers] = useState<ProjectMember[]>([]);
+   const [canManage, setCanManage] = useState(canManageProjectMembers(project));
+   const [loading, setLoading] = useState(true);
+@@ -68,6 +72,14 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
+     ? 'color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 96%, white)'
+     : 'color-mix(in srgb, var(--vscode-editor-background, #fff) 92%, transparent)';
+ 
++  const loadUsers = async () => {
++    const data = await fetchUsers();
++    const users = data.filter(user =>
++      /^[a-z]+[0-9]+$/.test(user.username)
++    );
++    setUsers(users);
++  };
++
+   const loadMembers = async () => {
+     setLoading(true);
+     try {
+@@ -86,15 +98,16 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
+   }, [project.id]);
+ 
+   const openAddModal = () => {
++    loadUsers();
+     setEditingMember(null);
+-    form.setFieldsValue({ employeeId: '', role: 'Member', ctmp: false });
++    form.setFieldsValue({ employeeIds: [], role: 'Member', ctmp: false });
+     setModalOpen(true);
+   };
+ 
+   const openEditModal = (member: ProjectMember) => {
+     setEditingMember(member);
+     form.setFieldsValue({
+-      employeeId: member.employeeId,
++      employeeIds: [member.employeeId],
+       role: member.role,
+       ctmp: member.ctmp,
+     });
+@@ -107,6 +120,45 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
+     form.resetFields();
+   };
+ 
++  const handleChange = async (values: string[]) => {
++    values = values.filter(value => value.trim());
++    form.setFieldValue('employeeIds', values);
++    if (!values || values.length === 0) return;
++
++    const firstNotInUsers = values.slice().reverse().find(value => {
++      return !users.some(user => user.username.toLowerCase() === value.toLowerCase());
++    });
++    if (firstNotInUsers) {
++      const user = await fetchSingleUser(firstNotInUsers);
++      if (user) {
++        if (user.locked) {
++          message.error(`Gitlab 用户 ${firstNotInUsers} 已被锁定`);
++        } else if (user.state !== 'active') {
++          message.error(`Gitlab 用户 ${firstNotInUsers} 的状态为 ${user.state}`);
++        } else {
++          setUsers((items) => [...items, user]);
++        }
++      } else {
++        message.error(`Gitlab 用户 ${firstNotInUsers} 不存在`);
++      }
++    }
++  };
++
++  const validateEmployeeIds = async (values: string[]) => {
++    values = values.filter(value => value.trim());
++    if (!values || values.length === 0) {
++      return Promise.reject('请选择工号');
++    }
++
++    const validPattern = /^[a-z0-9_-]+$/;
++    const isValid = values.every(value => { return validPattern.test(value) });
++    if (!isValid) {
++      return Promise.reject('工号只能包含小写字母、数字、下划线或短横线');
++    }
++
++    return Promise.resolve();
++  }
++
+   const saveMember = async () => {
+     const value = await form.validateFields();
+     setSaving(true);
+@@ -120,12 +172,14 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
+         setMembers((items) => items.map((item) => item.employeeId === editingMember.employeeId ? updated : item));
+         message.success('成员已更新');
+       } else {
+-        const created = await addProjectMember(project.id, {
+-          employeeId: value.employeeId.trim(),
+-          role: value.role,
+-          ctmp: value.ctmp,
+-        });
+-        setMembers((items) => [...items, created]);
++        for (const employeeId of value.employeeIds){
++          const created = await addProjectMember(project.id, {
++            employeeId: employeeId.trim(),
++            role: value.role,
++            ctmp: value.ctmp,
++          });
++          setMembers((items) => [...items, created]);
++        }
+         message.success('成员已添加');
+       }
+       closeModal();
+@@ -246,7 +300,8 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
+         </Space>
+       }
+       style={{ borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
+-      bodyStyle={{ padding: 16 }}
++      styles={{body: {padding: 16}}}
++      
+     >
+       <Space direction="vertical" size={14} style={{ width: '100%' }}>
+         <div>
+@@ -292,18 +347,27 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
+         onOk={saveMember}
+         okText={editingMember ? '保存' : '添加'}
+         confirmLoading={saving}
+-        destroyOnClose
++        destroyOnHidden
+       >
+         <Form form={form} layout="vertical" preserve={true}>
+           <Form.Item
+             label="工号"
+-            name="employeeId"
++            name="employeeIds"
+             rules={[
+-              { required: true, message: '请输入工号' },
+-              { pattern: /^[A-Za-z0-9_-]+$/, message: '工号只能包含字母、数字、下划线或短横线' },
++              {
++                validator: (_, value) => {
++                  return validateEmployeeIds(value);
++                },
++              }
+             ]}
+           >
+-            <Input disabled={Boolean(editingMember)} placeholder="例如 w00445630" />
++            <Select
++              mode="tags"
++              disabled={Boolean(editingMember)}
++              placeholder="Search or Input "
++              options={users.map(user => ({ label: user.username, value: user.username }))}
++              onChange={handleChange}
++            />
+           </Form.Item>
+           <Form.Item label="角色" name="role" rules={[{ required: true, message: '请选择角色' }]}>
+             <Select options={roleOptions} />
+@@ -314,6 +378,7 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
+                 { label: '是', value: true },
+                 { label: '否', value: false },
+               ]}
++              disabled
+             />
+           </Form.Item>
+         </Form>
+diff --git a/src/webview/components/Welcome.tsx b/src/webview/components/Welcome.tsx
+index 2a54a92..1be7094 100644
+--- a/src/webview/components/Welcome.tsx
++++ b/src/webview/components/Welcome.tsx
+@@ -1,5 +1,5 @@
+ import React, { useEffect, useMemo, useState } from 'react';
+-import { Alert, Button, Col, Input, Progress, Row, Spin, Tag, Tooltip, message, Form } from "antd";
++import { Alert, Button, Col, Input, Progress, Row, Spin, Tag, Tooltip, message, Form, Modal } from "antd";
+ import Card from "antd/es/card";
+ import Empty from "antd/es/empty";
+ import List from "antd/es/list";
+@@ -7,9 +7,9 @@ import Space from "antd/es/space";
+ import Typography from "antd/es/typography";
+ 
+ import {
+-  BellOutlined,
+   CheckCircleOutlined,
+   CloudSyncOutlined,
++  FolderAddOutlined,
+   ExperimentOutlined,
+   FileProtectOutlined,
+   FolderOpenOutlined,
+@@ -25,19 +25,17 @@ import {
+   openProjectWorkspace,
+   prepareProjectWorkspace,
+   selectPath,
+-  setLocalConfigPath,
+   enterProjectWorkspace,
+-  type LocalConfigInfo,
++  LocalConfigInfo,
+ } from '../utils/ipc';
+ import useWizardStore from '../store/wizardStore';
+ import {
+   DftProject,
+-  canManageProjectMembers,
+   fetchProjectDashboard,
++  createProject,
+   initProject,
+   ProjectDashboard,
+   ProjectRepoStatus,
+-  selectProject,
+   updateProjectRootPath,
+ } from '../services/projectService';
+ 
+@@ -114,6 +112,11 @@ function repoTagColor(status: ProjectRepoStatus['status']): string {
+   return 'default';
+ }
+ 
++type ProjectFormValue = {
++  name: string;
++  description: string;
++};
++
+ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }) => {
+   const {setFlowContext, setActiveProject, currentUser, setCurrentUser} = useWizardStore();
+   const [dashboard, setDashboard] = useState<ProjectDashboard | null>(null);
+@@ -126,17 +129,15 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+   const [projectKeyword, setProjectKeyword] = useState('');
+   const [localRootInfo, setLocalRootInfo] = useState<LocalConfigInfo | null>(null);
+   const [projectId, setProjectId] = useState('');
++  const [projectModalOpen, setProjectModalOpen] = useState(false);
++  const [projectForm] = Form.useForm<ProjectFormValue>();
++  const [projectSaving, setProjectSaving] = useState(false);
+ 
+   const cardBorder = 'var(--vscode-panel-border, rgba(127,127,127,0.18))';
+   const panelBg = isDark
+     ? 'color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 96%, white)'
+     : 'color-mix(in srgb, var(--vscode-editor-background, #fff) 92%, transparent)';
+ 
+-  // const currentProject = useMemo(() => {
+-  //   if (!dashboard?.currentProjectId) return null;
+-  //   return projects?.find((item) => item.id === dashboard.currentProjectId) ?? null;
+-  // }, [dashboard, projects]);
+-
+   const currentProject = useMemo(() => {
+     if (!dashboard) return null;
+     dashboard.currentProjectId = projectId;
+@@ -200,7 +201,6 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+           message.warning(error instanceof Error ? error.message : '本地托管目录读取失败');
+         }
+       });
+-
+     return () => {
+       disposed = true;
+     };
+@@ -209,7 +209,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+   const enterProject = async (project: DftProject, rootPath?: string) => {
+     setWorkingProjectId(project.id);
+     try {
+-      if(!project.local_root && !rootPath) {
++      if(!project.rootPath && !rootPath) {
+         chooseProjectsRoot(project, true);
+         return;
+       }
+@@ -245,31 +245,60 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+ 
+   const setProjectRoot = async (project: DftProject, porjectRootPath: string) => {
+     setProjects(projects?.map(item => 
+-      item.id === project.id ? { ...item, rootPath: porjectRootPath } : item
++      (item.id === project.id && item.ctmp_id === project.ctmp_id) ? { ...item, rootPath: porjectRootPath } : item
+     ));
+     // 请求后端保存项目目录数据
+     try {
+       await updateProjectRootPath(project.id, currentUser ,porjectRootPath);
++      return { success: true };
+     } catch (err) {
+       message.error(err instanceof Error ? err.message : '项目目录保存失败');
++      return { success: false };
+     }
+   };
+ 
+   const isProjectInitialized = (project: DftProject) =>
+     project.repos.length > 0 && project.repos.every((repo) => repo.status === 'ready');
+ 
+-  const initializeProject2 = async (project: DftProject) => {
++  const isProjectInitializeDisable = (project: DftProject) =>
++    isProjectInitialized(project) || project.role !== 'DFTM';
++
++  const isMemberManageDisable = (project: DftProject) =>
++    !isProjectInitialized(project) || project.role !== 'DFTM';
++
++  const isProjectEnterDisable = (project: DftProject) =>
++    !isProjectInitialized(project);
++
++  const projectInitializeTooltipTitle = (project: DftProject) => {
++    if (isProjectInitialized(project)) return '当前项目已初始化'
++    if (project.role !== 'DFTM') return '不是 DFTM 角色，不能初始化项目'
++    return '远程初始化，创建Gitlab项目'
++  }
++
++  const memberManageTooltipTitle = (project: DftProject) => {
++    if (!isProjectInitialized(project)) return '当前项目未初始化，不能管理成员'
++    if (project.role !== 'DFTM') return '不是 DFTM 角色，不能管理成员'
++    return '管理项目成员'
++  }
++
++  const projectEnterTooltipTitle = (project: DftProject) => {
++    if (!isProjectInitialized(project)) return '当前项目未初始化，不能进入项目'
++    return '进入项目，首次本地初始化'
++  }
++
++  const initializeProject = async (project: DftProject) => {
+     setInitializingProjectId(project.ctmp_id?.toString() ?? '');
+     try {
+       await initProject(project);
+       fetchProjectData();
+-    }
+-    finally {
++    } catch (err) {
++      message.error(err instanceof Error ? err.message : '项目初始化失败');
++    } finally {
+       setInitializingProjectId(null);
+     }
+   }
+ 
+-  const initializeProject = async (project: DftProject) => {
++  const initializeProject2 = async (project: DftProject) => {
+     if (isProjectInitialized(project)) return;
+ 
+     setInitializingProjectId(project.id);
+@@ -330,13 +359,41 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+   const chooseProjectsRoot = async (project: DftProject, doEnter=false) => {
+     const selected = await selectPath('folder');
+     if (selected) {
+-      setProjectRoot(project, selected);
+-      if (doEnter) {
+-        enterProject(project, selected);
++      const result = await setProjectRoot(project, selected);
++      if (doEnter && result.success) {
++        enterProject( {...project, rootPath: selected}, selected);
+       }
+     }
+   };
+ 
++  const openProjectModal = () => {
++    projectForm.setFieldsValue({ name: '', description: '' });
++    setProjectModalOpen(true);
++  };
++
++  const closeProjectModal = () => {
++    setProjectModalOpen(false);
++    projectForm.resetFields();
++  };
++
++  const saveProject = async () => {
++    const value = await projectForm.validateFields();
++    setProjectSaving(true);
++    try {
++      await createProject(currentUser, {
++        name: value.name.trim(),
++        description: value.description.trim(),
++      });
++      message.success('创建自定义项目成功');
++      closeProjectModal();
++      fetchProjectData();
++    } catch (err) {
++      message.error(err instanceof Error ? err.message : '创建自定义项目失败');
++    } finally {
++      setProjectSaving(false);
++    }
++  };
++
+   return (
+     <div>
+       <div
+@@ -418,11 +475,51 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+                   进入上次项目
+                 </Button>
+               )}
++              <Button
++                size="large"
++                icon={<FolderAddOutlined />}
++                onClick={() => openProjectModal()}
++                style={{
++                  color: ' #f97316',
++                  borderColor: ' #f97316'
++                }}
++              >
++                创建自定义项目
++              </Button>
+             </Space>
+           </Space>
+         </div>
+       </div>
+ 
++      <Modal
++        title="创建自定义项目"
++        open={projectModalOpen}
++        onCancel={closeProjectModal}
++        onOk={saveProject}
++        okText="创建"
++        confirmLoading={projectSaving}
++        destroyOnHidden
++      >
++        <Form form={projectForm} layout="vertical" preserve={true}>
++          <Form.Item
++            label="项目名称"
++            name="name"
++            rules={[
++              { required: true, message: '请输入项目名称' },
++            ]}
++          >
++            <Input placeholder="请输入项目名称" />
++          </Form.Item>
++
++          <Form.Item
++            label="项目描述"
++            name="description"
++          >
++            <Input />
++          </Form.Item>
++        </Form>
++      </Modal>
++
+       <div
+         className="welcome-content-grid"
+         style={{
+@@ -437,7 +534,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+           title="我的项目"
+           extra={currentProject ? <Tag color="blue">上次：{currentProject.name}</Tag> : null}
+           style={{ height: '100%', borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
+-          bodyStyle={{ padding: 0 }}
++          styles={{body: {padding: 0}}}
+         >
+           <div style={{ padding: '14px 18px', borderBottom: `1px solid ${cardBorder}` }}>
+             <Input.Search
+@@ -464,27 +561,29 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+             <List
+               dataSource={filteredProjects}
+               renderItem={(project) => {
+-                const canManageMembers = canManageProjectMembers(project);
+                 return (
+                 <List.Item
+                   actions={[
+                     <div style={{ minWidth: 300}}>
+                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, paddingBottom: 12 }}>
+-                        <Button
+-                          key="initialize"
+-                          type="primary"
+-                          disabled={isProjectInitialized(project)}
+-                          loading={initializingProjectId === project.ctmp_id?.toString()}
+-                          onClick={() => initializeProject2(project)}
+-                          style={{ flex: 1}}
+-                        >
+-                          初始化
+-                        </Button>
+-                        <Tooltip key="members" title={canManageMembers ? '管理项目成员' : '当前项目未初始化或不是 DFTM 角色，不能管理成员'}>
++                        <Tooltip key="initialize" title={projectInitializeTooltipTitle(project)}>
++                          <span>
++                            <Button
++                              type="primary"
++                              disabled={isProjectInitializeDisable(project)}
++                              loading={initializingProjectId === project.ctmp_id?.toString()}
++                              onClick={() => initializeProject(project)}
++                              style={{ flex: 1 }}
++                            >
++                              初始化
++                            </Button>
++                          </span>
++                        </Tooltip>
++                        <Tooltip key="members" title={memberManageTooltipTitle(project)}>
+                           <span>
+                             <Button
+                               icon={<TeamOutlined />}
+-                              disabled={!canManageMembers}
++                              disabled={isMemberManageDisable(project)}
+                               onClick={() => onManageMembers?.(project)}
+                               style={{ flex: 1}}
+                             >
+@@ -492,22 +591,25 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+                             </Button>
+                           </span>
+                         </Tooltip>
+-                        <Button
+-                          key="enter"
+-                          disabled={!isProjectInitialized(project)}
+-                          loading={workingProjectId === project.id}
+-                          onClick={() => enterProject(project)}
+-                          style={{ flex: 1}}
+-                        >
+-                          进入
+-                        </Button>
++                        <Tooltip key="enter" title={projectEnterTooltipTitle(project)}>
++                          <span>
++                            <Button
++                              disabled={isProjectEnterDisable(project)}
++                              loading={workingProjectId === project.id}
++                              onClick={() => enterProject(project)}
++                              style={{ flex: 1 }}
++                            >
++                              进入
++                            </Button>
++                          </span>
++                        </Tooltip>
+                       </div>
+                       <Form layout="horizontal" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
+                         <Form.Item label="项目目录" style={{ marginBottom: 16 }}>
+                           <Input
+-                            value={project.local_root}
++                            value={project.rootPath}
+                             onChange={(event) => setProjectRoot(project, event.target.value)}
+-                            placeholder="请选择项目目录"
++                            placeholder="例如 data/DFT/projects"
+                             suffix={<FolderOpenOutlined onClick={() => chooseProjectsRoot(project)}/>}
+                             allowClear
+                           />
+@@ -522,6 +624,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+                     title={
+                       <Space wrap>
+                         <Text strong>{project.name}</Text>
++                        <Tag>{project.ctmp_id ? "CTMP" : "自定义"}</Tag>
+                         <Tag>{project.role}</Tag>
+                         {project.id === dashboard?.currentProjectId && <Tag color="green">上次项目</Tag>}
+                       </Space>
+@@ -597,7 +700,8 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+                 opacity: flow.disabled ? 0.66 : 1,
+                 cursor: flow.disabled ? 'not-allowed' : 'pointer',
+               }}
+-              bodyStyle={{ padding: 18, height: '100%' }}
++              styles={{body: {padding: 18, height: '100%'}}}
++              
+             >
+               <Space direction="vertical" size={12} style={{ width: '100%', height: '100%', justifyContent: 'space-between' }}>
+                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+diff --git a/src/webview/components/design/Step1_CommonConfig.tsx b/src/webview/components/design/Step1_CommonConfig.tsx
+index 16daf67..b585c78 100644
+--- a/src/webview/components/design/Step1_CommonConfig.tsx
++++ b/src/webview/components/design/Step1_CommonConfig.tsx
+@@ -1,11 +1,8 @@
+ import React, { useEffect, useState } from 'react';
+-import { Badge, Button, Card, Col, Form, Input, Radio, Row, Select, Space, Spin, message } from 'antd';
+-import type { RadioChangeEvent } from 'antd';
++import { Badge, Button, Card, Col, Form, Radio, Row, Select, Space, Spin, message, RadioChangeEvent } from 'antd';
+ import {
+   BranchesOutlined,
+   FileAddOutlined,
+-  FileOutlined,
+-  FolderOpenOutlined,
+   MinusCircleOutlined,
+   PlusOutlined,
+   RightOutlined,
+@@ -14,9 +11,10 @@ import {
+ import { useVscodePath } from '../../hooks/useVscodePath';
+ import { useFlowConfig } from '../../hooks/useFlowConfig';
+ import PathInput from '../shared/PathInput';
+-import { generateDefaultFlowConfigs, getGitInfo, selectPath } from '../../utils/ipc';
++import { generateDefaultFlowConfigs, getGitInfo } from '../../utils/ipc';
+ import useWizardStore from '../../store/wizardStore';
+ import CollapsibleSection from '../shared/CollapsibleSection';
++import ControlledPathInput from '../shared/ControlledPathInput';
+ 
+ interface Props {
+   onNext?: () => void;
+@@ -41,6 +39,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+   const project = useVscodePath();
+   const workPath = useVscodePath();
+   const sailorCfg = useVscodePath();
++  const [domainCfg, setDomainCfg] = useState<string>('');
+ 
+   const [currentBranch, setCurrentBranch] = useState<string>('');
+   const [normalizeCfgs, setNormalizeCfgs] = useState<NormalizeCfg[]>([emptyNormalizeCfg()]);
+@@ -111,7 +110,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+     void handleSave({ moduleKey, step1: data });
+   };
+ 
+-  const handleChange = (e: RadioChangeEvent) => {
++  const handleRadioChange = (e: RadioChangeEvent) => {
+     setNormalizeIndex(Number(e.target.value));
+   };
+ 
+@@ -131,11 +130,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+     });
+   };
+ 
+-  const chooseNormalCfg = async (index: number, type: 1 | 2, targetType: 'file' | 'folder') => {
+-    const selected = await selectPath(targetType);
+-    if (selected) setNormalCfg(index, selected, type);
+-  };
+-
+   const setNormalCfg = (index: number, value: string, type: 1 | 2) => {
+     setNormalizeCfgs((prev) =>
+       prev.map((item, itemIndex) => {
+@@ -173,7 +167,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+     <Spin spinning={loading} tip="读取配置中...">
+       <Form layout="horizontal" labelCol={{ span: 4 }} wrapperCol={{ span: 20 }}>
+         <div style={pageStyle}>
+-          <Card size="small" style={{ marginBottom: 14 }} bodyStyle={{ padding: 18 }}>
++          <Card size="small" style={{ marginBottom: 14 }} styles={{body: {padding: 18}}}>
+             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
+               <Button shape="round" icon={<BranchesOutlined />} style={{ cursor: 'default' }}>
+                 {currentBranch || '获取分支中...'}
+@@ -202,6 +196,8 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+ 
+             <Form.Item label="选择领域">
+               <Select
++                value={domainCfg}
++                onChange={(value) => setDomainCfg(value)}
+                 allowClear
+                 placeholder="请选择领域"
+                 options={[
+@@ -213,64 +209,34 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+             </Form.Item>
+           </Card>
+ 
+-          <Card size="small" style={{ marginBottom: 14 }} bodyStyle={{ padding: 18 }}>
++          <Card size="small" style={{ marginBottom: 14 }} styles={{body: {padding: 18}}}>
+             <CollapsibleSection title="归一化表格转 cfg">
+               {configHeader}
+               {normalizeCfgs.map((normalizeCfg, index) => (
+                 <Row key={index} gutter={8} style={{ marginBottom: 16 }}>
+                   <Col span={1}>
+                     <Space>
+-                      <Radio checked={normalizeIndex === index} onChange={handleChange} value={index} />
++                      <Radio checked={normalizeIndex === index} onChange={handleRadioChange} value={index}></Radio>
+                     </Space>
+                   </Col>
+                   <Col span={11} className="dft-path-input">
+-                    <Input
++                    <ControlledPathInput 
+                       value={normalizeCfg.commandCfg}
+-                      onChange={(event) => setNormalCfg(index, event.target.value, 1)}
+-                      placeholder="请选择命令入口"
+-                      style={{ padding: 0 }}
+-                      allowClear
+-                      suffix={
+-                        <Space.Compact>
+-                          <Button
+-                            aria-label="选择文件"
+-                            icon={<FileOutlined />}
+-                            onClick={() => chooseNormalCfg(index, 1, 'file')}
+-                            style={{ flex: '0 0 auto', width: 30, paddingInline: 4 }}
+-                          />
+-                          <Button
+-                            aria-label="选择目录"
+-                            icon={<FolderOpenOutlined />}
+-                            onClick={() => chooseNormalCfg(index, 1, 'folder')}
+-                            style={{ flex: '0 0 auto', width: 30, paddingInline: 4 }}
+-                          />
+-                        </Space.Compact>
+-                      }
++                      onChange={(value) => setNormalCfg(index, value, 1)}
++                      placeholder="请选择命令入口" 
++                      pathSources={['local']} 
++                      showSelectFile 
++                      showOpen 
+                     />
+                   </Col>
+                   <Col span={11} className="dft-path-input">
+-                    <Input
++                    <ControlledPathInput 
+                       value={normalizeCfg.jsonCfg}
+-                      onChange={(event) => setNormalCfg(index, event.target.value, 2)}
+-                      placeholder="请选择json文件"
+-                      style={{ padding: 0 }}
+-                      allowClear
+-                      suffix={
+-                        <Space.Compact>
+-                          <Button
+-                            aria-label="选择文件"
+-                            icon={<FileOutlined />}
+-                            onClick={() => chooseNormalCfg(index, 2, 'file')}
+-                            style={{ flex: '0 0 auto', width: 30, paddingInline: 4 }}
+-                          />
+-                          <Button
+-                            aria-label="选择目录"
+-                            icon={<FolderOpenOutlined />}
+-                            onClick={() => chooseNormalCfg(index, 2, 'folder')}
+-                            style={{ flex: '0 0 auto', width: 30, paddingInline: 4 }}
+-                          />
+-                        </Space.Compact>
+-                      }
++                      onChange={(value) => setNormalCfg(index, value, 2)}
++                      placeholder="请选择json文件" 
++                      pathSources={['local']} 
++                      showSelectFile 
++                      showOpen 
+                     />
+                   </Col>
+                   <Col span={1}>
+@@ -282,8 +248,8 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+                     />
+                   </Col>
+                 </Row>
+-              ))}
+-              <Button type="dashed" onClick={addNormalizeCfg} block icon={<PlusOutlined />}>
++                ))}
++              <Button type="dashed" onClick={() => addNormalizeCfg()} block icon={<PlusOutlined />}>
+                 添加
+               </Button>
+             </CollapsibleSection>
+diff --git a/src/webview/components/design/Step2_ToolConfig.tsx b/src/webview/components/design/Step2_ToolConfig.tsx
+index 0678621..41e47cb 100644
+--- a/src/webview/components/design/Step2_ToolConfig.tsx
++++ b/src/webview/components/design/Step2_ToolConfig.tsx
+@@ -186,7 +186,14 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category
+       </Form.Item>
+ 
+       <Form.Item label="包含文件" name="includeFile">
+-        <ControlledPathInput placeholder="包含文件路径" showSelectFile showOpen />
++        <ControlledPathInput 
++          onChange={(value) => designForm.setFieldsValue({includeFile: value})}
++          value={designForm.getFieldValue('includeFile')}
++          placeholder="包含文件路径" 
++          pathSources={['local']}  
++          showSelectFile 
++          showOpen 
++        />
+         <div style={{ marginTop: 4 }}>
+           <Text type="secondary" style={{ fontSize: 12 }}>
+             包含文件路径（可由 Common 传出可配置修改）
+@@ -214,7 +221,7 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category
+                     </Col>
+                     <Col flex="auto">
+                       <Form.Item {...restField} name={[name, 'path']} noStyle>
+-                        <ControlledPathInput placeholder="宏定义路径或具体配置修改" showSelectFile showOpen />
++                        <ControlledPathInput placeholder="宏定义路径或具体配置修改" pathSources={['local']} showSelectFile showOpen />
+                       </Form.Item>
+                     </Col>
+                     <Col flex="0 0 40px">
+@@ -238,7 +245,14 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category
+ 
+       <CollapsibleSection title="特殊参数配置">
+         <Form.Item label="特殊参数" name="specialParam">
+-          <ControlledPathInput placeholder="特殊参数路径或值" showSelectFile showOpen />
++          <ControlledPathInput 
++            onChange={(value) => designForm.setFieldsValue({specialParam: value})}
++            value={designForm.getFieldValue('specialParam')}
++            placeholder="特殊参数路径或值" 
++            pathSources={['local']} 
++            showSelectFile 
++            showOpen 
++          />
+           <div style={{ marginTop: 4 }}>
+             <Text type="secondary" style={{ fontSize: 12 }}>
+               特殊参数配置（可由 Common 传出可配置修改）
+diff --git a/src/webview/components/shared/CollapsibleSection.tsx b/src/webview/components/shared/CollapsibleSection.tsx
+index d72cf1d..b800754 100644
+--- a/src/webview/components/shared/CollapsibleSection.tsx
++++ b/src/webview/components/shared/CollapsibleSection.tsx
+@@ -6,15 +6,13 @@ interface CollapsibleSectionProps {
+   children: React.ReactNode;
+   defaultOpen?: boolean;
+   style?: React.CSSProperties;
+-  bodyStyle?: React.CSSProperties;
+ }
+ 
+ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
+   title,
+   children,
+   defaultOpen = true,
+-  style,
+-  bodyStyle,
++  style
+ }) => {
+   const [open, setOpen] = useState(defaultOpen);
+   const [hovered, setHovered] = useState(false);
+@@ -80,7 +78,7 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
+           }}
+         />
+       </div>
+-      {open && <div style={{ marginTop: 14, ...bodyStyle }}>{children}</div>}
++      {open && <div style={{ marginTop: 14, ...style }}>{children}</div>}
+     </section>
+   );
+ };
+diff --git a/src/webview/components/shared/RepoCloudSubmitPanel.tsx b/src/webview/components/shared/RepoCloudSubmitPanel.tsx
+index c12d5bb..739cba2 100644
+--- a/src/webview/components/shared/RepoCloudSubmitPanel.tsx
++++ b/src/webview/components/shared/RepoCloudSubmitPanel.tsx
+@@ -18,6 +18,7 @@ import {
+   ExclamationCircleOutlined,
+   FileSearchOutlined,
+   FileSyncOutlined,
++  GitlabOutlined,
+   LeftOutlined,
+   ReloadOutlined,
+ } from '@ant-design/icons';
+@@ -26,9 +27,10 @@ import {
+   openFileInEditor,
+   runRepoGitAction,
+   submitRepoToCloud,
+-  type RepoCloudSubmitResult,
+-  type RepoGitInfo,
+-  type RepoKey,
++  RepoCloudSubmitResult,
++  RepoGitInfo,
++  RepoKey, 
++  openGitlabHost,
+ } from '../../utils/ipc';
+ 
+ const { Text, Title } = Typography;
+@@ -124,6 +126,22 @@ const RepoCloudSubmitPanel: React.FC<Props> = ({ repo, accent, onPrev }) => {
+     await runRepoGitAction({ repo, action: 'openScm' });
+   };
+ 
++  const openGitlab = async () => {
++    const repoInfo = await getRepoGitInfo(repo);
++    const repoRoot = repoInfo?.repoRoot ?? '';
++    const repoGitNames = repoRoot.split(/[\\/]/).filter(Boolean);
++    const repoGitName = repoGitNames.length > 0 ? repoGitNames[repoGitNames.length - 1] : '';
++    if (!repoGitName) {
++      message.error('无法识别仓库名称');
++      return;
++    }
++    
++    const result = await openGitlabHost(repoGitName);
++    if (!result.success) {
++      message.error(result.error ?? '无法打开浏览器，请检查系统默认设置!');
++    }
++  };
++
+   const openFirstConflict = () => {
+     const first = conflictFiles[0];
+     if (first) {
+@@ -305,6 +323,9 @@ const RepoCloudSubmitPanel: React.FC<Props> = ({ repo, accent, onPrev }) => {
+               <Button icon={<FileSyncOutlined />} onClick={openGitPanel}>
+                 打开 VS Code Git
+               </Button>
++              <Button icon={<GitlabOutlined />} onClick={openGitlab}>
++                打开 Git 地址
++              </Button>
+               <Button
+                 type="primary"
+                 icon={<CloudUploadOutlined />}
+diff --git a/src/webview/flows/CommonFlow.tsx b/src/webview/flows/CommonFlow.tsx
+index 99fb9e0..114af24 100644
+--- a/src/webview/flows/CommonFlow.tsx
++++ b/src/webview/flows/CommonFlow.tsx
+@@ -897,7 +897,7 @@ const CommonFlow: React.FC = () => {
+   );
+ 
+   const renderDataSection = (step: number) => (
+-    <Card size="small" style={{ ...cardStyle, ...greenPanelStyle, marginBottom: 14 }} bodyStyle={{ padding: 16 }}>
++    <Card size="small" style={{ ...cardStyle, ...greenPanelStyle, marginBottom: 14 }} styles={{body: {padding: 16}}}>
+       <div style={sectionHeaderStyle}>
+         {renderStepTitle(step, 'Data 公共仓', '公共输入文件的集中维护位置')}
+         <Space size="small" wrap>
+@@ -938,7 +938,7 @@ const CommonFlow: React.FC = () => {
+   );
+ 
+   const renderTargetSection = (step: number) => (
+-    <Card size="small" style={{ ...cardStyle, ...warmPanelStyle, marginBottom: 14 }} bodyStyle={{ padding: 16 }}>
++    <Card size="small" style={{ ...cardStyle, ...warmPanelStyle, marginBottom: 14 }} styles={{body: {padding: 16}}}>
+       <div style={sectionHeaderStyle}>
+         {renderStepTitle(step, '目标流程仓', '选择 Hibist / Sailor / 验证仓，并配置接收文件路径')}
+         <Space size="small" wrap>
+@@ -1632,7 +1632,7 @@ const CommonFlow: React.FC = () => {
+           />
+         )}
+ 
+-        <Card size="small" style={{ ...cardStyle, ...accentPanelStyle, marginBottom: 14 }} bodyStyle={{ padding: 18 }}>
++        <Card size="small" style={{ ...cardStyle, ...accentPanelStyle, marginBottom: 14 }} styles={{body: {padding: 18}}}>
+           <div style={sectionHeaderStyle}>
+             <div>
+               <Space size={8} wrap>
+@@ -1672,7 +1672,7 @@ const CommonFlow: React.FC = () => {
+           </>
+         )}
+ 
+-        <Card size="small" style={{ ...cardStyle, border: '1px solid rgba(22,119,255,0.35)' }} bodyStyle={{ padding: 16 }}>
++        <Card size="small" style={{ ...cardStyle, border: '1px solid rgba(22,119,255,0.35)' }} styles={{body: {padding: 16}}}>
+           <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
+             <Space direction="vertical" size={2}>
+               <Space size={6}>
+diff --git a/src/webview/services/projectService.ts b/src/webview/services/projectService.ts
+index ce6107b..8d180a2 100644
+--- a/src/webview/services/projectService.ts
++++ b/src/webview/services/projectService.ts
+@@ -33,7 +33,7 @@ const mockProjects: DftProject[] = [
+   {
+     id: 'apollo-dft',
+     name: 'Apollo DFT',
+-    rootPath: 'D:/Downloads/apollo-dft',
++    rootPath: 'D:/Downloads',
+     owner: 'DFT Platform',
+     role: 'DFTM',
+     canManageMembers: true,
+@@ -50,7 +50,7 @@ const mockProjects: DftProject[] = [
+   {
+     id: 'nova-mbist',
+     name: 'Nova MBIST',
+-    rootPath: 'D:/Downloads/nova-mbist',
++    rootPath: 'D:/Downloads',
+     owner: 'Memory Team',
+     role: 'Member',
+     updatedAt: '2026-04-24 18:10',
+@@ -66,7 +66,7 @@ const mockProjects: DftProject[] = [
+   {
+     id: 'atlas-regression',
+     name: 'Atlas Regression',
+-    rootPath: 'D:/dft/projects/atlas-regression',
++    rootPath: 'D:/dft/projects',
+     owner: 'Verification Team',
+     role: 'Member',
+     updatedAt: '2026-04-20 14:45',
+@@ -81,6 +81,17 @@ const mockProjects: DftProject[] = [
+   },
+ ];
+ 
++export interface UserInfo {
++  id: number;
++  username: string;
++  public_email: string | null;
++  name: string;
++  state: string;
++  locked: boolean;
++  avatar_url: string;
++  web_url: string;
++}
++
+ export type ProjectMemberRole = 'DFTM' | 'Member';
+ 
+ export interface ProjectMember {
+@@ -127,6 +138,34 @@ function getApiBase(): string | null {
+   return configured?.replace(/\/$/, '') ?? null;
+ }
+ 
++export async function createProject(currentUser: string, project: {
++  name: string;
++  description: string;
++}): Promise<boolean> {
++  const apiBase = getApiBase();
++  if (!apiBase) {
++    return false;
++  }
++
++  const response = await fetch(`${apiBase}/api/dft-ide/project/create`, {
++    method: 'POST',
++    headers: {
++      'Content-Type': 'application/json',
++    },
++    body: JSON.stringify({
++      user_id: currentUser,
++      project_name: project.name,
++      description: project.description,
++    }),
++  });
++
++  if (!response.ok) {
++    throw new Error(`Project create failed: ${response.status}`);
++  }
++
++  return true;
++}
++
+ export async function initProject(project: DftProject): Promise<boolean> {
+   const apiBase = getApiBase();
+   if (!apiBase) {
+@@ -151,7 +190,7 @@ export async function initProject(project: DftProject): Promise<boolean> {
+   return true;
+ }
+ 
+-export async function fetchProjectDashboard(currentUser:string | null): Promise<ProjectDashboard> {
++export async function fetchProjectDashboard(currentUser:string): Promise<ProjectDashboard> {
+   const apiBase = getApiBase();
+   if (!apiBase) {
+     return {
+@@ -186,8 +225,7 @@ export async function fetchProjectDashboard(currentUser:string | null): Promise<
+       ctmp_id: project.ctmp_id,
+       name: project.name,
+       role: project.role,
+-      rootPath: project.rootPath || '',
+-      local_root: project.local_root,
++      rootPath: project.local_root,
+       owner: project.owner || '',
+       canManageMembers: canManageProjectMembers(project),
+       updatedAt: project.updatedAt || '',
+@@ -326,6 +364,35 @@ export async function deleteProjectMember(projectId: string, employeeId: string)
+   return response.json() as Promise<{ success: boolean }>;
+ }
+ 
++export async function fetchUsers(): Promise<UserInfo[]> {
++  const apiBase = getApiBase();
++  if (!apiBase) {
++    return [];
++  }
++
++  const response = await fetch(`${apiBase}/api/dft-ide/users?state=active`);
++  if (!response.ok) {
++    throw new Error(`Fetch users failed: ${response.status}`);
++  }
++
++  return response.json() as Promise<UserInfo[]>;
++}
++
++export async function fetchSingleUser(employeeId: string): Promise<UserInfo | null> {
++  const apiBase = getApiBase();
++  if (!apiBase) {
++    return null;
++  }
++
++  const response = await fetch(`${apiBase}/api/dft-ide/users/${employeeId}`);
++  if (!response.ok) {
++    // throw new Error(`Fetch user ${employeeId} failed: ${response.status}`);
++    return null;
++  }
++
++  return response.json() as Promise<UserInfo>;
++}
++
+ export interface ExecutionData {
+   flow: string;
+   status: 'success' | 'error' | 'cancelled';
+diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
+index b2dfdcc..06642b3 100644
+--- a/src/webview/utils/ipc.ts
++++ b/src/webview/utils/ipc.ts
+@@ -33,7 +33,7 @@ window.addEventListener('message', (event: MessageEvent) => {
+ function ipcRequest(
+   command: string,
+   payload: Record<string, unknown> = {},
+-  timeoutMs = 30_000
++  timeoutMs = 120_000
+ ): Promise<Record<string, unknown>> {
+   return new Promise((resolve, reject) => {
+     const id = String(++_reqId);
+diff --git a/tools/README.md b/tools/README.md
+new file mode 100644
+index 0000000..82aa9c0
+--- /dev/null
++++ b/tools/README.md
+@@ -0,0 +1,20 @@
++# Local Tools
++
++本目录不提交 Git。
++
++VSCode 1.85.1
++解压后放到：
++tools/vscode-1.85.1/
++
++第三方插件
++下载 vsix 后放在 项目根目录下 offline-vsix 下
++
++分别执行以下脚本 powershell
++.\tools\scripts\setup-1.85.1.ps1
++.\tools\scripts\debug-1.85.1.ps1
++
++vscode 运行调试 切换配置（"Attach DFT IDE Extension (VSCode 1.85.1)）
++运行Debug
++
++调试的 vscode 中 （ctrl+shift+p -> Restart Extension host）
++Extension 重载
+diff --git a/tools/scripts/debug-1.85.1.ps1 b/tools/scripts/debug-1.85.1.ps1
+new file mode 100644
+index 0000000..cf39a12
+--- /dev/null
++++ b/tools/scripts/debug-1.85.1.ps1
+@@ -0,0 +1,21 @@
++$ErrorActionPreference = "Stop"
++
++$Root = (Resolve-Path "$PSScriptRoot\..\..").Path
++
++$CodeExe = Join-Path $Root "tools\vscode-1.85.1\Code.exe"
++
++$UserDataDir = Join-Path $Root ".vscode-test\user-data-1.85.1"
++$ExtensionsDir = Join-Path $Root ".vscode-test\extensions-1.85.1"
++
++if (!(Test-Path $CodeExe)) {
++    throw "Code.exe not found: $CodeExe"
++}
++
++
++& $CodeExe `
++    --extensionDevelopmentPath="$Root" `
++    --user-data-dir="$UserDataDir" `
++    --extensions-dir="$ExtensionsDir" `
++    --inspect-extensions=9333 `
++    --disable-workspace-trust `
++    --new-window
+diff --git a/tools/scripts/setup-1.85.1.ps1 b/tools/scripts/setup-1.85.1.ps1
+new file mode 100644
+index 0000000..19083bd
+--- /dev/null
++++ b/tools/scripts/setup-1.85.1.ps1
+@@ -0,0 +1,34 @@
++$ErrorActionPreference = "Stop"
++
++$Root = Resolve-Path "$PSScriptRoot\..\.."
++
++$CodeCmd = Join-Path $Root "tools\vscode-1.85.1\bin\code.cmd"
++$UserDataDir = Join-Path $Root ".vscode-test\user-data-1.85.1"
++$ExtensionsDir = Join-Path $Root ".vscode-test\extensions-1.85.1"
++$VsixDir = Join-Path $Root "offline-vsix"
++
++New-Item -ItemType Directory -Force -Path $UserDataDir | Out-Null
++New-Item -ItemType Directory -Force -Path $ExtensionsDir | Out-Null
++
++Get-ChildItem "$VsixDir\*.vsix" | ForEach-Object {
++    Write-Host "Installing VSIX $($_.Name) ..."
++
++    & $CodeCmd `
++        --user-data-dir "$UserDataDir" `
++        --extensions-dir "$ExtensionsDir" `
++        --install-extension "$($_.FullName)" `
++        --force
++
++    if ($LASTEXITCODE -ne 0) {
++        throw "Failed to install $($_.Name)"
++    }
++}
++
++Write-Host ""
++Write-Host "Installed extensions:"
++& $CodeCmd `
++    --extensions-dir "$ExtensionsDir" `
++    --list-extensions
++
++Write-Host ""
++Write-Host "Done."
