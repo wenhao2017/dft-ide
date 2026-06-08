@@ -91,6 +91,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   const timers = useRef<Record<string, number[]>>({});
   const [runs, setRuns] = useState<Record<string, PipelineRunOverview>>({});
   const [activeRuntimeModule, setActiveRuntimeModule] = useState<string>();
+  const [activeRuntimeAutoStart, setActiveRuntimeAutoStart] = useState(false);
 
   const selectedModuleKeys = useMemo(() => {
     const cleanKeys = moduleKeys.map((key) => key.trim()).filter(Boolean);
@@ -218,8 +219,6 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   const completedCount = visibleRuns.filter((run) => run.runState === 'completed').length;
   const failedCount = visibleRuns.reduce((sum, run) => sum + run.failed, 0);
   const terminalCommandUri = buildExecutionTerminalCommandUri(config.terminalTitle, config.terminalCommand);
-  const activeRuntimeRun = activeRuntimeModule ? runs[activeRuntimeModule] : undefined;
-
   return (
     <>
       <Card
@@ -278,7 +277,15 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
                         />
                       </Tooltip>,
                       <Tooltip title="打开流水线详情" key="open">
-                        <Button size="small" type="text" icon={<FullscreenOutlined />} onClick={() => setActiveRuntimeModule(run.moduleKey)} />
+                        <Button
+                          size="small"
+                          type="text"
+                          icon={<FullscreenOutlined />}
+                          onClick={() => {
+                            setActiveRuntimeAutoStart(run.runState === 'running');
+                            setActiveRuntimeModule(run.moduleKey);
+                          }}
+                        />
                       </Tooltip>,
                     ]}
                   >
@@ -316,8 +323,11 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
         <PipelineRuntimeView
           flowKey={flowKey}
           flowLabel={`${flowLabel} / ${activeRuntimeModule}`}
-          autoStart={activeRuntimeRun?.runState !== undefined && activeRuntimeRun.runState !== 'idle'}
-          onClose={() => setActiveRuntimeModule(undefined)}
+          autoStart={activeRuntimeAutoStart}
+          onClose={() => {
+            setActiveRuntimeModule(undefined);
+            setActiveRuntimeAutoStart(false);
+          }}
         />
       )}
     </>

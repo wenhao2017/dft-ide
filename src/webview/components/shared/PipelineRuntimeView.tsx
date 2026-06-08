@@ -36,6 +36,7 @@ import {
   PipelineLink,
   pipelineFlowConfigs,
 } from './pipelineMockData';
+import { openExecutionTerminal } from '../../utils/ipc';
 
 interface PipelineNodeData extends Record<string, unknown> {
   task: PipelineTask;
@@ -302,13 +303,21 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
     });
   }, [activeFlowKey, clearTimers, schedule, config]);
 
+  const startPipelineWithTerminal = useCallback(() => {
+    void openExecutionTerminal({
+      title: config.terminalTitle,
+      command: config.terminalCommand,
+    });
+    startPipeline();
+  }, [config.terminalCommand, config.terminalTitle, startPipeline]);
+
   useEffect(() => {
     if (!autoStart || autoStarted.current) {
       return;
     }
     autoStarted.current = true;
-    startPipeline();
-  }, [autoStart, startPipeline]);
+    startPipelineWithTerminal();
+  }, [autoStart, startPipelineWithTerminal]);
 
   const stopTask = useCallback((id: string) => {
     const logMsg = `[${now()}] ${config.logPrefix} 用户手动停止任务。`;
@@ -400,9 +409,6 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   const failedCount = runtime.tasks.filter((task) => task.status === 'failed').length;
   const runningCount = runtime.tasks.filter((task) => task.status === 'running').length;
   const canStopAll = runtime.tasks.some((task) => task.status === 'running' || task.status === 'pending');
-  const terminalTitle = config.terminalTitle;
-  const terminalCommand = config.terminalCommand;
-  const terminalCommandUri = buildExecutionTerminalCommandUri(terminalTitle, terminalCommand);
 
   return (
     <section className="dft-pipeline-runtime">
@@ -666,7 +672,7 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
           <Tag color="processing">运行中 {runningCount}</Tag>
           <Tag color={failedCount > 0 ? 'error' : 'success'}>失败 {failedCount}</Tag>
           <Tag>任务 {runtime.tasks.length}</Tag>
-          <Button type="primary" icon={<PlayCircleOutlined />} href={terminalCommandUri} onClick={startPipeline}>
+          <Button type="primary" icon={<PlayCircleOutlined />} onClick={startPipelineWithTerminal}>
             启动流水线
           </Button>
           <Button danger icon={<StopOutlined />} onClick={stopAll} disabled={!canStopAll}>
