@@ -59,10 +59,7 @@ interface PipelineRuntimeViewProps {
   flowKey?: 'hibist' | 'sailor' | 'verification';
   onClose?: () => void;
   autoStart?: boolean;
-}
-
-export function buildExecutionTerminalCommandUri(title: string, command?: string): string {
-  return `command:dftIde.openExecutionTerminalFromUri?${encodeURIComponent(JSON.stringify([{ title, command }]))}`;
+  startToken?: number;
 }
 
 const statusMeta: Record<TaskStatus, { label: string; color: string; tone: string }> = {
@@ -204,6 +201,7 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   flowKey,
   onClose,
   autoStart,
+  startToken,
 }) => {
   const activeFlowKey =
     flowKey ??
@@ -222,6 +220,7 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
 
   const timers = useRef<number[]>([]);
   const autoStarted = useRef(false);
+  const lastStartToken = useRef(0);
 
   const clearTimers = useCallback(() => {
     timers.current.forEach((timer) => window.clearTimeout(timer));
@@ -318,6 +317,15 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
     autoStarted.current = true;
     startPipelineWithTerminal();
   }, [autoStart, startPipelineWithTerminal]);
+
+  useEffect(() => {
+    if (!startToken || startToken === lastStartToken.current) {
+      return;
+    }
+    lastStartToken.current = startToken;
+    autoStarted.current = true;
+    startPipeline();
+  }, [startPipeline, startToken]);
 
   const stopTask = useCallback((id: string) => {
     const logMsg = `[${now()}] ${config.logPrefix} 用户手动停止任务。`;

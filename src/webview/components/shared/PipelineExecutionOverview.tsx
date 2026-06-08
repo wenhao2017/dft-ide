@@ -19,8 +19,9 @@ import {
   ReloadOutlined,
   StopOutlined,
 } from '@ant-design/icons';
-import PipelineRuntimeView, { buildExecutionTerminalCommandUri } from './PipelineRuntimeView';
+import PipelineRuntimeView from './PipelineRuntimeView';
 import { PipelineTask, TaskStatus, pipelineFlowConfigs } from './pipelineMockData';
+import { openExecutionTerminal } from '../../utils/ipc';
 
 const { Text } = Typography;
 
@@ -90,8 +91,8 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   const config = pipelineFlowConfigs[flowKey];
   const timers = useRef<Record<string, number[]>>({});
   const [runs, setRuns] = useState<Record<string, PipelineRunOverview>>({});
+  const [runtimeStartTokens, setRuntimeStartTokens] = useState<Record<string, number>>({});
   const [activeRuntimeModule, setActiveRuntimeModule] = useState<string>();
-  const [activeRuntimeAutoStart, setActiveRuntimeAutoStart] = useState(false);
 
   const selectedModuleKeys = useMemo(() => {
     const cleanKeys = moduleKeys.map((key) => key.trim()).filter(Boolean);
@@ -122,6 +123,16 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     clearModuleTimers(moduleKey);
     const total = makeInitialTaskCounter(flowKey);
     const startedAt = now();
+
+    void openExecutionTerminal({
+      title: `${config.terminalTitle} / ${moduleKey}`,
+      command: config.terminalCommand,
+    });
+
+    setRuntimeStartTokens((prev) => ({
+      ...prev,
+      [moduleKey]: (prev[moduleKey] ?? 0) + 1,
+    }));
 
     setRuns((prev) => ({
       ...prev,
@@ -187,7 +198,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
         };
       });
     });
-  }, [clearModuleTimers, flowKey, flowLabel, schedule]);
+  }, [clearModuleTimers, config.terminalCommand, config.terminalTitle, flowKey, flowLabel, schedule]);
 
   const startSelectedRuns = useCallback(() => {
     selectedModuleKeys.forEach((moduleKey) => startRun(moduleKey));
@@ -218,7 +229,6 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   const runningCount = visibleRuns.filter((run) => run.runState === 'running').length;
   const completedCount = visibleRuns.filter((run) => run.runState === 'completed').length;
   const failedCount = visibleRuns.reduce((sum, run) => sum + run.failed, 0);
-  const terminalCommandUri = buildExecutionTerminalCommandUri(config.terminalTitle, config.terminalCommand);
   return (
     <>
       <Card
@@ -239,7 +249,6 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
             <Button
               type="primary"
               icon={<PlayCircleOutlined />}
-              href={selectedModuleKeys.length ? terminalCommandUri : undefined}
               disabled={!selectedModuleKeys.length}
               onClick={startSelectedRuns}
             >
@@ -281,10 +290,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
                           size="small"
                           type="text"
                           icon={<FullscreenOutlined />}
-                          onClick={() => {
-                            setActiveRuntimeAutoStart(run.runState === 'running');
-                            setActiveRuntimeModule(run.moduleKey);
-                          }}
+                          onClick={() => setActiveRuntimeModule(run.moduleKey)}
                         />
                       </Tooltip>,
                     ]}
@@ -323,11 +329,8 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
         <PipelineRuntimeView
           flowKey={flowKey}
           flowLabel={`${flowLabel} / ${activeRuntimeModule}`}
-          autoStart={activeRuntimeAutoStart}
-          onClose={() => {
-            setActiveRuntimeModule(undefined);
-            setActiveRuntimeAutoStart(false);
-          }}
+          startToken={runtimeStartTokens[activeRuntimeModule] ?? 0}
+          onClose={() => setActiveRuntimeModule(undefined)}
         />
       )}
     </>
