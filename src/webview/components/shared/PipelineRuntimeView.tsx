@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import {
   Background,
   Edge,
@@ -36,7 +36,11 @@ import {
   PipelineLink,
   pipelineFlowConfigs,
 } from './pipelineMockData';
-import { openExecutionTerminal } from '../../utils/ipc';
+import usePipelineRuntimeStore, {
+  PipelineRuntimeSnapshot,
+  makeInitialRuntime,
+  getPipelineRuntimeKey,
+} from '../../store/pipelineRuntimeStore';
 
 interface PipelineNodeData extends Record<string, unknown> {
   task: PipelineTask;
@@ -46,17 +50,12 @@ interface PipelineNodeData extends Record<string, unknown> {
   onStop: (id: string) => void;
 }
 
-export interface RuntimeState {
-  tasks: PipelineTask[];
-  links: PipelineLink[];
-  logs: string[];
-  selectedTaskId?: string;
-  runState: 'idle' | 'running' | 'completed' | 'stopped';
-}
+export type RuntimeState = PipelineRuntimeSnapshot;
 
 interface PipelineRuntimeViewProps {
   flowLabel?: string;
   flowKey?: 'hibist' | 'sailor' | 'verification';
+  moduleKey?: string;
   onClose?: () => void;
   autoStart?: boolean;
   startToken?: number;
@@ -79,15 +78,6 @@ const statusMeta: Record<TaskStatus, { label: string; color: string; tone: strin
   stopped: { label: '已停止', color: 'warning', tone: '#faad14' },
   skipped: { label: '已跳过', color: 'default', tone: '#8c8c8c' },
 };
-
-const initialRuntimeState: RuntimeState = {
-  tasks: [],
-  links: [],
-  logs: ['流水线运行态已就绪，点击“启动流水线”开始接收事件流。'],
-  runState: 'idle',
-};
-
-const now = () => new Date().toLocaleTimeString();
 
 function PipelineTaskNode({ data }: NodeProps<Node<PipelineNodeData>>) {
   const { task, selected, onSelect, onRerun, onStop } = data;
@@ -208,6 +198,7 @@ function layoutGraph(
 const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   flowLabel = 'DFT',
   flowKey,
+  moduleKey,
   onClose,
   autoStart,
   startToken,
@@ -225,232 +216,70 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
         : 'hibist');
 
   const config = pipelineFlowConfigs[activeFlowKey];
-
-  const [runtime, setRuntime] = useState<RuntimeState>({
-    ...initialRuntimeState,
-    logs: [`流水线运行态已就绪，点击“启动流水线”开始接收 ${config.title} 事件流。`],
-  });
-
-  const onReadyRef = useRef(onReady);
-  const onRuntimeChangeRef = useRef(onRuntimeChange);
-
-  useEffect(() => {
-    onReadyRef.current = onReady;
-  }, [onReady]);
-
-  useEffect(() => {
-    onRuntimeChangeRef.current = onRuntimeChange;
-  }, [onRuntimeChange]);
+  const activeModuleKey = moduleKey ?? flowLabel;
+  const runtimeKey = getPipelineRuntimeKey(activeFlowKey, activeModuleKey);
+  const runtime = usePipelineRuntimeStore((state) => (
+    state.runtimes[runtimeKey] ?? makeInitialRuntime(activeFlowKey, activeModuleKey, flowLabel)
+  ));
+  const ensureRuntime = usePipelineRuntimeStore((state) => state.ensureRuntime);
+  const startRuntime = usePipelineRuntimeStore((state) => state.startRuntime);
+  const stopRuntime = usePipelineRuntimeStore((state) => state.stopRuntime);
+  const selectRuntimeTask = usePipelineRuntimeStore((state) => state.selectTask);
+  const stopRuntimeTask = usePipelineRuntimeStore((state) => state.stopTask);
+  const rerunRuntimeTask = usePipelineRuntimeStore((state) => state.rerunTask);
 
   useEffect(() => {
-    onRuntimeChangeRef.current?.(runtime);
-  }, [runtime]);
-
-  const timers = useRef<number[]>([]);
-  const autoStarted = useRef(false);
-  const lastStartToken = useRef(0);
-
-  const clearTimers = useCallback(() => {
-    timers.current.forEach((timer) => window.clearTimeout(timer));
-    timers.current = [];
-  }, []);
-
-  useEffect(() => clearTimers, [clearTimers]);
-
-  const schedule = useCallback((delay: number, action: () => void) => {
-    const timer = window.setTimeout(action, delay);
-    timers.current.push(timer);
-  }, []);
-
-  const startPipeline = useCallback(() => {
-    clearTimers();
-
-    const makeTask = (
-      id: string,
-      name: string,
-      command: string,
-      description: string,
-      status: TaskStatus = 'pending',
-    ): PipelineTask => ({
-      id,
-      name,
-      command,
-      status,
-      attempts: 1,
-      description,
-      startedAt: status === 'running' ? now() : undefined,
-      logs: [`[${now()}] ${config.logPrefix} ${name} 已创建，初始状态：${statusMeta[status].label}。`],
-    });
-
-    const initialTasks = config.getInitialTasks(makeTask);
-    const initialLinks = config.getInitialLinks();
-
-    setRuntime({
-      tasks: initialTasks,
-      links: initialLinks,
-      logs: [`[${now()}] ${config.logPrefix} 流水线已启动。`],
-      selectedTaskId: initialTasks[0]?.id,
-      runState: 'running',
-    });
-
-    config.timeline.forEach((event) => {
-      schedule(event.delay, () => {
-        event.action({
-          appendLog: (msg) => {
-            const formatted = msg.startsWith(config.logPrefix) ? msg : `${config.logPrefix} ${msg}`;
-            setRuntime((prev) => ({ ...prev, logs: [...prev.logs, `[${now()}] ${formatted}`] }));
-          },
-          addTasks: (newTasks, newLinks) => {
-            setRuntime((prev) => ({
-              ...prev,
-              tasks: [...prev.tasks, ...newTasks],
-              links: [...prev.links, ...newLinks],
-            }));
-          },
-          patchTask: (id, patch) => {
-            setRuntime((prev) => ({
-              ...prev,
-              tasks: prev.tasks.map((task) => {
-                if (task.id !== id) return task;
-                const nextPatch = typeof patch === 'function' ? patch(task) : patch;
-                return {
-                  ...task,
-                  ...nextPatch,
-                  logs: nextPatch.logs ?? task.logs,
-                };
-              }),
-            }));
-          },
-          setRunState: (state) => {
-            setRuntime((prev) => ({ ...prev, runState: state }));
-          },
-          getNow: now,
-        });
-      });
-    });
-  }, [activeFlowKey, clearTimers, schedule, config]);
+    ensureRuntime(activeFlowKey, activeModuleKey, flowLabel);
+  }, [activeFlowKey, activeModuleKey, ensureRuntime, flowLabel]);
 
   const startPipelineWithTerminal = useCallback(() => {
-    void openExecutionTerminal({
-      title: config.terminalTitle,
-      command: config.terminalCommand,
-    });
-    startPipeline();
-  }, [config.terminalCommand, config.terminalTitle, startPipeline]);
-
-  useEffect(() => {
-    if (!autoStart || autoStarted.current) {
-      return;
-    }
-    autoStarted.current = true;
-    startPipelineWithTerminal();
-  }, [autoStart, startPipelineWithTerminal]);
-
-  useEffect(() => {
-    if (!startToken || startToken === lastStartToken.current) {
-      return;
-    }
-    lastStartToken.current = startToken;
-    autoStarted.current = true;
-    startPipelineWithTerminal();
-  }, [startPipelineWithTerminal, startToken]);
-
-  const stopTask = useCallback((id: string) => {
-    const logMsg = `[${now()}] ${config.logPrefix} 用户手动停止任务。`;
-    setRuntime((prev) => ({
-      ...prev,
-      tasks: prev.tasks.map((task) => {
-        if (task.id !== id) return task;
-        return {
-          ...task,
-          status: 'stopped',
-          finishedAt: now(),
-          logs: [...task.logs, logMsg],
-        };
-      }),
-      logs: [...prev.logs, `[${now()}] ${config.logPrefix} 任务 ${id} 已由用户手动停止。`],
-    }));
-  }, [config.logPrefix]);
-
-  const rerunTask = useCallback((id: string) => {
-    config.onRerun(id, {
-      appendLog: (msg) => {
-        const formatted = msg.startsWith(config.logPrefix) ? msg : `${config.logPrefix} ${msg}`;
-        setRuntime((prev) => ({ ...prev, logs: [...prev.logs, `[${now()}] ${formatted}`] }));
-      },
-      patchTask: (taskId, patch) => {
-        setRuntime((prev) => ({
-          ...prev,
-          tasks: prev.tasks.map((task) => {
-            if (task.id !== taskId) return task;
-            const nextPatch = typeof patch === 'function' ? patch(task) : patch;
-            return {
-              ...task,
-              ...nextPatch,
-              logs: nextPatch.logs ?? task.logs,
-            };
-          }),
-        }));
-      },
-      setRunState: (state) => {
-        setRuntime((prev) => ({ ...prev, runState: state }));
-      },
-      getNow: now,
-      schedule,
-      setRuntime,
-    });
-  }, [activeFlowKey, schedule, config]);
+    startRuntime(activeFlowKey, activeModuleKey, flowLabel);
+  }, [activeFlowKey, activeModuleKey, flowLabel, startRuntime]);
 
   const stopAll = useCallback(() => {
-    clearTimers();
-    setRuntime((prev) => ({
-      ...prev,
-      runState: 'stopped',
-      tasks: prev.tasks.map((task) => {
-        if (task.status === 'running') {
-          return {
-            ...task,
-            status: 'stopped',
-            finishedAt: now(),
-            logs: [...task.logs, `[${now()}] ${config.logPrefix} 已被“停止全部”中止。`],
-          };
-        }
-        if (task.status === 'pending') {
-          return {
-            ...task,
-            status: 'skipped',
-            finishedAt: now(),
-            logs: [...task.logs, `[${now()}] ${config.logPrefix} 因“停止全部”跳过。`],
-          };
-        }
-        return task;
-      }),
-      logs: [...prev.logs, `[${now()}] ${config.logPrefix} 已触发“停止全部”。`],
-    }));
-  }, [clearTimers, config.logPrefix]);
+    stopRuntime(activeFlowKey, activeModuleKey, flowLabel);
+  }, [activeFlowKey, activeModuleKey, flowLabel, stopRuntime]);
 
   useEffect(() => {
-    if (!onReadyRef.current) {
-      return;
-    }
-    onReadyRef.current({
+    onReady?.({
       start: startPipelineWithTerminal,
       stop: stopAll,
     });
-  }, [startPipelineWithTerminal, stopAll]);
+  }, [onReady, startPipelineWithTerminal, stopAll]);
 
-  const lastStopToken = useRef(0);
   useEffect(() => {
-    if (!stopToken || stopToken === lastStopToken.current) {
-      return;
+    onRuntimeChange?.(runtime);
+  }, [onRuntimeChange, runtime]);
+
+  useEffect(() => {
+    if (autoStart) {
+      startPipelineWithTerminal();
     }
-    lastStopToken.current = stopToken;
-    stopAll();
+  }, [autoStart, startPipelineWithTerminal]);
+
+  useEffect(() => {
+    if (startToken) {
+      startPipelineWithTerminal();
+    }
+  }, [startPipelineWithTerminal, startToken]);
+
+  useEffect(() => {
+    if (stopToken) {
+      stopAll();
+    }
   }, [stopAll, stopToken]);
 
+  const stopTask = useCallback((id: string) => {
+    stopRuntimeTask(activeFlowKey, activeModuleKey, id);
+  }, [activeFlowKey, activeModuleKey, stopRuntimeTask]);
+
+  const rerunTask = useCallback((id: string) => {
+    rerunRuntimeTask(activeFlowKey, activeModuleKey, id);
+  }, [activeFlowKey, activeModuleKey, rerunRuntimeTask]);
+
   const selectTask = useCallback((id: string) => {
-    setRuntime((prev) => ({ ...prev, selectedTaskId: id }));
-  }, []);
+    selectRuntimeTask(activeFlowKey, activeModuleKey, id);
+  }, [activeFlowKey, activeModuleKey, selectRuntimeTask]);
 
   const handlers = useMemo(
     () => ({ onSelect: selectTask, onRerun: rerunTask, onStop: stopTask }),
