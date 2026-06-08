@@ -218,6 +218,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   const completedCount = visibleRuns.filter((run) => run.runState === 'completed').length;
   const failedCount = visibleRuns.reduce((sum, run) => sum + run.failed, 0);
   const terminalCommandUri = buildExecutionTerminalCommandUri(config.terminalTitle, config.terminalCommand);
+  const activeRuntimeRun = activeRuntimeModule ? runs[activeRuntimeModule] : undefined;
 
   return (
     <>
@@ -315,6 +316,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
         <PipelineRuntimeView
           flowKey={flowKey}
           flowLabel={`${flowLabel} / ${activeRuntimeModule}`}
+          autoStart={activeRuntimeRun?.runState !== undefined && activeRuntimeRun.runState !== 'idle'}
           onClose={() => setActiveRuntimeModule(undefined)}
         />
       )}

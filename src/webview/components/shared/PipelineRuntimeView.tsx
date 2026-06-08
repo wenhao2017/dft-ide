@@ -102,7 +102,7 @@ function PipelineTaskNode({ data }: NodeProps<Node<PipelineNodeData>>) {
           : '0 8px 22px rgba(0,0,0,0.14)',
       }}
     >
-      <Handle type="target" position={Position.Left} />
+      <Handle type="target" position={Position.Top} />
       <Space direction="vertical" size={6} style={{ width: '100%' }}>
         <Space style={{ width: '100%', justifyContent: 'space-between' }} align="start">
           <Text strong style={{ maxWidth: 96, fontSize: 12 }} ellipsis title={task.name}>
@@ -145,7 +145,7 @@ function PipelineTaskNode({ data }: NodeProps<Node<PipelineNodeData>>) {
           </Space>
         )}
       </Space>
-      <Handle type="source" position={Position.Right} />
+      <Handle type="source" position={Position.Bottom} />
     </div>
   );
 }
@@ -160,7 +160,7 @@ function layoutGraph(
 ) {
   const graph = new dagre.graphlib.Graph();
   graph.setDefaultEdgeLabel(() => ({}));
-  graph.setGraph({ rankdir: 'LR', nodesep: 34, ranksep: 58 });
+  graph.setGraph({ rankdir: 'TB', nodesep: 38, ranksep: 58 });
 
   tasks.forEach((task) => graph.setNode(task.id, { width: 154, height: 96 }));
   links.forEach((link) => graph.setEdge(link.source, link.target));
@@ -172,8 +172,8 @@ function layoutGraph(
       id: task.id,
       type: 'pipelineTask',
       position: { x: point.x - 77, y: point.y - 48 },
-      sourcePosition: Position.Right,
-      targetPosition: Position.Left,
+      sourcePosition: Position.Bottom,
+      targetPosition: Position.Top,
       data: {
         task,
         selected: task.id === selectedTaskId,
@@ -575,6 +575,18 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
             top: 50%;
             right: 0;
             transform: translate(50%, -50%);
+          }
+
+          .dft-pipeline-runtime .react-flow__handle-top {
+            top: 0;
+            left: 50%;
+            transform: translate(-50%, -50%);
+          }
+
+          .dft-pipeline-runtime .react-flow__handle-bottom {
+            bottom: 0;
+            left: 50%;
+            transform: translate(-50%, 50%);
           }
 
           .dft-pipeline-runtime .react-flow__panel {
