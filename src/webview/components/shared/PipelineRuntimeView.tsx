@@ -60,6 +60,8 @@ interface PipelineRuntimeViewProps {
   onClose?: () => void;
   autoStart?: boolean;
   startToken?: number;
+  stopToken?: number;
+  visible?: boolean;
 }
 
 const statusMeta: Record<TaskStatus, { label: string; color: string; tone: string }> = {
@@ -202,6 +204,8 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   onClose,
   autoStart,
   startToken,
+  stopToken,
+  visible = true,
 }) => {
   const activeFlowKey =
     flowKey ??
@@ -324,8 +328,8 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
     }
     lastStartToken.current = startToken;
     autoStarted.current = true;
-    startPipeline();
-  }, [startPipeline, startToken]);
+    startPipelineWithTerminal();
+  }, [startPipelineWithTerminal, startToken]);
 
   const stopTask = useCallback((id: string) => {
     const logMsg = `[${now()}] ${config.logPrefix} 用户手动停止任务。`;
@@ -401,6 +405,15 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
     }));
   }, [clearTimers, config.logPrefix]);
 
+  const lastStopToken = useRef(0);
+  useEffect(() => {
+    if (!stopToken || stopToken === lastStopToken.current) {
+      return;
+    }
+    lastStopToken.current = stopToken;
+    stopAll();
+  }, [stopAll, stopToken]);
+
   const selectTask = useCallback((id: string) => {
     setRuntime((prev) => ({ ...prev, selectedTaskId: id }));
   }, []);
@@ -417,6 +430,10 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   const failedCount = runtime.tasks.filter((task) => task.status === 'failed').length;
   const runningCount = runtime.tasks.filter((task) => task.status === 'running').length;
   const canStopAll = runtime.tasks.some((task) => task.status === 'running' || task.status === 'pending');
+
+  if (!visible) {
+    return null;
+  }
 
   return (
     <section className="dft-pipeline-runtime">

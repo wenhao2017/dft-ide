@@ -21,7 +21,6 @@ import {
 } from '@ant-design/icons';
 import PipelineRuntimeView from './PipelineRuntimeView';
 import { PipelineTask, TaskStatus, pipelineFlowConfigs } from './pipelineMockData';
-import { openExecutionTerminal } from '../../utils/ipc';
 
 const { Text } = Typography;
 
@@ -88,10 +87,11 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   flowLabel,
   moduleKeys,
 }) => {
-  const config = pipelineFlowConfigs[flowKey];
   const timers = useRef<Record<string, number[]>>({});
   const [runs, setRuns] = useState<Record<string, PipelineRunOverview>>({});
   const [runtimeStartTokens, setRuntimeStartTokens] = useState<Record<string, number>>({});
+  const [runtimeStopTokens, setRuntimeStopTokens] = useState<Record<string, number>>({});
+  const [runtimeModuleKeys, setRuntimeModuleKeys] = useState<string[]>([]);
   const [activeRuntimeModule, setActiveRuntimeModule] = useState<string>();
 
   const selectedModuleKeys = useMemo(() => {
@@ -124,11 +124,9 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     const total = makeInitialTaskCounter(flowKey);
     const startedAt = now();
 
-    void openExecutionTerminal({
-      title: `${config.terminalTitle} / ${moduleKey}`,
-      command: config.terminalCommand,
-    });
-
+    setRuntimeModuleKeys((prev) => (
+      prev.includes(moduleKey) ? prev : [...prev, moduleKey]
+    ));
     setRuntimeStartTokens((prev) => ({
       ...prev,
       [moduleKey]: (prev[moduleKey] ?? 0) + 1,
@@ -198,7 +196,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
         };
       });
     });
-  }, [clearModuleTimers, config.terminalCommand, config.terminalTitle, flowKey, flowLabel, schedule]);
+  }, [clearModuleTimers, flowKey, flowLabel, schedule]);
 
   const startSelectedRuns = useCallback(() => {
     selectedModuleKeys.forEach((moduleKey) => startRun(moduleKey));
@@ -206,6 +204,10 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
 
   const stopRun = useCallback((moduleKey: string) => {
     clearModuleTimers(moduleKey);
+    setRuntimeStopTokens((prev) => ({
+      ...prev,
+      [moduleKey]: (prev[moduleKey] ?? 0) + 1,
+    }));
     setRuns((prev) => {
       const current = prev[moduleKey];
       if (!current) return prev;
@@ -229,6 +231,10 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   const runningCount = visibleRuns.filter((run) => run.runState === 'running').length;
   const completedCount = visibleRuns.filter((run) => run.runState === 'completed').length;
   const failedCount = visibleRuns.reduce((sum, run) => sum + run.failed, 0);
+  const mountedRuntimeModuleKeys = Array.from(new Set([
+    ...runtimeModuleKeys,
+    ...(activeRuntimeModule ? [activeRuntimeModule] : []),
+  ]));
   return (
     <>
       <Card
@@ -325,14 +331,17 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
         </Space>
       </Card>
 
-      {activeRuntimeModule && (
+      {mountedRuntimeModuleKeys.map((moduleKey) => (
         <PipelineRuntimeView
+          key={moduleKey}
           flowKey={flowKey}
-          flowLabel={`${flowLabel} / ${activeRuntimeModule}`}
-          startToken={runtimeStartTokens[activeRuntimeModule] ?? 0}
+          flowLabel={`${flowLabel} / ${moduleKey}`}
+          startToken={runtimeStartTokens[moduleKey] ?? 0}
+          stopToken={runtimeStopTokens[moduleKey] ?? 0}
+          visible={moduleKey === activeRuntimeModule}
           onClose={() => setActiveRuntimeModule(undefined)}
         />
-      )}
+      ))}
     </>
   );
 };
