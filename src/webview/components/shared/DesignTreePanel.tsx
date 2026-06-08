@@ -68,6 +68,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   const [search, setSearch] = useState('');
   const [focusKeys, setFocusKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [configsLoaded, setConfigsLoaded] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const [collapsed, setCollapsed] = useState(false);
@@ -109,6 +110,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
 
       setConfigs(result.configs);
       setConfigsDir(result.configsDir ?? '');
+      setConfigsLoaded(true);
       const nextKey =
         preferredKey && result.configs.some((item) => item.key === preferredKey)
           ? preferredKey
@@ -130,8 +132,10 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   useEffect(() => {
     focusHydratedRef.current = false;
     executionHydratedRef.current = false;
+    setConfigsLoaded(false);
     setFocusKeys([]);
-  }, [flow]);
+    onExecutionSelectionChange?.([]);
+  }, [flow, onExecutionSelectionChange]);
 
   useEffect(() => {
     if (focusHydratedRef.current) {
@@ -172,7 +176,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   }, [configs, flow, focusKeys]);
 
   useEffect(() => {
-    if (!configs.length || !onExecutionSelectionChange || !executionKeys.length) {
+    if (!configsLoaded || !onExecutionSelectionChange || !executionKeys.length) {
       return;
     }
     const validKeys = new Set(configs.map((item) => item.key));

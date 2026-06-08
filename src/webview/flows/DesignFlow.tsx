@@ -15,8 +15,8 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
   const repo = category.toLowerCase() === 'sailor' ? 'sailor' : 'hibist';
   const accent = repo === 'sailor' ? '#0ea5e9' : '#7c3aed';
   const [currentStep, setCurrentStep] = useState(0);
-  const [selectedModule, setSelectedModule] = useState('top_abc');
-  const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>(['top_abc']);
+  const [selectedModule, setSelectedModule] = useState('');
+  const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>([]);
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
 

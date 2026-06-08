@@ -94,6 +94,8 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   const [runtimeModuleKeys, setRuntimeModuleKeys] = useState<string[]>([]);
   const [activeRuntimeModule, setActiveRuntimeModule] = useState<string>();
   const runtimeControls = useRef<Record<string, PipelineRuntimeControls>>({});
+  const runtimeStartTokensRef = useRef<Record<string, number>>({});
+  const runtimeStopTokensRef = useRef<Record<string, number>>({});
   const deliveredStartTokens = useRef<Record<string, number>>({});
   const deliveredStopTokens = useRef<Record<string, number>>({});
   const [controlsVersion, setControlsVersion] = useState(0);
@@ -131,10 +133,14 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     setRuntimeModuleKeys((prev) => (
       prev.includes(moduleKey) ? prev : [...prev, moduleKey]
     ));
-    setRuntimeStartTokens((prev) => ({
-      ...prev,
-      [moduleKey]: (prev[moduleKey] ?? 0) + 1,
-    }));
+    setRuntimeStartTokens((prev) => {
+      const next = {
+        ...prev,
+        [moduleKey]: (prev[moduleKey] ?? 0) + 1,
+      };
+      runtimeStartTokensRef.current = next;
+      return next;
+    });
 
     setRuns((prev) => ({
       ...prev,
@@ -208,10 +214,14 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
 
   const stopRun = useCallback((moduleKey: string) => {
     clearModuleTimers(moduleKey);
-    setRuntimeStopTokens((prev) => ({
-      ...prev,
-      [moduleKey]: (prev[moduleKey] ?? 0) + 1,
-    }));
+    setRuntimeStopTokens((prev) => {
+      const next = {
+        ...prev,
+        [moduleKey]: (prev[moduleKey] ?? 0) + 1,
+      };
+      runtimeStopTokensRef.current = next;
+      return next;
+    });
     setRuns((prev) => {
       const current = prev[moduleKey];
       if (!current) return prev;
@@ -234,6 +244,16 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
 
   const registerRuntimeControls = useCallback((moduleKey: string, controls: PipelineRuntimeControls) => {
     runtimeControls.current[moduleKey] = controls;
+    const startToken = runtimeStartTokensRef.current[moduleKey] ?? 0;
+    if (startToken && deliveredStartTokens.current[moduleKey] !== startToken) {
+      deliveredStartTokens.current[moduleKey] = startToken;
+      controls.start();
+    }
+    const stopToken = runtimeStopTokensRef.current[moduleKey] ?? 0;
+    if (stopToken && deliveredStopTokens.current[moduleKey] !== stopToken) {
+      deliveredStopTokens.current[moduleKey] = stopToken;
+      controls.stop();
+    }
     setControlsVersion((prev) => prev + 1);
   }, []);
 
