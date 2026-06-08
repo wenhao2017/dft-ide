@@ -62,6 +62,12 @@ interface PipelineRuntimeViewProps {
   startToken?: number;
   stopToken?: number;
   visible?: boolean;
+  onReady?: (controls: PipelineRuntimeControls) => void;
+}
+
+export interface PipelineRuntimeControls {
+  start: () => void;
+  stop: () => void;
 }
 
 const statusMeta: Record<TaskStatus, { label: string; color: string; tone: string }> = {
@@ -206,6 +212,7 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   startToken,
   stopToken,
   visible = true,
+  onReady,
 }) => {
   const activeFlowKey =
     flowKey ??
@@ -404,6 +411,16 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
       logs: [...prev.logs, `[${now()}] ${config.logPrefix} 已触发“停止全部”。`],
     }));
   }, [clearTimers, config.logPrefix]);
+
+  useEffect(() => {
+    if (!onReady) {
+      return;
+    }
+    onReady({
+      start: startPipelineWithTerminal,
+      stop: stopAll,
+    });
+  }, [startPipelineWithTerminal, stopAll]);
 
   const lastStopToken = useRef(0);
   useEffect(() => {

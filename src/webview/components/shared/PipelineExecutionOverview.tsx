@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Badge,
   Button,
@@ -19,7 +19,7 @@ import {
   ReloadOutlined,
   StopOutlined,
 } from '@ant-design/icons';
-import PipelineRuntimeView from './PipelineRuntimeView';
+import PipelineRuntimeView, { PipelineRuntimeControls } from './PipelineRuntimeView';
 import { PipelineTask, TaskStatus, pipelineFlowConfigs } from './pipelineMockData';
 
 const { Text } = Typography;
@@ -93,6 +93,10 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   const [runtimeStopTokens, setRuntimeStopTokens] = useState<Record<string, number>>({});
   const [runtimeModuleKeys, setRuntimeModuleKeys] = useState<string[]>([]);
   const [activeRuntimeModule, setActiveRuntimeModule] = useState<string>();
+  const runtimeControls = useRef<Record<string, PipelineRuntimeControls>>({});
+  const deliveredStartTokens = useRef<Record<string, number>>({});
+  const deliveredStopTokens = useRef<Record<string, number>>({});
+  const [controlsVersion, setControlsVersion] = useState(0);
 
   const selectedModuleKeys = useMemo(() => {
     const cleanKeys = moduleKeys.map((key) => key.trim()).filter(Boolean);
@@ -228,6 +232,39 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     selectedModuleKeys.forEach((moduleKey) => stopRun(moduleKey));
   }, [selectedModuleKeys, stopRun]);
 
+  const registerRuntimeControls = useCallback((moduleKey: string, controls: PipelineRuntimeControls) => {
+    runtimeControls.current[moduleKey] = controls;
+    setControlsVersion((prev) => prev + 1);
+  }, []);
+
+  useEffect(() => {
+    Object.entries(runtimeStartTokens).forEach(([moduleKey, token]) => {
+      if (!token || deliveredStartTokens.current[moduleKey] === token) {
+        return;
+      }
+      const controls = runtimeControls.current[moduleKey];
+      if (!controls) {
+        return;
+      }
+      deliveredStartTokens.current[moduleKey] = token;
+      controls.start();
+    });
+  }, [controlsVersion, runtimeStartTokens]);
+
+  useEffect(() => {
+    Object.entries(runtimeStopTokens).forEach(([moduleKey, token]) => {
+      if (!token || deliveredStopTokens.current[moduleKey] === token) {
+        return;
+      }
+      const controls = runtimeControls.current[moduleKey];
+      if (!controls) {
+        return;
+      }
+      deliveredStopTokens.current[moduleKey] = token;
+      controls.stop();
+    });
+  }, [controlsVersion, runtimeStopTokens]);
+
   const runningCount = visibleRuns.filter((run) => run.runState === 'running').length;
   const completedCount = visibleRuns.filter((run) => run.runState === 'completed').length;
   const failedCount = visibleRuns.reduce((sum, run) => sum + run.failed, 0);
@@ -336,9 +373,8 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
           key={moduleKey}
           flowKey={flowKey}
           flowLabel={`${flowLabel} / ${moduleKey}`}
-          startToken={runtimeStartTokens[moduleKey] ?? 0}
-          stopToken={runtimeStopTokens[moduleKey] ?? 0}
           visible={moduleKey === activeRuntimeModule}
+          onReady={(controls) => registerRuntimeControls(moduleKey, controls)}
           onClose={() => setActiveRuntimeModule(undefined)}
         />
       ))}
