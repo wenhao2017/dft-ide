@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Badge,
   Button,
@@ -19,7 +19,7 @@ import {
   ReloadOutlined,
   StopOutlined,
 } from '@ant-design/icons';
-import PipelineRuntimeView, { PipelineRuntimeControls } from './PipelineRuntimeView';
+import PipelineRuntimeView, { PipelineRuntimeControls, RuntimeState } from './PipelineRuntimeView';
 import { PipelineTask, TaskStatus, pipelineFlowConfigs } from './pipelineMockData';
 
 const { Text } = Typography;
@@ -82,28 +82,128 @@ function makeInitialTaskCounter(flowKey: FlowKey): number {
   return config.getInitialTasks(makeTask).length;
 }
 
+function summarizeRuntime(moduleKey: string, flowKey: FlowKey, runtime: RuntimeState): PipelineRunOverview {
+  const total = runtime.tasks.length || makeInitialTaskCounter(flowKey);
+  const completed = runtime.tasks.filter((task) =>
+    task.status === 'success' ||
+    task.status === 'failed' ||
+    task.status === 'stopped' ||
+    task.status === 'skipped'
+  ).length;
+  const running = runtime.tasks.filter((task) => task.status === 'running').length;
+  const failed = runtime.tasks.filter((task) => task.status === 'failed').length;
+  const startedAt = runtime.tasks.find((task) => task.startedAt)?.startedAt;
+  const finishedAt = [...runtime.tasks].reverse().find((task) => task.finishedAt)?.finishedAt;
+
+  return {
+    moduleKey,
+    runState: runtime.runState,
+    total,
+    completed,
+    running,
+    failed,
+    startedAt,
+    finishedAt,
+    logs: runtime.logs.length ? runtime.logs : [`${moduleKey} 等待启动。`],
+  };
+}
+
 const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   flowKey,
   flowLabel,
   moduleKeys,
 }) => {
-  const timers = useRef<Record<string, number[]>>({});
   const [runs, setRuns] = useState<Record<string, PipelineRunOverview>>({});
-  const [runtimeStartTokens, setRuntimeStartTokens] = useState<Record<string, number>>({});
-  const [runtimeStopTokens, setRuntimeStopTokens] = useState<Record<string, number>>({});
   const [runtimeModuleKeys, setRuntimeModuleKeys] = useState<string[]>([]);
   const [activeRuntimeModule, setActiveRuntimeModule] = useState<string>();
   const runtimeControls = useRef<Record<string, PipelineRuntimeControls>>({});
-  const runtimeStartTokensRef = useRef<Record<string, number>>({});
-  const runtimeStopTokensRef = useRef<Record<string, number>>({});
-  const deliveredStartTokens = useRef<Record<string, number>>({});
-  const deliveredStopTokens = useRef<Record<string, number>>({});
-  const [controlsVersion, setControlsVersion] = useState(0);
+  const pendingStarts = useRef<Record<string, number>>({});
+  const pendingStops = useRef<Record<string, number>>({});
 
   const selectedModuleKeys = useMemo(() => {
     const cleanKeys = moduleKeys.map((key) => key.trim()).filter(Boolean);
     return Array.from(new Set(cleanKeys));
   }, [moduleKeys]);
+
+  const ensureRuntimeMounted = useCallback((moduleKey: string) => {
+    setRuntimeModuleKeys((prev) => (
+      prev.includes(moduleKey) ? prev : [...prev, moduleKey]
+    ));
+  }, []);
+
+  const setPendingRun = useCallback((moduleKey: string, state: OverviewRunState) => {
+    const total = makeInitialTaskCounter(flowKey);
+    const timestamp = now();
+    setRuns((prev) => ({
+      ...prev,
+      [moduleKey]: {
+        moduleKey,
+        runState: state,
+        total,
+        completed: 0,
+        running: state === 'running' ? 1 : 0,
+        failed: 0,
+        startedAt: state === 'running' ? timestamp : prev[moduleKey]?.startedAt,
+        finishedAt: state === 'stopped' ? timestamp : undefined,
+        logs: [
+          ...(prev[moduleKey]?.logs ?? []),
+          state === 'running'
+            ? `[${timestamp}] ${flowLabel} ${moduleKey} 已提交启动请求。`
+            : `[${timestamp}] ${moduleKey} 已提交停止请求。`,
+        ],
+      },
+    }));
+  }, [flowKey, flowLabel]);
+
+  const startRun = useCallback((moduleKey: string) => {
+    ensureRuntimeMounted(moduleKey);
+    const controls = runtimeControls.current[moduleKey];
+    if (controls) {
+      controls.start();
+    } else {
+      pendingStarts.current[moduleKey] = (pendingStarts.current[moduleKey] ?? 0) + 1;
+    }
+    setPendingRun(moduleKey, 'running');
+  }, [ensureRuntimeMounted, setPendingRun]);
+
+  const stopRun = useCallback((moduleKey: string) => {
+    ensureRuntimeMounted(moduleKey);
+    const controls = runtimeControls.current[moduleKey];
+    if (controls) {
+      controls.stop();
+    } else {
+      pendingStops.current[moduleKey] = (pendingStops.current[moduleKey] ?? 0) + 1;
+    }
+    setPendingRun(moduleKey, 'stopped');
+  }, [ensureRuntimeMounted, setPendingRun]);
+
+  const startSelectedRuns = useCallback(() => {
+    selectedModuleKeys.forEach((moduleKey) => startRun(moduleKey));
+  }, [selectedModuleKeys, startRun]);
+
+  const stopAll = useCallback(() => {
+    selectedModuleKeys.forEach((moduleKey) => stopRun(moduleKey));
+  }, [selectedModuleKeys, stopRun]);
+
+  const registerRuntimeControls = useCallback((moduleKey: string, controls: PipelineRuntimeControls) => {
+    runtimeControls.current[moduleKey] = controls;
+
+    if (pendingStarts.current[moduleKey]) {
+      pendingStarts.current[moduleKey] = 0;
+      controls.start();
+    }
+    if (pendingStops.current[moduleKey]) {
+      pendingStops.current[moduleKey] = 0;
+      controls.stop();
+    }
+  }, []);
+
+  const updateRunFromRuntime = useCallback((moduleKey: string, runtime: RuntimeState) => {
+    setRuns((prev) => ({
+      ...prev,
+      [moduleKey]: summarizeRuntime(moduleKey, flowKey, runtime),
+    }));
+  }, [flowKey]);
 
   const visibleRuns = selectedModuleKeys.map((moduleKey) => runs[moduleKey] ?? {
     moduleKey,
@@ -114,177 +214,6 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     failed: 0,
     logs: [`${moduleKey} 已加入执行队列，等待启动。`],
   });
-
-  const clearModuleTimers = useCallback((moduleKey: string) => {
-    timers.current[moduleKey]?.forEach((timer) => window.clearTimeout(timer));
-    timers.current[moduleKey] = [];
-  }, []);
-
-  const schedule = useCallback((moduleKey: string, delay: number, action: () => void) => {
-    const timer = window.setTimeout(action, delay);
-    timers.current[moduleKey] = [...(timers.current[moduleKey] ?? []), timer];
-  }, []);
-
-  const startRun = useCallback((moduleKey: string) => {
-    clearModuleTimers(moduleKey);
-    const total = makeInitialTaskCounter(flowKey);
-    const startedAt = now();
-
-    setRuntimeModuleKeys((prev) => (
-      prev.includes(moduleKey) ? prev : [...prev, moduleKey]
-    ));
-    setRuntimeStartTokens((prev) => {
-      const next = {
-        ...prev,
-        [moduleKey]: (prev[moduleKey] ?? 0) + 1,
-      };
-      runtimeStartTokensRef.current = next;
-      return next;
-    });
-
-    setRuns((prev) => ({
-      ...prev,
-      [moduleKey]: {
-        moduleKey,
-        runState: 'running',
-        total,
-        completed: 0,
-        running: Math.min(1, total),
-        failed: 0,
-        startedAt,
-        logs: [`[${startedAt}] ${flowLabel} ${moduleKey} 流水线已启动。`],
-      },
-    }));
-
-    schedule(moduleKey, 900, () => {
-      setRuns((prev) => {
-        const current = prev[moduleKey];
-        if (!current || current.runState !== 'running') return prev;
-        return {
-          ...prev,
-          [moduleKey]: {
-            ...current,
-            completed: Math.max(1, Math.floor(total * 0.35)),
-            running: Math.min(2, total),
-            logs: [...current.logs, `[${now()}] ${moduleKey} 已完成环境准备，进入任务编排。`],
-          },
-        };
-      });
-    });
-
-    schedule(moduleKey, 2100, () => {
-      setRuns((prev) => {
-        const current = prev[moduleKey];
-        if (!current || current.runState !== 'running') return prev;
-        return {
-          ...prev,
-          [moduleKey]: {
-            ...current,
-            completed: Math.max(current.completed, Math.floor(total * 0.72)),
-            running: 1,
-            logs: [...current.logs, `[${now()}] ${moduleKey} 关键执行节点已通过，等待结果收敛。`],
-          },
-        };
-      });
-    });
-
-    schedule(moduleKey, 3600, () => {
-      setRuns((prev) => {
-        const current = prev[moduleKey];
-        if (!current || current.runState !== 'running') return prev;
-        return {
-          ...prev,
-          [moduleKey]: {
-            ...current,
-            runState: 'completed',
-            completed: total,
-            running: 0,
-            failed: 0,
-            finishedAt: now(),
-            logs: [...current.logs, `[${now()}] ${moduleKey} 流水线执行完成。`],
-          },
-        };
-      });
-    });
-  }, [clearModuleTimers, flowKey, flowLabel, schedule]);
-
-  const startSelectedRuns = useCallback(() => {
-    selectedModuleKeys.forEach((moduleKey) => startRun(moduleKey));
-  }, [selectedModuleKeys, startRun]);
-
-  const stopRun = useCallback((moduleKey: string) => {
-    clearModuleTimers(moduleKey);
-    setRuntimeStopTokens((prev) => {
-      const next = {
-        ...prev,
-        [moduleKey]: (prev[moduleKey] ?? 0) + 1,
-      };
-      runtimeStopTokensRef.current = next;
-      return next;
-    });
-    setRuns((prev) => {
-      const current = prev[moduleKey];
-      if (!current) return prev;
-      return {
-        ...prev,
-        [moduleKey]: {
-          ...current,
-          runState: 'stopped',
-          running: 0,
-          finishedAt: now(),
-          logs: [...current.logs, `[${now()}] ${moduleKey} 已手动停止。`],
-        },
-      };
-    });
-  }, [clearModuleTimers]);
-
-  const stopAll = useCallback(() => {
-    selectedModuleKeys.forEach((moduleKey) => stopRun(moduleKey));
-  }, [selectedModuleKeys, stopRun]);
-
-  const registerRuntimeControls = useCallback((moduleKey: string, controls: PipelineRuntimeControls) => {
-    runtimeControls.current[moduleKey] = controls;
-    const startToken = runtimeStartTokensRef.current[moduleKey] ?? 0;
-    if (startToken && deliveredStartTokens.current[moduleKey] !== startToken) {
-      deliveredStartTokens.current[moduleKey] = startToken;
-      controls.start();
-    }
-    const stopToken = runtimeStopTokensRef.current[moduleKey] ?? 0;
-    if (stopToken && deliveredStopTokens.current[moduleKey] !== stopToken) {
-      deliveredStopTokens.current[moduleKey] = stopToken;
-      controls.stop();
-    }
-    setControlsVersion((prev) => prev + 1);
-  }, []);
-
-  useEffect(() => {
-    Object.entries(runtimeStartTokens).forEach(([moduleKey, token]) => {
-      if (!token || deliveredStartTokens.current[moduleKey] === token) {
-        return;
-      }
-      const controls = runtimeControls.current[moduleKey];
-      if (!controls) {
-        return;
-      }
-      deliveredStartTokens.current[moduleKey] = token;
-      controls.start();
-    });
-  }, [controlsVersion, runtimeStartTokens]);
-
-  useEffect(() => {
-    Object.entries(runtimeStopTokens).forEach(([moduleKey, token]) => {
-      if (!token || deliveredStopTokens.current[moduleKey] === token) {
-        return;
-      }
-      const controls = runtimeControls.current[moduleKey];
-      if (!controls) {
-        return;
-      }
-      deliveredStopTokens.current[moduleKey] = token;
-      controls.stop();
-    });
-  }, [controlsVersion, runtimeStopTokens]);
-
   const runningCount = visibleRuns.filter((run) => run.runState === 'running').length;
   const completedCount = visibleRuns.filter((run) => run.runState === 'completed').length;
   const failedCount = visibleRuns.reduce((sum, run) => sum + run.failed, 0);
@@ -292,6 +221,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     ...runtimeModuleKeys,
     ...(activeRuntimeModule ? [activeRuntimeModule] : []),
   ]));
+
   return (
     <>
       <Card
@@ -353,7 +283,10 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
                           size="small"
                           type="text"
                           icon={<FullscreenOutlined />}
-                          onClick={() => setActiveRuntimeModule(run.moduleKey)}
+                          onClick={() => {
+                            ensureRuntimeMounted(run.moduleKey);
+                            setActiveRuntimeModule(run.moduleKey);
+                          }}
                         />
                       </Tooltip>,
                     ]}
@@ -395,6 +328,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
           flowLabel={`${flowLabel} / ${moduleKey}`}
           visible={moduleKey === activeRuntimeModule}
           onReady={(controls) => registerRuntimeControls(moduleKey, controls)}
+          onRuntimeChange={(runtime) => updateRunFromRuntime(moduleKey, runtime)}
           onClose={() => setActiveRuntimeModule(undefined)}
         />
       ))}

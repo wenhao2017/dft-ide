@@ -46,7 +46,7 @@ interface PipelineNodeData extends Record<string, unknown> {
   onStop: (id: string) => void;
 }
 
-interface RuntimeState {
+export interface RuntimeState {
   tasks: PipelineTask[];
   links: PipelineLink[];
   logs: string[];
@@ -63,6 +63,7 @@ interface PipelineRuntimeViewProps {
   stopToken?: number;
   visible?: boolean;
   onReady?: (controls: PipelineRuntimeControls) => void;
+  onRuntimeChange?: (runtime: RuntimeState) => void;
 }
 
 export interface PipelineRuntimeControls {
@@ -213,6 +214,7 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   stopToken,
   visible = true,
   onReady,
+  onRuntimeChange,
 }) => {
   const activeFlowKey =
     flowKey ??
@@ -228,6 +230,21 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
     ...initialRuntimeState,
     logs: [`流水线运行态已就绪，点击“启动流水线”开始接收 ${config.title} 事件流。`],
   });
+
+  const onReadyRef = useRef(onReady);
+  const onRuntimeChangeRef = useRef(onRuntimeChange);
+
+  useEffect(() => {
+    onReadyRef.current = onReady;
+  }, [onReady]);
+
+  useEffect(() => {
+    onRuntimeChangeRef.current = onRuntimeChange;
+  }, [onRuntimeChange]);
+
+  useEffect(() => {
+    onRuntimeChangeRef.current?.(runtime);
+  }, [runtime]);
 
   const timers = useRef<number[]>([]);
   const autoStarted = useRef(false);
@@ -413,10 +430,10 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   }, [clearTimers, config.logPrefix]);
 
   useEffect(() => {
-    if (!onReady) {
+    if (!onReadyRef.current) {
       return;
     }
-    onReady({
+    onReadyRef.current({
       start: startPipelineWithTerminal,
       stop: stopAll,
     });
