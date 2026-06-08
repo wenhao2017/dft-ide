@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Col, Input, Progress, Row, Spin, Tag, Tooltip, message, Form } from "antd";
+import { Alert, Button, Col, Input, Progress, Row, Spin, Tag, Tooltip, message, Form, Modal } from "antd";
 import Card from "antd/es/card";
 import Empty from "antd/es/empty";
 import List from "antd/es/list";
@@ -7,9 +7,9 @@ import Space from "antd/es/space";
 import Typography from "antd/es/typography";
 
 import {
-  BellOutlined,
   CheckCircleOutlined,
   CloudSyncOutlined,
+  FolderAddOutlined,
   ExperimentOutlined,
   FileProtectOutlined,
   FolderOpenOutlined,
@@ -25,19 +25,17 @@ import {
   openProjectWorkspace,
   prepareProjectWorkspace,
   selectPath,
-  setLocalConfigPath,
   enterProjectWorkspace,
-  type LocalConfigInfo,
+  LocalConfigInfo,
 } from '../utils/ipc';
 import useWizardStore from '../store/wizardStore';
 import {
   DftProject,
-  canManageProjectMembers,
   fetchProjectDashboard,
+  createProject,
   initProject,
   ProjectDashboard,
   ProjectRepoStatus,
-  selectProject,
   updateProjectRootPath,
 } from '../services/projectService';
 
@@ -114,6 +112,11 @@ function repoTagColor(status: ProjectRepoStatus['status']): string {
   return 'default';
 }
 
+type ProjectFormValue = {
+  name: string;
+  description: string;
+};
+
 const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }) => {
   const {setFlowContext, setActiveProject, currentUser, setCurrentUser} = useWizardStore();
   const [dashboard, setDashboard] = useState<ProjectDashboard | null>(null);
@@ -126,16 +129,14 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
   const [projectKeyword, setProjectKeyword] = useState('');
   const [localRootInfo, setLocalRootInfo] = useState<LocalConfigInfo | null>(null);
   const [projectId, setProjectId] = useState('');
+  const [projectModalOpen, setProjectModalOpen] = useState(false);
+  const [projectForm] = Form.useForm<ProjectFormValue>();
+  const [projectSaving, setProjectSaving] = useState(false);
 
   const cardBorder = 'var(--vscode-panel-border, rgba(127,127,127,0.18))';
   const panelBg = isDark
     ? 'color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 96%, white)'
     : 'color-mix(in srgb, var(--vscode-editor-background, #fff) 92%, transparent)';
-
-  // const currentProject = useMemo(() => {
-  //   if (!dashboard?.currentProjectId) return null;
-  //   return projects?.find((item) => item.id === dashboard.currentProjectId) ?? null;
-  // }, [dashboard, projects]);
 
   const currentProject = useMemo(() => {
     if (!dashboard) return null;
@@ -200,7 +201,6 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
           message.warning(error instanceof Error ? error.message : '本地托管目录读取失败');
         }
       });
-
     return () => {
       disposed = true;
     };
@@ -209,7 +209,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
   const enterProject = async (project: DftProject, rootPath?: string) => {
     setWorkingProjectId(project.id);
     try {
-      if(!project.local_root && !rootPath) {
+      if(!project.rootPath && !rootPath) {
         chooseProjectsRoot(project, true);
         return;
       }
@@ -244,32 +244,61 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
   };
 
   const setProjectRoot = async (project: DftProject, porjectRootPath: string) => {
-    setProjects(projects?.map(item => 
-      item.id === project.id ? { ...item, rootPath: porjectRootPath } : item
+    setProjects(projects?.map(item =>
+      (item.id === project.id && item.ctmp_id === project.ctmp_id) ? { ...item, rootPath: porjectRootPath } : item
     ));
     // 请求后端保存项目目录数据
     try {
       await updateProjectRootPath(project.id, currentUser ,porjectRootPath);
+      return { success: true };
     } catch (err) {
       message.error(err instanceof Error ? err.message : '项目目录保存失败');
+      return { success: false };
     }
   };
 
   const isProjectInitialized = (project: DftProject) =>
     project.repos.length > 0 && project.repos.every((repo) => repo.status === 'ready');
 
-  const initializeProject2 = async (project: DftProject) => {
+  const isProjectInitializeDisable = (project: DftProject) =>
+    isProjectInitialized(project) || project.role !== 'DFTM';
+
+  const isMemberManageDisable = (project: DftProject) =>
+    !isProjectInitialized(project) || project.role !== 'DFTM';
+
+  const isProjectEnterDisable = (project: DftProject) =>
+    !isProjectInitialized(project);
+
+  const projectInitializeTooltipTitle = (project: DftProject) => {
+    if (isProjectInitialized(project)) return '当前项目已初始化'
+    if (project.role !== 'DFTM') return '不是 DFTM 角色，不能初始化项目'
+    return '远程初始化，创建Gitlab项目'
+  }
+
+  const memberManageTooltipTitle = (project: DftProject) => {
+    if (!isProjectInitialized(project)) return '当前项目未初始化，不能管理成员'
+    if (project.role !== 'DFTM') return '不是 DFTM 角色，不能管理成员'
+    return '管理项目成员'
+  }
+
+  const projectEnterTooltipTitle = (project: DftProject) => {
+    if (!isProjectInitialized(project)) return '当前项目未初始化，不能进入项目'
+    return '进入项目，首次本地初始化'
+  }
+
+  const initializeProject = async (project: DftProject) => {
     setInitializingProjectId(project.ctmp_id?.toString() ?? '');
     try {
       await initProject(project);
       fetchProjectData();
-    }
-    finally {
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '项目初始化失败');
+    } finally {
       setInitializingProjectId(null);
     }
   }
 
-  const initializeProject = async (project: DftProject) => {
+  const initializeProject2 = async (project: DftProject) => {
     if (isProjectInitialized(project)) return;
 
     setInitializingProjectId(project.id);
@@ -330,10 +359,38 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
   const chooseProjectsRoot = async (project: DftProject, doEnter=false) => {
     const selected = await selectPath('folder');
     if (selected) {
-      setProjectRoot(project, selected);
-      if (doEnter) {
-        enterProject(project, selected);
+      const result = await setProjectRoot(project, selected);
+      if (doEnter && result.success) {
+        enterProject( {...project, rootPath: selected}, selected);
       }
+    }
+  };
+
+  const openProjectModal = () => {
+    projectForm.setFieldsValue({ name: '', description: '' });
+    setProjectModalOpen(true);
+  };
+
+  const closeProjectModal = () => {
+    setProjectModalOpen(false);
+    projectForm.resetFields();
+  };
+
+  const saveProject = async () => {
+    const value = await projectForm.validateFields();
+    setProjectSaving(true);
+    try {
+      await createProject(currentUser, {
+        name: value.name.trim(),
+        description: value.description.trim(),
+      });
+      message.success('创建自定义项目成功');
+      closeProjectModal();
+      fetchProjectData();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '创建自定义项目失败');
+    } finally {
+      setProjectSaving(false);
     }
   };
 
@@ -418,10 +475,50 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                   进入上次项目
                 </Button>
               )}
+              <Button
+                size="large"
+                icon={<FolderAddOutlined />}
+                onClick={() => openProjectModal()}
+                style={{
+                  color: ' #f97316',
+                  borderColor: ' #f97316'
+                }}
+              >
+                创建自定义项目
+              </Button>
             </Space>
           </Space>
         </div>
       </div>
+
+      <Modal
+        title="创建自定义项目"
+        open={projectModalOpen}
+        onCancel={closeProjectModal}
+        onOk={saveProject}
+        okText="创建"
+        confirmLoading={projectSaving}
+        destroyOnHidden
+      >
+        <Form form={projectForm} layout="vertical" preserve={true}>
+          <Form.Item
+            label="项目名称"
+            name="name"
+            rules={[
+              { required: true, message: '请输入项目名称' },
+            ]}
+          >
+            <Input placeholder="请输入项目名称" />
+          </Form.Item>
+
+          <Form.Item
+            label="项目描述"
+            name="description"
+          >
+            <Input />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <div
         className="welcome-content-grid"
@@ -437,7 +534,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
           title="我的项目"
           extra={currentProject ? <Tag color="blue">上次：{currentProject.name}</Tag> : null}
           style={{ height: '100%', borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
-          bodyStyle={{ padding: 0 }}
+          styles={{body: {padding: 0}}}
         >
           <div style={{ padding: '14px 18px', borderBottom: `1px solid ${cardBorder}` }}>
             <Input.Search
@@ -464,27 +561,29 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
             <List
               dataSource={filteredProjects}
               renderItem={(project) => {
-                const canManageMembers = canManageProjectMembers(project);
                 return (
                 <List.Item
                   actions={[
                     <div style={{ minWidth: 300}}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, paddingBottom: 12 }}>
-                        <Button
-                          key="initialize"
-                          type="primary"
-                          disabled={isProjectInitialized(project)}
-                          loading={initializingProjectId === project.ctmp_id?.toString()}
-                          onClick={() => initializeProject2(project)}
-                          style={{ flex: 1}}
-                        >
-                          初始化
-                        </Button>
-                        <Tooltip key="members" title={canManageMembers ? '管理项目成员' : '当前项目未初始化或不是 DFTM 角色，不能管理成员'}>
+                        <Tooltip key="initialize" title={projectInitializeTooltipTitle(project)}>
+                          <span>
+                            <Button
+                              type="primary"
+                              disabled={isProjectInitializeDisable(project)}
+                              loading={initializingProjectId === project.ctmp_id?.toString()}
+                              onClick={() => initializeProject(project)}
+                              style={{ flex: 1 }}
+                            >
+                              初始化
+                            </Button>
+                          </span>
+                        </Tooltip>
+                        <Tooltip key="members" title={memberManageTooltipTitle(project)}>
                           <span>
                             <Button
                               icon={<TeamOutlined />}
-                              disabled={!canManageMembers}
+                              disabled={isMemberManageDisable(project)}
                               onClick={() => onManageMembers?.(project)}
                               style={{ flex: 1}}
                             >
@@ -492,22 +591,25 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                             </Button>
                           </span>
                         </Tooltip>
-                        <Button
-                          key="enter"
-                          disabled={!isProjectInitialized(project)}
-                          loading={workingProjectId === project.id}
-                          onClick={() => enterProject(project)}
-                          style={{ flex: 1}}
-                        >
-                          进入
-                        </Button>
+                        <Tooltip key="enter" title={projectEnterTooltipTitle(project)}>
+                          <span>
+                            <Button
+                              disabled={isProjectEnterDisable(project)}
+                              loading={workingProjectId === project.id}
+                              onClick={() => enterProject(project)}
+                              style={{ flex: 1 }}
+                            >
+                              进入
+                            </Button>
+                          </span>
+                        </Tooltip>
                       </div>
                       <Form layout="horizontal" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
                         <Form.Item label="项目目录" style={{ marginBottom: 16 }}>
                           <Input
-                            value={project.local_root}
+                            value={project.rootPath}
                             onChange={(event) => setProjectRoot(project, event.target.value)}
-                            placeholder="请选择项目目录"
+                            placeholder="例如 data/DFT/projects"
                             suffix={<FolderOpenOutlined onClick={() => chooseProjectsRoot(project)}/>}
                             allowClear
                           />
@@ -522,6 +624,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                     title={
                       <Space wrap>
                         <Text strong>{project.name}</Text>
+                        <Tag>{project.ctmp_id ? "CTMP" : "自定义"}</Tag>
                         <Tag>{project.role}</Tag>
                         {project.id === dashboard?.currentProjectId && <Tag color="green">上次项目</Tag>}
                       </Space>
@@ -597,7 +700,8 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                 opacity: flow.disabled ? 0.66 : 1,
                 cursor: flow.disabled ? 'not-allowed' : 'pointer',
               }}
-              bodyStyle={{ padding: 18, height: '100%' }}
+              styles={{body: {padding: 18, height: '100%'}}}
+
             >
               <Space direction="vertical" size={12} style={{ width: '100%', height: '100%', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>

@@ -6,15 +6,13 @@ interface CollapsibleSectionProps {
   children: React.ReactNode;
   defaultOpen?: boolean;
   style?: React.CSSProperties;
-  bodyStyle?: React.CSSProperties;
 }
 
 const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   title,
   children,
   defaultOpen = true,
-  style,
-  bodyStyle,
+  style
 }) => {
   const [open, setOpen] = useState(defaultOpen);
   const [hovered, setHovered] = useState(false);
@@ -80,7 +78,7 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
           }}
         />
       </div>
-      {open && <div style={{ marginTop: 14, ...bodyStyle }}>{children}</div>}
+      {open && <div style={{ marginTop: 14, ...style }}>{children}</div>}
     </section>
   );
 };

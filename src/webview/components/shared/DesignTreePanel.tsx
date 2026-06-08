@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Badge,
   Button,
+  Checkbox,
   Dropdown,
   Empty,
   Input,
@@ -21,6 +22,7 @@ import {
   FileTextOutlined,
   FilterOutlined,
   LeftOutlined,
+  PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   RightOutlined,
@@ -45,6 +47,8 @@ interface DesignTreePanelProps {
   flowLabel: string;
   selectedKey: string;
   onSelect: (key: string) => void;
+  executionSelectedKeys?: string[];
+  onExecutionSelectionChange?: (keys: string[]) => void;
 }
 
 const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
@@ -53,9 +57,12 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   flowLabel,
   selectedKey,
   onSelect,
+  executionSelectedKeys,
+  onExecutionSelectionChange,
 }) => {
   const { savedData: flowSavedData } = useFlowConfig(flow);
   const focusHydratedRef = useRef(false);
+  const executionHydratedRef = useRef(false);
   const [configs, setConfigs] = useState<FlowConfigFileInfo[]>([]);
   const [configsDir, setConfigsDir] = useState('');
   const [search, setSearch] = useState('');
@@ -68,11 +75,28 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   const [createValue, setCreateValue] = useState('');
 
   const selectedConfig = configs.find((item) => item.key === selectedKey) ?? configs[0];
+  const executionKeys = executionSelectedKeys ?? [];
 
   const selectModule = useCallback((key: string) => {
     onSelect(key);
     saveConfig(flow, { activeModuleKey: key, moduleConfigs: undefined }).catch(() => undefined);
   }, [flow, onSelect]);
+
+  const updateExecutionKeys = useCallback((keys: string[]) => {
+    if (!onExecutionSelectionChange) {
+      return;
+    }
+    const nextKeys = Array.from(new Set(keys.filter(Boolean)));
+    onExecutionSelectionChange(nextKeys);
+    saveConfig(flow, { executionModuleKeys: nextKeys }).catch(() => undefined);
+  }, [flow, onExecutionSelectionChange]);
+
+  const toggleExecutionKey = useCallback((key: string, checked: boolean) => {
+    const nextKeys = checked
+      ? [...executionKeys, key]
+      : executionKeys.filter((item) => item !== key);
+    updateExecutionKeys(nextKeys);
+  }, [executionKeys, updateExecutionKeys]);
 
   const refreshConfigs = useCallback(async (preferredKey?: string) => {
     setLoading(true);
@@ -105,6 +129,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
 
   useEffect(() => {
     focusHydratedRef.current = false;
+    executionHydratedRef.current = false;
     setFocusKeys([]);
   }, [flow]);
 
@@ -122,6 +147,19 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   }, [flowSavedData]);
 
   useEffect(() => {
+    if (!onExecutionSelectionChange || executionHydratedRef.current) {
+      return;
+    }
+    const rawKeys = flowSavedData?.executionModuleKeys;
+    if (!Array.isArray(rawKeys)) {
+      return;
+    }
+    const nextKeys = rawKeys.filter((key): key is string => typeof key === 'string' && Boolean(key));
+    onExecutionSelectionChange(nextKeys);
+    executionHydratedRef.current = true;
+  }, [flowSavedData, onExecutionSelectionChange]);
+
+  useEffect(() => {
     if (!configs.length || !focusKeys.length) {
       return;
     }
@@ -132,6 +170,17 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
       saveConfig(flow, { focusModuleKeys: nextKeys }).catch(() => undefined);
     }
   }, [configs, flow, focusKeys]);
+
+  useEffect(() => {
+    if (!configs.length || !onExecutionSelectionChange || !executionKeys.length) {
+      return;
+    }
+    const validKeys = new Set(configs.map((item) => item.key));
+    const nextKeys = executionKeys.filter((key) => validKeys.has(key));
+    if (nextKeys.length !== executionKeys.length) {
+      updateExecutionKeys(nextKeys);
+    }
+  }, [configs, executionKeys, onExecutionSelectionChange, updateExecutionKeys]);
 
   const openCreate = () => {
     setCreateValue('');
@@ -149,6 +198,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     }
 
     setCreateOpen(false);
+    updateExecutionKeys([...executionKeys, result.config.key]);
     message.success(`已创建模块 ${result.config.moduleName}`);
     await refreshConfigs(result.config.key);
   };
@@ -188,6 +238,9 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
       setFocusKeys(nextFocusKeys);
       saveConfig(flow, { focusModuleKeys: nextFocusKeys }).catch(() => undefined);
     }
+    if (executionKeys.includes(selectedConfig.key)) {
+      updateExecutionKeys(executionKeys.map((key) => key === selectedConfig.key ? result.config!.key : key));
+    }
     message.success(`已重命名模块为 ${result.config.moduleName}`);
     await refreshConfigs(result.config.key);
   };
@@ -211,6 +264,9 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
         if (nextFocusKeys.length !== focusKeys.length) {
           setFocusKeys(nextFocusKeys);
           saveConfig(flow, { focusModuleKeys: nextFocusKeys }).catch(() => undefined);
+        }
+        if (executionKeys.includes(moduleName)) {
+          updateExecutionKeys(executionKeys.filter((key) => key !== moduleName));
         }
         await refreshConfigs();
       },
@@ -299,6 +355,33 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
         />
       </Space>
 
+      {onExecutionSelectionChange && (
+        <Space direction="vertical" size={6} style={{ width: '100%', marginBottom: 10 }}>
+          <Space size={6}>
+            <PlayCircleOutlined style={{ color: executionKeys.length ? accent : 'var(--vscode-descriptionForeground)' }} />
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              执行选择
+            </Text>
+            {executionKeys.length > 0 && (
+              <Button size="small" type="link" onClick={() => updateExecutionKeys([])} style={{ padding: 0 }}>
+                清空
+              </Button>
+            )}
+          </Space>
+          <Select
+            mode="multiple"
+            allowClear
+            size="small"
+            maxTagCount="responsive"
+            placeholder="选择要同时启动的模块"
+            value={executionKeys}
+            options={moduleOptions}
+            onChange={(keys) => updateExecutionKeys(keys)}
+            style={{ width: '100%' }}
+          />
+        </Space>
+      )}
+
       <Space size={6} wrap style={{ marginBottom: 10 }}>
         <Tooltip title="新增">
           <Button size="small" icon={<PlusOutlined />} onClick={() => openCreate()} />
@@ -321,6 +404,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
           dataSource={filteredConfigs}
           renderItem={(item) => {
             const selected = item.key === selectedConfig?.key;
+            const executionChecked = executionKeys.includes(item.key);
             return (
               <Dropdown
                 trigger={['contextMenu']}
@@ -350,6 +434,14 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
                   }}
                 >
                   <Space style={{ minWidth: 0, width: '100%' }}>
+                    {onExecutionSelectionChange && (
+                      <span onClick={(event) => event.stopPropagation()}>
+                        <Checkbox
+                          checked={executionChecked}
+                          onChange={(event) => toggleExecutionKey(item.key, event.target.checked)}
+                        />
+                      </span>
+                    )}
                     <FileTextOutlined style={{ color: selected ? accent : 'var(--vscode-descriptionForeground)' }} />
                     <Text strong={selected} ellipsis={{ tooltip: item.moduleName }} style={{ minWidth: 0 }}>
                       {item.moduleName}

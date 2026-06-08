@@ -13,3 +13,5 @@ build.log
 tsconfig.json
 package-lock.json
 out/**/*.map
+tools/**
+offline-vsix/**

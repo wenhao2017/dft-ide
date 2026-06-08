@@ -16,6 +16,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
   const accent = repo === 'sailor' ? '#0ea5e9' : '#7c3aed';
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedModule, setSelectedModule] = useState('top_abc');
+  const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>(['top_abc']);
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
 
@@ -40,7 +41,14 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
     {
       title: '执行配置',
       description: '脚本与任务',
-      content: <Step3Execution onNext={nextStep} onPrev={prevStep} category={category} />,
+      content: (
+        <Step3Execution
+          onNext={nextStep}
+          onPrev={prevStep}
+          category={category}
+          moduleKeys={executionModuleKeys}
+        />
+      ),
     },
     {
       title: '结果查看',
@@ -71,6 +79,8 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
             flowLabel={category}
             selectedKey={selectedModule}
             onSelect={setSelectedModule}
+            executionSelectedKeys={executionModuleKeys}
+            onExecutionSelectionChange={setExecutionModuleKeys}
           />
         ) : undefined
       }

@@ -10,13 +10,14 @@ import DesignTreePanel from '../components/shared/DesignTreePanel';
 const VerificationFlow: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedModule, setSelectedModule] = useState('top_abc');
+  const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>(['top_abc']);
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
 
   const steps = [
     { title: '公共配置', description: '环境与出口', content: <Step1CommonConfig onNext={nextStep} /> },
     { title: '工具配置', description: '仿真工具链', content: <Step2ToolConfig moduleKey={selectedModule} onNext={nextStep} onPrev={prevStep} /> },
-    { title: '执行页', description: '用例与命令', content: <Step3Execution onNext={nextStep} onPrev={prevStep} /> },
+    { title: '执行页', description: '用例与命令', content: <Step3Execution onNext={nextStep} onPrev={prevStep} moduleKeys={executionModuleKeys} /> },
     { title: '结果页', description: '日志与报告', content: <Step4Result onNext={nextStep} onPrev={prevStep} /> },
     { title: '端云协同', description: '共享与复用', content: <Step5Cloud onPrev={prevStep} /> },
   ];
@@ -38,6 +39,8 @@ const VerificationFlow: React.FC = () => {
             flowLabel="Verification"
             selectedKey={selectedModule}
             onSelect={setSelectedModule}
+            executionSelectedKeys={executionModuleKeys}
+            onExecutionSelectionChange={setExecutionModuleKeys}
           />
         ) : undefined
       }

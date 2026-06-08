@@ -28,7 +28,10 @@ import {
   canManageProjectMembers,
   deleteProjectMember,
   DftProject,
+  fetchUsers,
+  fetchSingleUser,
   fetchProjectMembers,
+  UserInfo,
   ProjectMember,
   ProjectMemberRole,
   updateProjectMember,
@@ -43,7 +46,7 @@ interface Props {
 }
 
 type MemberFormValue = {
-  employeeId: string;
+  employeeIds: string[];
   role: ProjectMemberRole;
   ctmp: boolean;
 };
@@ -54,6 +57,7 @@ const roleOptions: Array<{ label: string; value: ProjectMemberRole }> = [
 ];
 
 const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
+  const [users, setUsers] = useState<UserInfo[]>([]);
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [canManage, setCanManage] = useState(canManageProjectMembers(project));
   const [loading, setLoading] = useState(true);
@@ -67,6 +71,14 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
   const panelBg = isDark
     ? 'color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 96%, white)'
     : 'color-mix(in srgb, var(--vscode-editor-background, #fff) 92%, transparent)';
+
+  const loadUsers = async () => {
+    const data = await fetchUsers();
+    const users = data.filter(user =>
+      /^[a-z]+[0-9]+$/.test(user.username)
+    );
+    setUsers(users);
+  };
 
   const loadMembers = async () => {
     setLoading(true);
@@ -86,15 +98,16 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
   }, [project.id]);
 
   const openAddModal = () => {
+    loadUsers();
     setEditingMember(null);
-    form.setFieldsValue({ employeeId: '', role: 'Member', ctmp: false });
+    form.setFieldsValue({ employeeIds: [], role: 'Member', ctmp: false });
     setModalOpen(true);
   };
 
   const openEditModal = (member: ProjectMember) => {
     setEditingMember(member);
     form.setFieldsValue({
-      employeeId: member.employeeId,
+      employeeIds: [member.employeeId],
       role: member.role,
       ctmp: member.ctmp,
     });
@@ -106,6 +119,45 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
     setEditingMember(null);
     form.resetFields();
   };
+
+  const handleChange = async (values: string[]) => {
+    values = values.filter(value => value.trim());
+    form.setFieldValue('employeeIds', values);
+    if (!values || values.length === 0) return;
+
+    const firstNotInUsers = values.slice().reverse().find(value => {
+      return !users.some(user => user.username.toLowerCase() === value.toLowerCase());
+    });
+    if (firstNotInUsers) {
+      const user = await fetchSingleUser(firstNotInUsers);
+      if (user) {
+        if (user.locked) {
+          message.error(`Gitlab 用户 ${firstNotInUsers} 已被锁定`);
+        } else if (user.state !== 'active') {
+          message.error(`Gitlab 用户 ${firstNotInUsers} 的状态为 ${user.state}`);
+        } else {
+          setUsers((items) => [...items, user]);
+        }
+      } else {
+        message.error(`Gitlab 用户 ${firstNotInUsers} 不存在`);
+      }
+    }
+  };
+
+  const validateEmployeeIds = async (values: string[]) => {
+    values = values.filter(value => value.trim());
+    if (!values || values.length === 0) {
+      return Promise.reject('请选择工号');
+    }
+
+    const validPattern = /^[a-z0-9_-]+$/;
+    const isValid = values.every(value => { return validPattern.test(value) });
+    if (!isValid) {
+      return Promise.reject('工号只能包含小写字母、数字、下划线或短横线');
+    }
+
+    return Promise.resolve();
+  }
 
   const saveMember = async () => {
     const value = await form.validateFields();
@@ -120,12 +172,14 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
         setMembers((items) => items.map((item) => item.employeeId === editingMember.employeeId ? updated : item));
         message.success('成员已更新');
       } else {
-        const created = await addProjectMember(project.id, {
-          employeeId: value.employeeId.trim(),
-          role: value.role,
-          ctmp: value.ctmp,
-        });
-        setMembers((items) => [...items, created]);
+        for (const employeeId of value.employeeIds){
+          const created = await addProjectMember(project.id, {
+            employeeId: employeeId.trim(),
+            role: value.role,
+            ctmp: value.ctmp,
+          });
+          setMembers((items) => [...items, created]);
+        }
         message.success('成员已添加');
       }
       closeModal();
@@ -246,7 +300,8 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
         </Space>
       }
       style={{ borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
-      bodyStyle={{ padding: 16 }}
+      styles={{body: {padding: 16}}}
+
     >
       <Space direction="vertical" size={14} style={{ width: '100%' }}>
         <div>
@@ -292,18 +347,27 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
         onOk={saveMember}
         okText={editingMember ? '保存' : '添加'}
         confirmLoading={saving}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" preserve={true}>
           <Form.Item
             label="工号"
-            name="employeeId"
+            name="employeeIds"
             rules={[
-              { required: true, message: '请输入工号' },
-              { pattern: /^[A-Za-z0-9_-]+$/, message: '工号只能包含字母、数字、下划线或短横线' },
+              {
+                validator: (_, value) => {
+                  return validateEmployeeIds(value);
+                },
+              }
             ]}
           >
-            <Input disabled={Boolean(editingMember)} placeholder="例如 w00445630" />
+            <Select
+              mode="tags"
+              disabled={Boolean(editingMember)}
+              placeholder="Search or Input "
+              options={users.map(user => ({ label: user.username, value: user.username }))}
+              onChange={handleChange}
+            />
           </Form.Item>
           <Form.Item label="角色" name="role" rules={[{ required: true, message: '请选择角色' }]}>
             <Select options={roleOptions} />
@@ -314,6 +378,7 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
                 { label: '是', value: true },
                 { label: '否', value: false },
               ]}
+              disabled
             />
           </Form.Item>
         </Form>

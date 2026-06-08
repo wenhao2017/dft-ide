@@ -214,181 +214,11 @@ const CommonFlow: React.FC = () => {
   }>({ open: false, repo: 'hibist', mode: 'checkout', value: '' });
 
   // Wizard state declarations for advanced common file synchronization
-  const [wizardStep, setWizardStep] = useState<number>(0); // 0 = Precheck & Strategy, 1 = Visual Merge, 2 = Report
-  const [selectedStrategy, setSelectedStrategy] = useState<'overwrite' | 'autoMerge' | 'manualMerge' | 'cancel'>('manualMerge');
-  const [diffItems, setDiffItems] = useState<any[]>([]);
-  const [activeDiffId, setActiveDiffId] = useState<string | null>(null);
-  const [filterFileType, setFilterFileType] = useState<'all' | 'designTree' | 'normTable'>('all');
-  const [filterDiffType, setFilterDiffType] = useState<string>('all');
-  const [filterSheet, setFilterSheet] = useState<string>('all');
-  const [showValidationErrors, setShowValidationErrors] = useState<boolean>(false);
+  const [wizardStep, setWizardStep] = useState<number>(0);
+  const selectedStrategy = 'overwrite';
   const [precheckInfo, setPrecheckInfo] = useState<any>(null);
   const [syncReport, setSyncReport] = useState<any>(null);
   const [isApplying, setIsApplying] = useState<boolean>(false);
-
-  const generateMockDiffs = (sourceDesignPath: string, sourceTablePath: string, targetDesignPath: string, targetTablePath: string) => {
-    const dtName = sourceDesignPath ? sourceDesignPath.split(/[\\/]/).pop() : 'SD5888V100_LM_TOP_design_tree_all.xls';
-    const ntName = sourceTablePath ? sourceTablePath.split(/[\\/]/).pop() : 'SD5888V100_LM_TOP.xls';
-
-    return [
-      // Design tree differences
-      {
-        id: 'dt-1',
-        fileType: 'designTree',
-        fileName: dtName,
-        sheetName: 'design_tree',
-        key: 'SD5888V100_LM_TOP/U_TM_TOP_0/U_TMDP_ESPE',
-        fieldName: 'inst_num',
-        type: 'fieldDifferent',
-        sourceVal: '5000544',
-        targetVal: '5000600',
-        decision: undefined,
-      },
-      {
-        id: 'dt-2',
-        fileType: 'designTree',
-        fileName: dtName,
-        sheetName: 'design_tree',
-        key: 'SD5888V100_LM_TOP/U_TM_TOP_0/U_TMDP_UMCBR_0',
-        fieldName: 'int_edt_info',
-        type: 'fieldDifferent',
-        sourceVal: 'default_int{1:1}',
-        targetVal: 'default_int{2:2}',
-        decision: undefined,
-      },
-      {
-        id: 'dt-3',
-        fileType: 'designTree',
-        fileName: dtName,
-        sheetName: 'design_tree',
-        key: 'SD5888V100_LM_TOP/U_TM_TOP_1/U_TMCP_FQMC',
-        fieldName: '',
-        type: 'sourceAdded',
-        sourceVal: 'design_name: U_TMCP_FQMC, inst_num: 128, reg_num: 2048, int_edt_info: default_int{4:4}',
-        targetVal: '',
-        decision: undefined,
-      },
-      {
-        id: 'dt-4',
-        fileType: 'designTree',
-        fileName: dtName,
-        sheetName: 'design_tree',
-        key: 'SD5888V100_LM_TOP/U_TM_TOP_0/U_TMCP_CME',
-        fieldName: '',
-        type: 'targetRedundant',
-        sourceVal: '',
-        targetVal: 'design_name: U_TMCP_CME, inst_num: 64, reg_num: 512, int_edt_info: default_int{3:3}',
-        decision: undefined,
-      },
-
-      // Normalized table differences (Isio_core_top)
-      {
-        id: 'nt-1',
-        fileType: 'normTable',
-        fileName: ntName,
-        sheetName: 'Isio_core_top',
-        key: 'Isio_core_top::dft_ram_bypass',
-        fieldName: '',
-        type: 'sourceAdded',
-        sourceVal: 'Pin name: dft_ram_bypass, ctrl_type: direct_ctrl, default_value: 0, scan_insert: X, atpg_sae: *',
-        targetVal: '',
-        decision: undefined,
-      },
-      {
-        id: 'nt-2',
-        fileType: 'normTable',
-        fileName: ntName,
-        sheetName: 'Isio_core_top',
-        key: 'Isio_core_top::dft_tcam_ctrl_bus[10:0]',
-        fieldName: '',
-        type: 'targetRedundant',
-        sourceVal: '',
-        targetVal: 'Pin name: dft_tcam_ctrl_bus[10:0], ctrl_type: direct_ctrl, default_value: 1, scan_insert: X, atpg_sae: *',
-        decision: undefined,
-      },
-      {
-        id: 'nt-3',
-        fileType: 'normTable',
-        fileName: ntName,
-        sheetName: 'Isio_core_top',
-        key: 'Isio_core_top::dft_ram_ctrl_bus[319:229]',
-        fieldName: 'default_value',
-        type: 'fieldDifferent',
-        sourceVal: '91b0',
-        targetVal: '91b1',
-        decision: undefined,
-      },
-      {
-        id: 'nt-4',
-        fileType: 'normTable',
-        fileName: ntName,
-        sheetName: 'Isio_core_top',
-        key: 'Isio_core_top::dft_org_post_mode',
-        fieldName: 'ctrl_type',
-        type: 'fieldDifferent',
-        sourceVal: 'direct_ctrl',
-        targetVal: 'direct_ctrle',
-        decision: undefined,
-      },
-      {
-        id: 'nt-5',
-        fileType: 'normTable',
-        fileName: ntName,
-        sheetName: 'Isio_core_top',
-        key: 'Isio_core_top::dft_crg_pre_mode',
-        fieldName: 'default_value',
-        type: 'fieldAnomaly',
-        sourceVal: '0',
-        targetVal: '口',
-        decision: undefined,
-      },
-      {
-        id: 'nt-6',
-        fileType: 'normTable',
-        fileName: ntName,
-        sheetName: 'new_module_sheet',
-        key: 'new_module_sheet',
-        fieldName: '',
-        type: 'sheetAdded',
-        sourceVal: 'Sheet exists',
-        targetVal: '',
-        decision: undefined,
-      },
-      {
-        id: 'nt-7',
-        fileType: 'normTable',
-        fileName: ntName,
-        sheetName: 'deprecated_module_sheet',
-        key: 'deprecated_module_sheet',
-        fieldName: '',
-        type: 'sheetRedundant',
-        sourceVal: '',
-        targetVal: 'Sheet exists',
-        decision: undefined,
-      }
-    ];
-  };
-
-  const generateMockPrecheck = (srcRepo: string, tgtRepo: string, srcDesign: string, srcTable: string, tgtDesign: string, tgtTable: string) => {
-    const dtName = srcDesign ? srcDesign.split(/[\\/]/).pop() : 'SD5888V100_LM_TOP_design_tree_all.xls';
-    const ntName = srcTable ? srcTable.split(/[\\/]/).pop() : 'SD5888V100_LM_TOP.xls';
-    const dtBase = dtName?.replace(/\.[^/.]+$/, "") || 'SD5888V100_LM_TOP_design_tree_all';
-    const ntBase = ntName?.replace(/\.[^/.]+$/, "") || 'SD5888V100_LM_TOP';
-
-    return {
-      direction: `${repoLabels[srcRepo as RepoKey]} → ${repoLabels[tgtRepo as RepoKey]}`,
-      sourceRepo: srcRepo,
-      targetRepo: tgtRepo,
-      designTreeSource: srcDesign || `dft-workspace/${srcRepo}/${dtName}`,
-      designTreeTarget: tgtDesign || `dft-workspace/${tgtRepo}/${dtName}`,
-      designTreeHiddenDir: `dft-workspace/${tgtRepo}/.${dtBase}/`,
-      designTreeDiffCount: 4,
-      normTableSource: srcTable || `dft-workspace/${srcRepo}/${ntName}`,
-      normTableTarget: tgtTable || `dft-workspace/${tgtRepo}/${ntName}`,
-      normTableHiddenDir: `dft-workspace/${tgtRepo}/.${ntBase}/`,
-      normTableDiffCount: 7,
-    };
-  };
 
   const activeProject = useWizardStore((s) => s.activeProject);
   const { savedData, loading, saving, uploading, syncing, hasUnsaved, handleSave, debouncedSave, markDirty } =
@@ -631,7 +461,7 @@ const CommonFlow: React.FC = () => {
 
     try {
       const res = await prepareCommonArtifactSync({
-        targetRepo: selectedRepo,
+        targetRepo: tgt,
         sourceDesignTree: srcDesign,
         sourceNormTable: srcTable,
         targetDesignTree: tgtDesign,
@@ -641,58 +471,25 @@ const CommonFlow: React.FC = () => {
       
       if (res.success) {
         setPrecheckInfo(res.precheck);
-        setDiffItems(res.diffItems);
-        setActiveDiffId(res.diffItems[0]?.id || null);
       } else {
         message.error(res.error || '预检查失败');
         return;
       }
     } catch (err: any) {
-      console.warn("Using fallback mock data because IPC is not fully wired yet:", err);
-      // Generate precheck summary and diff items (demo level fallback)
-      const mockPrecheck = generateMockPrecheck(src, tgt, srcDesign, srcTable, tgtDesign, tgtTable);
-      const mockDiffs = generateMockDiffs(srcDesign, srcTable, tgtDesign, tgtTable);
-      
-      setPrecheckInfo(mockPrecheck);
-      setDiffItems(mockDiffs);
-      setActiveDiffId(mockDiffs[0]?.id || null);
+      message.error(err?.message || '预检查失败');
+      return;
     }
     
     setWizardStep(0);
-    setSelectedStrategy('manualMerge');
-    setShowValidationErrors(false);
     setSyncReport(null);
     setConfirmModalOpen(true);
   };
 
-  const handleDecisionChange = (id: string, decision: 'source' | 'target' | 'custom', customVal?: string) => {
-    setDiffItems((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? { ...item, decision, customVal: customVal !== undefined ? customVal : item.customVal }
-          : item
-      )
-    );
-  };
-
   const handleApplySync = async () => {
-    if (selectedStrategy === 'manualMerge') {
-      const unresolved = diffItems.filter(item => !item.decision);
-      if (unresolved.length > 0) {
-        setShowValidationErrors(true);
-        message.error(`存在 ${unresolved.length} 项未决策的差异，请先处理`);
-        return;
-      }
-    }
-
     Modal.confirm({
-      title: '确认执行同步合并操作？',
+      title: '确认执行同步',
       icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
-      content: selectedStrategy === 'overwrite' 
-        ? '直接覆盖将会清空并重写目标仓中的本地修改。确认执行？'
-        : selectedStrategy === 'autoMerge'
-        ? '即将自动应用无冲突的合并变更。确认执行？'
-        : `即将应用您选择的 ${diffItems.length} 项差异合并决策到目标仓。确认执行？`,
+      content: '将把源 XLS/XLSX 文件复制到目标文件或目标目录；若目标文件已存在，会先创建备份。',
       okText: '确认',
       cancelText: '取消',
       onOk: async () => {
@@ -702,109 +499,35 @@ const CommonFlow: React.FC = () => {
           const srcTable = syncDirection === 'dataToTarget' ? dataNormTable.value : targetNormTable.value;
           const tgtDesign = syncDirection === 'dataToTarget' ? targetDesignTree.value : dataDesignTree.value;
           const tgtTable = syncDirection === 'dataToTarget' ? targetNormTable.value : dataNormTable.value;
-
-          const decisions = diffItems.map(item => ({
-            id: item.id,
-            choice: item.decision || 'target',
-            customValue: item.customVal
-          }));
+          const tgt = syncDirection === 'dataToTarget' ? selectedRepo : selectedDataRepo;
 
           const res = await applyCommonArtifactSync({
-            targetRepo: selectedRepo,
+            targetRepo: tgt,
             strategy: selectedStrategy,
             direction: syncDirection,
             sourceDesignTree: srcDesign,
             sourceNormTable: srcTable,
             targetDesignTree: tgtDesign,
             targetNormTable: tgtTable,
-            decisions: decisions,
+            decisions: [],
             stageAfterApply: false,
           });
 
-          if (res.success) {
-            setSyncReport(res.report);
-            setWizardStep(2);
-            message.success('差异合并已应用到目标文件及 CSV 隐藏目录！');
-            await refreshRepoInfo();
-          } else {
-            throw new Error(res.error || '应用同步合并策略失败');
+          if (!res.success) {
+            throw new Error(res.error || '同步应用失败');
           }
-        } catch (err: any) {
-          console.warn("Using fallback local report because backend operation is not fully wired yet:", err);
-          // Fallback local report simulation
-          const now = new Date();
-          const ts = now.getFullYear() + 
-                     String(now.getMonth() + 1).padStart(2, '0') + 
-                     String(now.getDate()).padStart(2, '0') + '_' +
-                     String(now.getHours()).padStart(2, '0') + 
-                     String(now.getMinutes()).padStart(2, '0') + 
-                     String(now.getSeconds()).padStart(2, '0');
-          const backupDir = `.dft-sync-backup/${ts}/`;
-          
-          const srcDesign = syncDirection === 'dataToTarget' ? dataDesignTree.value : targetDesignTree.value;
-          const srcTable = syncDirection === 'dataToTarget' ? dataNormTable.value : targetNormTable.value;
-          const dtName = srcDesign ? srcDesign.split(/[\\/]/).pop() : 'SD5888V100_LM_TOP_design_tree_all.xls';
-          const ntName = srcTable ? srcTable.split(/[\\/]/).pop() : 'SD5888V100_LM_TOP.xls';
-          const dtBase = dtName?.replace(/\.[^/.]+$/, "") || 'SD5888V100_LM_TOP_design_tree_all';
-          const ntBase = ntName?.replace(/\.[^/.]+$/, "") || 'SD5888V100_LM_TOP';
 
-          const mockReport = {
-            backupDir,
-            changedXls: [dtName, ntName].filter(Boolean),
-            generatedCsv: [
-              `.${dtBase}/design_tree.csv`,
-              `.${ntBase}/Isio_core_top.csv`,
-              `.${ntBase}/new_module_sheet.csv`,
-            ],
-            strategy: selectedStrategy === 'overwrite' ? '直接覆盖' : selectedStrategy === 'autoMerge' ? '自动合并' : '手动合并',
-            unresolvedCount: selectedStrategy === 'overwrite' ? 0 : selectedStrategy === 'autoMerge' ? 4 : diffItems.length,
-            result: '同步成功！\n1. 目标 CSV 隐藏目录 (.' + dtBase + '/, .' + ntBase + '/) 已成功生成并写入，完整体现了本次 Demo 中的合并与决策配置。\n2. 目标 XLS 路径当前仅为源文件复制（Copy Source），以确保输出的 Excel 文件格式有效性。\n3. 生产版后续再实现完整的 CSV -> XLS 逻辑写回与刷新以支持 XLS 二进制合并。',
-          };
-          
-          setSyncReport(mockReport);
+          setSyncReport(res.report);
           setWizardStep(2);
-          message.success('差异合并应用成功，请在 VS Code Git 控制面板中提交变更。');
+          message.success('同步已应用到目标路径');
+          await refreshRepoInfo();
+        } catch (err: any) {
+          message.error(err?.message || '同步应用失败');
         } finally {
           setIsApplying(false);
         }
       }
     });
-  };
-
-  const filteredItems = useMemo(() => {
-    return diffItems.filter((item) => {
-      const matchFile = filterFileType === 'all' || item.fileType === filterFileType;
-      const matchType = filterDiffType === 'all' || item.type === filterDiffType;
-      const matchSheet = filterSheet === 'all' || item.sheetName === filterSheet;
-      return matchFile && matchType && matchSheet;
-    });
-  }, [diffItems, filterFileType, filterDiffType, filterSheet]);
-
-  const uniqueSheets = useMemo(() => {
-    const sheets = new Set<string>();
-    diffItems.forEach((item) => {
-      if (item.sheetName) sheets.add(item.sheetName);
-    });
-    return Array.from(sheets);
-  }, [diffItems]);
-
-  const getDiffTypeTag = (type: string) => {
-    switch (type) {
-      case 'sourceAdded':
-        return <Tag color="cyan">来源新增</Tag>;
-      case 'targetRedundant':
-        return <Tag color="purple">目标多余</Tag>;
-      case 'fieldDifferent':
-        return <Tag color="gold">字段不同</Tag>;
-      case 'sheetAdded':
-        return <Tag color="blue">Sheet 新增</Tag>;
-      case 'sheetRedundant':
-        return <Tag color="magenta">Sheet 多余</Tag>;
-      case 'fieldAnomaly':
-        return <Tag color="error">字段异常</Tag>;
-      default:
-        return <Tag>{type}</Tag>;
-    }
   };
 
   const setSelectedRepoByGroup = (repo: RepoKey, group: number) => {
@@ -897,7 +620,7 @@ const CommonFlow: React.FC = () => {
   );
 
   const renderDataSection = (step: number) => (
-    <Card size="small" style={{ ...cardStyle, ...greenPanelStyle, marginBottom: 14 }} bodyStyle={{ padding: 16 }}>
+    <Card size="small" style={{ ...cardStyle, ...greenPanelStyle, marginBottom: 14 }} styles={{body: {padding: 16}}}>
       <div style={sectionHeaderStyle}>
         {renderStepTitle(step, 'Data 公共仓', '公共输入文件的集中维护位置')}
         <Space size="small" wrap>
@@ -921,6 +644,7 @@ const CommonFlow: React.FC = () => {
             pathSources={['local']}
             placeholder="请输入或选择 Data 仓中的 Design Tree 文件/目录"
             showSelectFile
+            showSelectFolder={syncDirection === 'targetToData'}
             showOpen
           />
         </Form.Item>
@@ -930,6 +654,7 @@ const CommonFlow: React.FC = () => {
             pathSources={['local']}
             placeholder="请输入或选择 Data 仓中的归一化表格文件"
             showSelectFile
+            showSelectFolder={syncDirection === 'targetToData'}
             showOpen
           />
         </Form.Item>
@@ -938,7 +663,7 @@ const CommonFlow: React.FC = () => {
   );
 
   const renderTargetSection = (step: number) => (
-    <Card size="small" style={{ ...cardStyle, ...warmPanelStyle, marginBottom: 14 }} bodyStyle={{ padding: 16 }}>
+    <Card size="small" style={{ ...cardStyle, ...warmPanelStyle, marginBottom: 14 }} styles={{body: {padding: 16}}}>
       <div style={sectionHeaderStyle}>
         {renderStepTitle(step, '目标流程仓', '选择 Hibist / Sailor / 验证仓，并配置接收文件路径')}
         <Space size="small" wrap>
@@ -966,6 +691,7 @@ const CommonFlow: React.FC = () => {
             pathSources={['local']}
             placeholder={`请输入或选择 ${targetName} 中的 Design Tree 文件/目录`}
             showSelectFile
+            showSelectFolder={syncDirection === 'dataToTarget'}
             showOpen
           />
         </Form.Item>
@@ -975,6 +701,7 @@ const CommonFlow: React.FC = () => {
             pathSources={['local']}
             placeholder={`请输入或选择 ${targetName} 中的归一化表格文件`}
             showSelectFile
+            showSelectFolder={syncDirection === 'dataToTarget'}
             showOpen
           />
         </Form.Item>
@@ -984,612 +711,77 @@ const CommonFlow: React.FC = () => {
 
   const renderStep0Precheck = () => {
     if (!precheckInfo) return <Spin />;
-    const hasConflicts = diffItems.some(item => item.type === 'fieldDifferent' || item.type === 'fieldAnomaly');
+    const files = Array.isArray(precheckInfo.files) ? precheckInfo.files : [];
 
     return (
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
         <Alert
           type="info"
           showIcon
-          message={
-            <div>
-              <Text strong>检测差异后选择同步策略，避免静默覆盖目标内容</Text>
-              <br />
-              <Text style={{ fontSize: 12 }}>方向: {precheckInfo.direction}</Text>
-            </div>
-          }
+          message="同步预检查完成"
+          description="源路径必须是 XLS/XLSX 文件；目标路径可以是 XLS/XLSX 文件、目录或留空。留空时会复制到目标仓库根目录下的同名文件。"
         />
-        
-        <div>
-          <Title level={5} style={{ margin: '0 0 10px 0' }}>同步预检查结果</Title>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <Card size="small" title="Design Tree 目标映射" style={{ borderRadius: 8 }}>
-              <Space direction="vertical" size={4} style={{ width: '100%', fontSize: 12 }}>
-                <div><Text type="secondary">来源文件:</Text> {precheckInfo.designTreeSource.split(/[\\/]/).pop()}</div>
-                <div><Text type="secondary">目标文件:</Text> {precheckInfo.designTreeTarget.split(/[\\/]/).pop()}</div>
-                <div><Text type="secondary">拆分目录:</Text> <code>{precheckInfo.designTreeHiddenDir}</code></div>
-                <div>
-                  <Badge status={precheckInfo.designTreeDiffCount > 0 ? "warning" : "success"} 
-                         text={`状态：存在 ${precheckInfo.designTreeDiffCount} 项差异`} />
-                </div>
-              </Space>
-            </Card>
-            
-            <Card size="small" title="归一化表格 目标映射" style={{ borderRadius: 8 }}>
-              <Space direction="vertical" size={4} style={{ width: '100%', fontSize: 12 }}>
-                <div><Text type="secondary">来源文件:</Text> {precheckInfo.normTableSource.split(/[\\/]/).pop()}</div>
-                <div><Text type="secondary">目标文件:</Text> {precheckInfo.normTableTarget.split(/[\\/]/).pop()}</div>
-                <div><Text type="secondary">拆分目录:</Text> <code>{precheckInfo.normTableHiddenDir}</code></div>
-                <div>
-                  <Badge status={precheckInfo.normTableDiffCount > 0 ? "warning" : "success"} 
-                         text={`状态：存在 ${precheckInfo.normTableDiffCount} 项差异`} />
-                </div>
-              </Space>
-            </Card>
-          </div>
-        </div>
 
-        <div>
-          <Title level={5} style={{ margin: '0 0 10px 0' }}>请选择同步策略：</Title>
-          <Radio.Group 
-            value={selectedStrategy} 
-            onChange={(e) => setSelectedStrategy(e.target.value)}
-            style={{ width: '100%' }}
-          >
-            <Space direction="vertical" style={{ width: '100%' }} size={10}>
-              <Card 
-                size="small" 
-                hoverable
-                onClick={() => setSelectedStrategy('manualMerge')}
-                style={{ 
-                  borderRadius: 8, 
-                  border: selectedStrategy === 'manualMerge' ? '1px solid var(--vscode-focusBorder)' : '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
-                  background: selectedStrategy === 'manualMerge' ? 'color-mix(in srgb, var(--vscode-editor-background, #fff) 96%, var(--vscode-focusBorder, #1677ff))' : undefined
+        <Card size="small" title="文件映射" style={{ borderRadius: 8 }}>
+          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            {files.map((file: any) => (
+              <div
+                key={file.label}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '120px minmax(0, 1fr)',
+                  gap: 8,
+                  paddingBottom: 10,
+                  borderBottom: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
                 }}
               >
-                <Radio value="manualMerge">
-                  <Text strong>手动合并 (推荐)</Text>
-                  <div style={{ fontSize: 12, color: 'var(--vscode-descriptionForeground)', marginLeft: 24, marginTop: 4 }}>
-                    在 Webview 中展示业务化差异，用户逐项选择后生成最终 CSV / XLS。无需暴露原始 CSV 文本或 Git 冲突文本。
-                  </div>
-                </Radio>
-              </Card>
-
-              <Card 
-                size="small" 
-                hoverable
-                onClick={() => {
-                  if (!hasConflicts) {
-                    setSelectedStrategy('autoMerge');
-                  } else {
-                    message.warning("检测到有字段不同或异常冲突，不能直接自动合并。请选择【手动合并】");
-                  }
-                }}
-                style={{ 
-                  borderRadius: 8, 
-                  border: selectedStrategy === 'autoMerge' ? '1px solid var(--vscode-focusBorder)' : '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
-                  background: selectedStrategy === 'autoMerge' ? 'color-mix(in srgb, var(--vscode-editor-background, #fff) 96%, var(--vscode-focusBorder, #1677ff))' : undefined,
-                  opacity: hasConflicts ? 0.6 : 1
-                }}
-              >
-                <Radio value="autoMerge" disabled={hasConflicts}>
-                  <Text strong>自动合并 (仅适用于安全场景)</Text>
-                  {hasConflicts && (
-                    <Tag color="red" style={{ marginLeft: 8 }}>检测到冲突字段，不可用</Tag>
-                  )}
-                  <div style={{ fontSize: 12, color: 'var(--vscode-descriptionForeground)', marginLeft: 24, marginTop: 4 }}>
-                    自动将来源新增项引入到目标中，并保留目标独有的本地新增项。包含字段冲突或异常时将强制转为手动合并。
-                  </div>
-                </Radio>
-              </Card>
-
-              <Card 
-                size="small" 
-                hoverable
-                onClick={() => setSelectedStrategy('overwrite')}
-                style={{ 
-                  borderRadius: 8, 
-                  border: selectedStrategy === 'overwrite' ? '1px solid var(--vscode-focusBorder)' : '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
-                  background: selectedStrategy === 'overwrite' ? 'color-mix(in srgb, var(--vscode-editor-background, #fff) 96%, var(--vscode-focusBorder, #1677ff))' : undefined
-                }}
-              >
-                <Radio value="overwrite">
-                  <Text strong>直接覆盖 (高风险)</Text>
-                  <div style={{ fontSize: 12, color: 'var(--vscode-descriptionForeground)', marginLeft: 24, marginTop: 4 }}>
-                    来源 xls 覆盖目标 xls，来源隐藏目录 csv 覆盖目标隐藏目录 csv。覆盖后目标仓本地修改将丢失。系统在执行前会自动生成时间戳备份。
-                  </div>
-                </Radio>
-              </Card>
-            </Space>
-          </Radio.Group>
-        </div>
+                <Text strong>{file.label}</Text>
+                <Space direction="vertical" size={2} style={{ minWidth: 0 }}>
+                  <Text ellipsis={{ tooltip: file.source }}><Text type="secondary">源文件：</Text>{file.source}</Text>
+                  <Text ellipsis={{ tooltip: file.target }}><Text type="secondary">目标：</Text>{file.target}</Text>
+                  {file.overwritten && <Tag color="orange">目标已存在，将先备份</Tag>}
+                </Space>
+              </div>
+            ))}
+          </Space>
+        </Card>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
           <Button onClick={() => setConfirmModalOpen(false)}>取消同步</Button>
-          <Button 
-            type="primary" 
-            onClick={() => {
-              if (selectedStrategy === 'overwrite') {
-                setWizardStep(1);
-              } else if (selectedStrategy === 'autoMerge') {
-                if (hasConflicts) {
-                  message.error("存在未决冲突，无法使用自动合并。请选择‘手动合并’。");
-                } else {
-                  setWizardStep(1);
-                }
-              } else {
-                setWizardStep(1);
-              }
-            }}
-          >
-            下一步
-          </Button>
+          <Button type="primary" loading={isApplying} onClick={handleApplySync}>执行同步</Button>
         </div>
       </Space>
-    );
-  };
-
-  const renderOverwriteConfirmation = () => {
-    return (
-      <Space direction="vertical" size={14} style={{ width: '100%' }}>
-        <Alert
-          type="warning"
-          showIcon
-          message="直接覆盖确认"
-          description="目标文件已有内容，覆盖后目标仓本地修改将丢失。系统会先在目标仓生成一个时间戳备份目录，如 .dft-sync-backup/YYYYMMDD_HHMMSS/。"
-        />
-        <div>
-          <Text strong>将被覆盖的文件及隐藏目录：</Text>
-          <ul style={{ paddingLeft: 20, marginTop: 8, fontSize: 13 }}>
-            <li><code>{precheckInfo?.designTreeTarget}</code></li>
-            <li><code>{precheckInfo?.designTreeHiddenDir}</code></li>
-            <li><code>{precheckInfo?.normTableTarget}</code></li>
-            <li><code>{precheckInfo?.normTableHiddenDir}</code></li>
-          </ul>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-          <Button onClick={() => setWizardStep(0)}>返回上一步</Button>
-          <Button type="primary" danger loading={isApplying} onClick={handleApplySync}>
-            确认直接覆盖
-          </Button>
-        </div>
-      </Space>
-    );
-  };
-
-  const renderAutoMergePreview = () => {
-    return (
-      <Space direction="vertical" size={14} style={{ width: '100%' }}>
-        <Alert
-          type="success"
-          showIcon
-          message="自动合并结果预览"
-          description="系统检测到以下可以安全自动合并的条目（不含值冲突或字段异常）。请确认是否执行合并。"
-        />
-        <Card size="small" style={{ borderRadius: 8 }}>
-          <div style={{ fontSize: 13, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div>
-              <Text type="secondary">Design Tree:</Text>
-              <span style={{ marginLeft: 8 }}>可自动引入：<Text type="success">1 项</Text> (来源新增)，可自动保留：<Text type="success">1 项</Text> (目标多余)</span>
-            </div>
-            <div>
-              <Text type="secondary">归一化表格 (Isio_core_top):</Text>
-              <span style={{ marginLeft: 8 }}>可自动引入 Pin：<Text type="success">1 项</Text>，可自动保留 Pin：<Text type="success">1 项</Text></span>
-            </div>
-            <div>
-              <Text type="secondary">分表合并 (Sheets):</Text>
-              <span style={{ marginLeft: 8 }}>可引入 Sheet：<Text type="success">1 项</Text>，可保留 Sheet：<Text type="success">1 项</Text></span>
-            </div>
-          </div>
-        </Card>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-          <Button onClick={() => setWizardStep(0)}>返回上一步</Button>
-          <Button type="primary" loading={isApplying} onClick={handleApplySync}>
-            应用自动合并结果
-          </Button>
-        </div>
-      </Space>
-    );
-  };
-
-  const renderManualMergeScreen = () => {
-    const activeItem = diffItems.find((item) => item.id === activeDiffId);
-    const unresolvedCount = diffItems.filter(item => !item.decision).length;
-
-    return (
-      <Row gutter={16}>
-        {/* Left Column - Filter & Diff List */}
-        <Col span={9}>
-          <Space direction="vertical" style={{ width: '100%' }} size={10}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))' }}>
-              <div>
-                <Text style={{ fontSize: 11, fontWeight: 600 }}>文件过滤</Text>
-                <div style={{ marginTop: 4 }}>
-                  <Radio.Group 
-                    size="small" 
-                    value={filterFileType} 
-                    onChange={(e) => setFilterFileType(e.target.value)}
-                  >
-                    <Radio.Button value="all">全部</Radio.Button>
-                    <Radio.Button value="designTree">Design Tree</Radio.Button>
-                    <Radio.Button value="normTable">归一化表</Radio.Button>
-                  </Radio.Group>
-                </div>
-              </div>
-
-              <div>
-                <Text style={{ fontSize: 11, fontWeight: 600 }}>差异类型</Text>
-                <div style={{ marginTop: 4 }}>
-                  <Radio.Group 
-                    size="small" 
-                    value={filterDiffType} 
-                    onChange={(e) => setFilterDiffType(e.target.value)}
-                  >
-                    <Radio.Button value="all">全部</Radio.Button>
-                    <Radio.Button value="fieldDifferent">不同</Radio.Button>
-                    <Radio.Button value="fieldAnomaly">异常</Radio.Button>
-                    <Radio.Button value="sourceAdded">新增</Radio.Button>
-                  </Radio.Group>
-                </div>
-              </div>
-
-              {uniqueSheets.length > 0 && (
-                <div>
-                  <Text style={{ fontSize: 11, fontWeight: 600 }}>分表 (Sheet / Module)</Text>
-                  <div style={{ marginTop: 4 }}>
-                    <Radio.Group 
-                      size="small" 
-                      value={filterSheet} 
-                      onChange={(e) => setFilterSheet(e.target.value)}
-                    >
-                      <Radio.Button value="all">全部</Radio.Button>
-                      {uniqueSheets.map(sheet => (
-                        <Radio.Button key={sheet} value={sheet}>{sheet.length > 12 ? sheet.slice(0, 10) + '...' : sheet}</Radio.Button>
-                      ))}
-                    </Radio.Group>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {showValidationErrors && unresolvedCount > 0 && (
-              <Alert 
-                type="error" 
-                showIcon 
-                message={`尚有 ${unresolvedCount} 项差异未决定，请在列表中处理。`} 
-                style={{ padding: '6px 12px' }}
-              />
-            )}
-
-            <div 
-              style={{ 
-                height: 380, 
-                overflowY: 'auto', 
-                border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))', 
-                borderRadius: 8,
-                padding: 6,
-                background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))'
-              }}
-            >
-              {filteredItems.length === 0 ? (
-                <div style={{ textAlign: 'center', color: 'var(--vscode-descriptionForeground)', padding: 20 }}>
-                  无符合条件的差异项
-                </div>
-              ) : (
-                filteredItems.map((item) => {
-                  const isSelected = item.id === activeDiffId;
-                  const hasDecision = item.decision !== undefined;
-                  const showErr = showValidationErrors && !hasDecision;
-
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => setActiveDiffId(item.id)}
-                      style={{
-                        padding: '10px 12px',
-                        marginBottom: 6,
-                        borderRadius: 6,
-                        border: isSelected 
-                          ? '1px solid var(--vscode-focusBorder)' 
-                          : showErr 
-                            ? '1px solid var(--vscode-errorForeground, #ff4d4f)' 
-                            : '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
-                        background: isSelected 
-                          ? 'color-mix(in srgb, var(--vscode-editor-background, #fff) 90%, var(--vscode-focusBorder, #1677ff))' 
-                          : 'var(--vscode-editor-background)',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 4
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Space size={6}>
-                          {hasDecision ? (
-                            <CheckCircleOutlined style={{ color: '#389e0d' }} />
-                          ) : (
-                            <WarningOutlined style={{ color: showErr ? '#ff4d4f' : '#faad14' }} />
-                          )}
-                          <Text style={{ fontSize: 12, fontWeight: 600 }} ellipsis={{ tooltip: item.key }}>
-                            {item.key.includes('::') ? item.key.split('::')[1] : item.key.split(/[\\/]/).pop()}
-                          </Text>
-                        </Space>
-                        {getDiffTypeTag(item.type)}
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--vscode-descriptionForeground)' }}>
-                        <span>Sheet: {item.sheetName}</span>
-                        {item.fieldName && <span>字段: {item.fieldName}</span>}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </Space>
-        </Col>
-
-        {/* Right Column - Diff Detail & Action */}
-        <Col span={15}>
-          {activeItem ? (
-            <Card 
-              size="small" 
-              title="差异业务对比与决策"
-              style={{ borderRadius: 8, height: '100%', background: 'var(--vscode-editor-background)' }}
-            >
-              <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 12 }}>
-                  <div><Text type="secondary">文件类别:</Text> {activeItem.fileType === 'designTree' ? 'Design Tree' : '归一化表格'}</div>
-                  <div><Text type="secondary">Sheet/Path:</Text> <code>{activeItem.sheetName}</code></div>
-                  <div style={{ gridColumn: 'span 2' }}><Text type="secondary">业务Key:</Text> <code>{activeItem.key}</code></div>
-                  {activeItem.fieldName && <div style={{ gridColumn: 'span 2' }}><Text type="secondary">变更字段:</Text> <Tag color="orange">{activeItem.fieldName}</Tag></div>}
-                </div>
-
-                <Row gutter={12}>
-                  <Col span={12}>
-                    <div style={{ 
-                      padding: 10, 
-                      borderRadius: 6, 
-                      background: 'rgba(82, 196, 26, 0.06)', 
-                      border: '1px solid rgba(82, 196, 26, 0.2)',
-                      height: 110,
-                      overflowY: 'auto'
-                    }}>
-                      <div style={{ fontSize: 11, color: '#389e0d', fontWeight: 600, marginBottom: 4 }}>来源值 (SOURCE)</div>
-                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                        {activeItem.sourceVal || <span style={{ fontStyle: 'italic', color: '#888' }}>(空/不存在)</span>}
-                      </Text>
-                    </div>
-                  </Col>
-                  <Col span={12}>
-                    <div style={{ 
-                      padding: 10, 
-                      borderRadius: 6, 
-                      background: 'rgba(250, 173, 20, 0.06)', 
-                      border: '1px solid rgba(250, 173, 20, 0.2)',
-                      height: 110,
-                      overflowY: 'auto'
-                    }}>
-                      <div style={{ fontSize: 11, color: '#d46b08', fontWeight: 600, marginBottom: 4 }}>目标值 (TARGET)</div>
-                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                        {activeItem.targetVal || <span style={{ fontStyle: 'italic', color: '#888' }}>(空/不存在)</span>}
-                      </Text>
-                    </div>
-                  </Col>
-                </Row>
-
-                <Card size="small" title="合并决策选择" style={{ borderRadius: 6, background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))' }}>
-                  {activeItem.type === 'sourceAdded' || activeItem.type === 'sheetAdded' ? (
-                    <Radio.Group 
-                      value={activeItem.decision} 
-                      onChange={(e) => handleDecisionChange(activeItem.id, e.target.value)}
-                    >
-                      <Space direction="vertical">
-                        <Radio value="source">引入：将该项引入到目标仓</Radio>
-                        <Radio value="target">不引入：舍弃该项</Radio>
-                      </Space>
-                    </Radio.Group>
-                  ) : activeItem.type === 'targetRedundant' || activeItem.type === 'sheetRedundant' ? (
-                    <Radio.Group 
-                      value={activeItem.decision} 
-                      onChange={(e) => handleDecisionChange(activeItem.id, e.target.value)}
-                    >
-                      <Space direction="vertical">
-                        <Radio value="target">保留：保留目标仓中多余的项 (默认)</Radio>
-                        <Radio value="source">删除：在目标仓中移除该项</Radio>
-                      </Space>
-                    </Radio.Group>
-                  ) : (
-                    // fieldDifferent / fieldAnomaly
-                    <Space direction="vertical" style={{ width: '100%' }}>
-                      <Radio.Group 
-                        value={activeItem.decision} 
-                        onChange={(e) => handleDecisionChange(activeItem.id, e.target.value)}
-                      >
-                        <Space direction="vertical">
-                          <Radio value="source">使用来源值: <code>{activeItem.sourceVal}</code></Radio>
-                          <Radio value="target">使用目标值: <code>{activeItem.targetVal}</code></Radio>
-                          <Radio value="custom">手动输入自定义值</Radio>
-                        </Space>
-                      </Radio.Group>
-                      {activeItem.decision === 'custom' && (
-                        <Input.TextArea
-                          rows={2}
-                          value={activeItem.customVal || ''}
-                          onChange={(e) => handleDecisionChange(activeItem.id, 'custom', e.target.value)}
-                          placeholder="请输入自定义值..."
-                          style={{ marginTop: 6 }}
-                        />
-                      )}
-                    </Space>
-                  )}
-                </Card>
-
-                {/* VS Code Native Auxiliary Actions */}
-                <div style={{ 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  alignItems: 'center',
-                  background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))', 
-                  padding: 8, 
-                  borderRadius: 6,
-                  border: '1px dashed var(--vscode-panel-border, rgba(127,127,127,0.22))'
-                }}>
-                  <Text style={{ fontSize: 11 }} type="secondary">VS Code 辅助工具:</Text>
-                  <Space size="small">
-                    <Button 
-                      size="small" 
-                      icon={<SlidersOutlined />} 
-                      onClick={async () => {
-                        const dtName = precheckInfo?.designTreeSource.split(/[\\/]/).pop() || '';
-                        const ntName = precheckInfo?.normTableSource.split(/[\\/]/).pop() || '';
-                        const dtBase = dtName.replace(/\.[^/.]+$/, "");
-                        const ntBase = ntName.replace(/\.[^/.]+$/, "");
-                        
-                        const isDt = activeItem.fileType === 'designTree';
-                        const fileDirName = isDt ? `.${dtBase}` : `.${ntBase}`;
-                        const csvFileName = isDt ? 'design_tree.csv' : `${activeItem.sheetName}.csv`;
-
-                        const srcDir = isDt ? precheckInfo?.designTreeSource : precheckInfo?.normTableSource;
-                        const tgtDir = isDt ? precheckInfo?.designTreeTarget : precheckInfo?.normTableTarget;
-
-                        if (!srcDir || !tgtDir) {
-                          message.error("文件路径不完整，无法对比");
-                          return;
-                        }
-
-                        const srcCsvPath = srcDir.replace(/[\\/][^\\/]+$/, `/${fileDirName}/${csvFileName}`);
-                        const tgtCsvPath = tgtDir.replace(/[\\/][^\\/]+$/, `/${fileDirName}/${csvFileName}`);
-
-                        try {
-                          const res = await openVsCodeDiff({
-                            sourcePath: srcCsvPath,
-                            targetPath: tgtCsvPath,
-                            title: `Diff: ${csvFileName}`
-                          });
-                          if (!res.success) {
-                            message.error(`对比失败: ${res.error || '无法打开差异对比窗口'}`);
-                          }
-                        } catch (err: any) {
-                          message.error(`对比失败: ${err.message || '对比执行异常，请确认是否已生成 CSV'}`);
-                        }
-                      }}
-                    >
-                      VS Code 窗口对比
-                    </Button>
-                    <Button 
-                      size="small" 
-                      onClick={() => {
-                        const dtName = precheckInfo?.designTreeSource.split(/[\\/]/).pop() || '';
-                        const ntName = precheckInfo?.normTableSource.split(/[\\/]/).pop() || '';
-                        const dtBase = dtName.replace(/\.[^/.]+$/, "");
-                        const ntBase = ntName.replace(/\.[^/.]+$/, "");
-                        const isDt = activeItem.fileType === 'designTree';
-                        const fileDirName = isDt ? `.${dtBase}` : `.${ntBase}`;
-                        const csvFileName = isDt ? 'design_tree.csv' : `${activeItem.sheetName}.csv`;
-                        
-                        const srcDir = isDt ? precheckInfo?.designTreeSource : precheckInfo?.normTableSource;
-                        if (!srcDir) {
-                          message.error("来源文件路径为空");
-                          return;
-                        }
-                        const srcCsvPath = srcDir.replace(/[\\/][^\\/]+$/, `/${fileDirName}/${csvFileName}`);
-                        
-                        try {
-                          openFileInEditor(srcCsvPath);
-                          message.success(`已在编辑器中打开源 CSV: ${csvFileName}`);
-                        } catch (err: any) {
-                          message.error(`打开文件失败: ${err.message}`);
-                        }
-                      }}
-                    >
-                      打开源 CSV
-                    </Button>
-                    <Button 
-                      size="small" 
-                      onClick={() => {
-                        const dtName = precheckInfo?.designTreeSource.split(/[\\/]/).pop() || '';
-                        const ntName = precheckInfo?.normTableSource.split(/[\\/]/).pop() || '';
-                        const dtBase = dtName.replace(/\.[^/.]+$/, "");
-                        const ntBase = ntName.replace(/\.[^/.]+$/, "");
-                        const isDt = activeItem.fileType === 'designTree';
-                        const fileDirName = isDt ? `.${dtBase}` : `.${ntBase}`;
-                        const csvFileName = isDt ? 'design_tree.csv' : `${activeItem.sheetName}.csv`;
-                        
-                        const tgtDir = isDt ? precheckInfo?.designTreeTarget : precheckInfo?.normTableTarget;
-                        if (!tgtDir) {
-                          message.error("目标文件路径为空");
-                          return;
-                        }
-                        const tgtCsvPath = tgtDir.replace(/[\\/][^\\/]+$/, `/${fileDirName}/${csvFileName}`);
-                        
-                        try {
-                          openFileInEditor(tgtCsvPath);
-                          message.success(`已在编辑器中打开目标 CSV: ${csvFileName}`);
-                        } catch (err: any) {
-                          message.error(`打开文件失败: ${err.message}`);
-                        }
-                      }}
-                    >
-                      打开目标 CSV
-                    </Button>
-                  </Space>
-                </div>
-              </Space>
-            </Card>
-          ) : (
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--vscode-descriptionForeground)' }}>
-              请在左侧选择差异项
-            </div>
-          )}
-        </Col>
-      </Row>
     );
   };
 
   const renderStep2Report = () => {
     if (!syncReport) return <Spin />;
+    const changedFiles = Array.isArray(syncReport.changedXls) ? syncReport.changedXls : [];
 
     return (
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
         <Alert
           type="success"
           showIcon
-          message="公共表格同步合并报告"
-          description="本地合并策略已成功应用，文件变更已写入工作区。"
+          message="公共表格同步完成"
+          description="真实 XLS/XLSX 文件已经复制到目标路径；本次操作没有生成 demo 差异、CSV 或占位文件。"
         />
 
         <Card size="small" style={{ borderRadius: 8 }}>
           <Space direction="vertical" size={8} style={{ width: '100%', fontSize: 13 }}>
-            <div><Text type="secondary">所选合并策略:</Text> <Tag color="blue">{syncReport.strategy}</Tag></div>
+            <div><Text type="secondary">同步方式：</Text> <Tag color="blue">{syncReport.strategy}</Tag></div>
+            {syncReport.backupDir && (
+              <div><Text type="secondary">备份目录：</Text> <code style={{ color: 'var(--vscode-textPreformat-foreground)' }}>{syncReport.backupDir}</code></div>
+            )}
             <div>
-              <Text type="secondary">备份文件夹路径:</Text> <code style={{ color: 'var(--vscode-textPreformat-foreground)' }}>{syncReport.backupDir}</code>
-              <div style={{ fontSize: 11, color: 'var(--vscode-descriptionForeground)', marginTop: 2 }}>
-                (系统已在此目录中备份了原始的 XLS 及其隐藏 CSV 目录)
-              </div>
-            </div>
-            <div>
-              <Text type="secondary">已更新的 XLS 文件:</Text>
+              <Text type="secondary">已更新的 Excel 文件：</Text>
               <ul style={{ margin: '4px 0 4px 16px', padding: 0 }}>
-                {syncReport.changedXls.map((file: string) => <li key={file}><code>{file}</code></li>)}
+                {changedFiles.map((file: string) => <li key={file}><code>{file}</code></li>)}
               </ul>
             </div>
-            <div>
-              <Text type="secondary">已写入的隐藏 CSV 文件 (反映合并决策):</Text>
-              <ul style={{ margin: '4px 0 4px 16px', padding: 0 }}>
-                {syncReport.generatedCsv.map((file: string) => <li key={file}><code>{file}</code></li>)}
-              </ul>
-            </div>
-            <div><Text type="secondary">合并前冲突数:</Text> <Badge count={syncReport.unresolvedCount} style={{ backgroundColor: '#faad14' }} /></div>
-            <div><Text type="secondary">执行动作结果:</Text> {syncReport.result}</div>
+            <div><Text type="secondary">执行结果：</Text> {syncReport.result}</div>
           </Space>
         </Card>
-
-        <Alert
-          type="warning"
-          showIcon
-          message="Excel 写入说明"
-          description="Excel 写入为 Demo 级，当前通过复制源 XLS 来保证 Excel 文件的格式有效性。同名隐藏 CSV 目录下已经写入了反映您所选决策的完整结构化数据。完整的 XLS 自动生成与刷新（从合并后的 CSV 写回）将在生产级 Excel Writer 模块中实现。"
-        />
 
         <div style={{ 
           background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))', 
@@ -1603,7 +795,7 @@ const CommonFlow: React.FC = () => {
           <div>
             <Text strong>后续步骤</Text>
             <div style={{ fontSize: 12, color: 'var(--vscode-descriptionForeground)', marginTop: 4 }}>
-              系统未对本次变更执行 Git 暂存与提交。请使用 VS Code 侧边栏的 Git 控制面板手动审查、暂存并提交这些变更。
+              系统未自动提交本次文件变更。请在 VS Code Git 面板中审查、暂存并提交。
             </div>
           </div>
           <Button icon={<FileSyncOutlined />} type="primary" onClick={() => {
@@ -1632,7 +824,7 @@ const CommonFlow: React.FC = () => {
           />
         )}
 
-        <Card size="small" style={{ ...cardStyle, ...accentPanelStyle, marginBottom: 14 }} bodyStyle={{ padding: 18 }}>
+        <Card size="small" style={{ ...cardStyle, ...accentPanelStyle, marginBottom: 14 }} styles={{body: {padding: 18}}}>
           <div style={sectionHeaderStyle}>
             <div>
               <Space size={8} wrap>
@@ -1672,7 +864,7 @@ const CommonFlow: React.FC = () => {
           </>
         )}
 
-        <Card size="small" style={{ ...cardStyle, border: '1px solid rgba(22,119,255,0.35)' }} bodyStyle={{ padding: 16 }}>
+        <Card size="small" style={{ ...cardStyle, border: '1px solid rgba(22,119,255,0.35)' }} styles={{body: {padding: 16}}}>
           <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
             <Space direction="vertical" size={2}>
               <Space size={6}>
@@ -1725,7 +917,7 @@ const CommonFlow: React.FC = () => {
             }
           }}
           footer={null}
-          width={wizardStep === 1 && selectedStrategy === 'manualMerge' ? 1150 : 750}
+          width={750}
           style={{ top: 40 }}
           destroyOnClose
         >
@@ -1766,28 +958,10 @@ const CommonFlow: React.FC = () => {
             {/* Modal Body content based on step */}
             {wizardStep === 0 && renderStep0Precheck()}
 
-            {wizardStep === 1 && (
-              selectedStrategy === 'overwrite' ? renderOverwriteConfirmation() : 
-              selectedStrategy === 'autoMerge' ? renderAutoMergePreview() : 
-              renderManualMergeScreen()
-            )}
+            {wizardStep === 1 && renderStep0Precheck()}
 
             {wizardStep === 2 && renderStep2Report()}
 
-            {/* Manual Merge bottom buttons */}
-            {wizardStep === 1 && selectedStrategy === 'manualMerge' && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 20, borderTop: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))', paddingTop: 14 }}>
-                <Button onClick={() => setWizardStep(0)}>返回上一步</Button>
-                <Button 
-                  type="primary" 
-                  loading={isApplying} 
-                  onClick={handleApplySync}
-                  style={{ fontWeight: 600 }}
-                >
-                  确认应用合并决策
-                </Button>
-              </div>
-            )}
           </div>
         </Modal>
 

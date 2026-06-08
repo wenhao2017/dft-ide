@@ -1,11 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Badge, Button, Card, Col, Form, Input, Radio, Row, Select, Space, Spin, message } from 'antd';
-import type { RadioChangeEvent } from 'antd';
+import { Badge, Button, Card, Col, Form, Radio, Row, Select, Space, Spin, message, RadioChangeEvent } from 'antd';
 import {
   BranchesOutlined,
   FileAddOutlined,
-  FileOutlined,
-  FolderOpenOutlined,
   MinusCircleOutlined,
   PlusOutlined,
   RightOutlined,
@@ -14,9 +11,10 @@ import {
 import { useVscodePath } from '../../hooks/useVscodePath';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 import PathInput from '../shared/PathInput';
-import { generateDefaultFlowConfigs, getGitInfo, selectPath } from '../../utils/ipc';
+import { generateDefaultFlowConfigs, getGitInfo } from '../../utils/ipc';
 import useWizardStore from '../../store/wizardStore';
 import CollapsibleSection from '../shared/CollapsibleSection';
+import ControlledPathInput from '../shared/ControlledPathInput';
 
 interface Props {
   onNext?: () => void;
@@ -41,6 +39,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
   const project = useVscodePath();
   const workPath = useVscodePath();
   const sailorCfg = useVscodePath();
+  const [domainCfg, setDomainCfg] = useState<string>('');
 
   const [currentBranch, setCurrentBranch] = useState<string>('');
   const [normalizeCfgs, setNormalizeCfgs] = useState<NormalizeCfg[]>([emptyNormalizeCfg()]);
@@ -111,7 +110,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
     void handleSave({ moduleKey, step1: data });
   };
 
-  const handleChange = (e: RadioChangeEvent) => {
+  const handleRadioChange = (e: RadioChangeEvent) => {
     setNormalizeIndex(Number(e.target.value));
   };
 
@@ -129,11 +128,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
       if (index === prev) return 0;
       return prev;
     });
-  };
-
-  const chooseNormalCfg = async (index: number, type: 1 | 2, targetType: 'file' | 'folder') => {
-    const selected = await selectPath(targetType);
-    if (selected) setNormalCfg(index, selected, type);
   };
 
   const setNormalCfg = (index: number, value: string, type: 1 | 2) => {
@@ -173,7 +167,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
     <Spin spinning={loading} tip="读取配置中...">
       <Form layout="horizontal" labelCol={{ span: 4 }} wrapperCol={{ span: 20 }}>
         <div style={pageStyle}>
-          <Card size="small" style={{ marginBottom: 14 }} bodyStyle={{ padding: 18 }}>
+          <Card size="small" style={{ marginBottom: 14 }} styles={{ body: { padding: 18 } }}>
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
               <Button shape="round" icon={<BranchesOutlined />} style={{ cursor: 'default' }}>
                 {currentBranch || '获取分支中...'}
@@ -202,6 +196,8 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
 
             <Form.Item label="选择领域">
               <Select
+                value={domainCfg}
+                onChange={(value) => setDomainCfg(value)}
                 allowClear
                 placeholder="请选择领域"
                 options={[
@@ -213,64 +209,34 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
             </Form.Item>
           </Card>
 
-          <Card size="small" style={{ marginBottom: 14 }} bodyStyle={{ padding: 18 }}>
+          <Card size="small" style={{ marginBottom: 14 }} styles={{ body: { padding: 18 } }}>
             <CollapsibleSection title="归一化表格转 cfg">
               {configHeader}
               {normalizeCfgs.map((normalizeCfg, index) => (
                 <Row key={index} gutter={8} style={{ marginBottom: 16 }}>
                   <Col span={1}>
                     <Space>
-                      <Radio checked={normalizeIndex === index} onChange={handleChange} value={index} />
+                      <Radio checked={normalizeIndex === index} onChange={handleRadioChange} value={index} />
                     </Space>
                   </Col>
                   <Col span={11} className="dft-path-input">
-                    <Input
+                    <ControlledPathInput
                       value={normalizeCfg.commandCfg}
-                      onChange={(event) => setNormalCfg(index, event.target.value, 1)}
+                      onChange={(value) => setNormalCfg(index, value, 1)}
                       placeholder="请选择命令入口"
-                      style={{ padding: 0 }}
-                      allowClear
-                      suffix={
-                        <Space.Compact>
-                          <Button
-                            aria-label="选择文件"
-                            icon={<FileOutlined />}
-                            onClick={() => chooseNormalCfg(index, 1, 'file')}
-                            style={{ flex: '0 0 auto', width: 30, paddingInline: 4 }}
-                          />
-                          <Button
-                            aria-label="选择目录"
-                            icon={<FolderOpenOutlined />}
-                            onClick={() => chooseNormalCfg(index, 1, 'folder')}
-                            style={{ flex: '0 0 auto', width: 30, paddingInline: 4 }}
-                          />
-                        </Space.Compact>
-                      }
+                      pathSources={['local']}
+                      showSelectFile
+                      showOpen
                     />
                   </Col>
                   <Col span={11} className="dft-path-input">
-                    <Input
+                    <ControlledPathInput
                       value={normalizeCfg.jsonCfg}
-                      onChange={(event) => setNormalCfg(index, event.target.value, 2)}
+                      onChange={(value) => setNormalCfg(index, value, 2)}
                       placeholder="请选择json文件"
-                      style={{ padding: 0 }}
-                      allowClear
-                      suffix={
-                        <Space.Compact>
-                          <Button
-                            aria-label="选择文件"
-                            icon={<FileOutlined />}
-                            onClick={() => chooseNormalCfg(index, 2, 'file')}
-                            style={{ flex: '0 0 auto', width: 30, paddingInline: 4 }}
-                          />
-                          <Button
-                            aria-label="选择目录"
-                            icon={<FolderOpenOutlined />}
-                            onClick={() => chooseNormalCfg(index, 2, 'folder')}
-                            style={{ flex: '0 0 auto', width: 30, paddingInline: 4 }}
-                          />
-                        </Space.Compact>
-                      }
+                      pathSources={['local']}
+                      showSelectFile
+                      showOpen
                     />
                   </Col>
                   <Col span={1}>
@@ -283,7 +249,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
                   </Col>
                 </Row>
               ))}
-              <Button type="dashed" onClick={addNormalizeCfg} block icon={<PlusOutlined />}>
+              <Button type="dashed" onClick={() => addNormalizeCfg()} block icon={<PlusOutlined />}>
                 添加
               </Button>
             </CollapsibleSection>

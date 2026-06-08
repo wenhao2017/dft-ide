@@ -33,7 +33,7 @@ const mockProjects: DftProject[] = [
   {
     id: 'apollo-dft',
     name: 'Apollo DFT',
-    rootPath: 'D:/Downloads/apollo-dft',
+    rootPath: 'D:/Downloads',
     owner: 'DFT Platform',
     role: 'DFTM',
     canManageMembers: true,
@@ -50,7 +50,7 @@ const mockProjects: DftProject[] = [
   {
     id: 'nova-mbist',
     name: 'Nova MBIST',
-    rootPath: 'D:/Downloads/nova-mbist',
+    rootPath: 'D:/Downloads',
     owner: 'Memory Team',
     role: 'Member',
     updatedAt: '2026-04-24 18:10',
@@ -66,7 +66,7 @@ const mockProjects: DftProject[] = [
   {
     id: 'atlas-regression',
     name: 'Atlas Regression',
-    rootPath: 'D:/dft/projects/atlas-regression',
+    rootPath: 'D:/dft/projects',
     owner: 'Verification Team',
     role: 'Member',
     updatedAt: '2026-04-20 14:45',
@@ -80,6 +80,17 @@ const mockProjects: DftProject[] = [
     ],
   },
 ];
+
+export interface UserInfo {
+  id: number;
+  username: string;
+  public_email: string | null;
+  name: string;
+  state: string;
+  locked: boolean;
+  avatar_url: string;
+  web_url: string;
+}
 
 export type ProjectMemberRole = 'DFTM' | 'Member';
 
@@ -127,6 +138,34 @@ function getApiBase(): string | null {
   return configured?.replace(/\/$/, '') ?? null;
 }
 
+export async function createProject(currentUser: string, project: {
+  name: string;
+  description: string;
+}): Promise<boolean> {
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    return false;
+  }
+
+  const response = await fetch(`${apiBase}/api/dft-ide/project/create`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      user_id: currentUser,
+      project_name: project.name,
+      description: project.description,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Project create failed: ${response.status}`);
+  }
+
+  return true;
+}
+
 export async function initProject(project: DftProject): Promise<boolean> {
   const apiBase = getApiBase();
   if (!apiBase) {
@@ -151,7 +190,7 @@ export async function initProject(project: DftProject): Promise<boolean> {
   return true;
 }
 
-export async function fetchProjectDashboard(currentUser:string | null): Promise<ProjectDashboard> {
+export async function fetchProjectDashboard(currentUser:string): Promise<ProjectDashboard> {
   const apiBase = getApiBase();
   if (!apiBase) {
     return {
@@ -186,8 +225,7 @@ export async function fetchProjectDashboard(currentUser:string | null): Promise<
       ctmp_id: project.ctmp_id,
       name: project.name,
       role: project.role,
-      rootPath: project.rootPath || '',
-      local_root: project.local_root,
+      rootPath: project.local_root,
       owner: project.owner || '',
       canManageMembers: canManageProjectMembers(project),
       updatedAt: project.updatedAt || '',
@@ -324,6 +362,35 @@ export async function deleteProjectMember(projectId: string, employeeId: string)
   }
 
   return response.json() as Promise<{ success: boolean }>;
+}
+
+export async function fetchUsers(): Promise<UserInfo[]> {
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    return [];
+  }
+
+  const response = await fetch(`${apiBase}/api/dft-ide/users?state=active`);
+  if (!response.ok) {
+    throw new Error(`Fetch users failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<UserInfo[]>;
+}
+
+export async function fetchSingleUser(employeeId: string): Promise<UserInfo | null> {
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    return null;
+  }
+
+  const response = await fetch(`${apiBase}/api/dft-ide/users/${employeeId}`);
+  if (!response.ok) {
+    // throw new Error(`Fetch user ${employeeId} failed: ${response.status}`);
+    return null;
+  }
+
+  return response.json() as Promise<UserInfo>;
 }
 
 export interface ExecutionData {

@@ -18,6 +18,7 @@ import {
   ExclamationCircleOutlined,
   FileSearchOutlined,
   FileSyncOutlined,
+  GitlabOutlined,
   LeftOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
@@ -26,9 +27,10 @@ import {
   openFileInEditor,
   runRepoGitAction,
   submitRepoToCloud,
-  type RepoCloudSubmitResult,
-  type RepoGitInfo,
-  type RepoKey,
+  RepoCloudSubmitResult,
+  RepoGitInfo,
+  RepoKey,
+  openGitlabHost,
 } from '../../utils/ipc';
 
 const { Text, Title } = Typography;
@@ -122,6 +124,22 @@ const RepoCloudSubmitPanel: React.FC<Props> = ({ repo, accent, onPrev }) => {
 
   const openGitPanel = async () => {
     await runRepoGitAction({ repo, action: 'openScm' });
+  };
+
+  const openGitlab = async () => {
+    const repoInfo = await getRepoGitInfo(repo);
+    const repoRoot = repoInfo?.repoRoot ?? '';
+    const repoGitNames = repoRoot.split(/[\\/]/).filter(Boolean);
+    const repoGitName = repoGitNames.length > 0 ? repoGitNames[repoGitNames.length - 1] : '';
+    if (!repoGitName) {
+      message.error('无法识别仓库名称');
+      return;
+    }
+
+    const result = await openGitlabHost(repoGitName);
+    if (!result.success) {
+      message.error(result.error ?? '无法打开浏览器，请检查系统默认设置!');
+    }
   };
 
   const openFirstConflict = () => {
@@ -304,6 +322,9 @@ const RepoCloudSubmitPanel: React.FC<Props> = ({ repo, accent, onPrev }) => {
             <Space wrap>
               <Button icon={<FileSyncOutlined />} onClick={openGitPanel}>
                 打开 VS Code Git
+              </Button>
+              <Button icon={<GitlabOutlined />} onClick={openGitlab}>
+                打开 Git 地址
               </Button>
               <Button
                 type="primary"

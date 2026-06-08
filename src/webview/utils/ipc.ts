@@ -33,7 +33,7 @@ window.addEventListener('message', (event: MessageEvent) => {
 function ipcRequest(
   command: string,
   payload: Record<string, unknown> = {},
-  timeoutMs = 30_000
+  timeoutMs = 120_000
 ): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const id = String(++_reqId);

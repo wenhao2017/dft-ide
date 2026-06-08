@@ -13,6 +13,15 @@
         "${workspaceFolder}/out/**/*.js"
       ],
       "preLaunchTask": "npm: compile"
+    },
+    {
+      "name": "Attach DFT IDE Extension (VSCode 1.85.1)",
+      "type": "extensionHost",
+      "request": "attach",
+      "port": 9333,
+      "outFiles": [
+        "${workspaceFolder}/out/**/*.js"
+      ]
     }
   ]
 }

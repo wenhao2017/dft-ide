@@ -186,7 +186,14 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category 
       </Form.Item>
 
       <Form.Item label="包含文件" name="includeFile">
-        <ControlledPathInput placeholder="包含文件路径" showSelectFile showOpen />
+        <ControlledPathInput
+          onChange={(value) => designForm.setFieldsValue({includeFile: value})}
+          value={designForm.getFieldValue('includeFile')}
+          placeholder="包含文件路径"
+          pathSources={['local']}
+          showSelectFile
+          showOpen
+        />
         <div style={{ marginTop: 4 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
             包含文件路径（可由 Common 传出可配置修改）
@@ -214,7 +221,7 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category 
                     </Col>
                     <Col flex="auto">
                       <Form.Item {...restField} name={[name, 'path']} noStyle>
-                        <ControlledPathInput placeholder="宏定义路径或具体配置修改" showSelectFile showOpen />
+                        <ControlledPathInput placeholder="宏定义路径或具体配置修改" pathSources={['local']} showSelectFile showOpen />
                       </Form.Item>
                     </Col>
                     <Col flex="0 0 40px">
@@ -238,7 +245,14 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category 
 
       <CollapsibleSection title="特殊参数配置">
         <Form.Item label="特殊参数" name="specialParam">
-          <ControlledPathInput placeholder="特殊参数路径或值" showSelectFile showOpen />
+          <ControlledPathInput
+            onChange={(value) => designForm.setFieldsValue({specialParam: value})}
+            value={designForm.getFieldValue('specialParam')}
+            placeholder="特殊参数路径或值"
+            pathSources={['local']}
+            showSelectFile
+            showOpen
+          />
           <div style={{ marginTop: 4 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
               特殊参数配置（可由 Common 传出可配置修改）

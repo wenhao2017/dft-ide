@@ -30,4 +30,8 @@ lerna-debug.log*
 .dft-ide/
 
 .env
-package-lock.json
+package-lock.json
+
+tools/*
+!tools/README.md
+!tools/scripts
