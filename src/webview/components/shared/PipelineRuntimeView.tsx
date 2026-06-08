@@ -40,6 +40,7 @@ import usePipelineRuntimeStore, {
   PipelineRuntimeSnapshot,
   makeInitialRuntime,
   getPipelineRuntimeKey,
+  subscribePipelineRuntimeUpdates,
 } from '../../store/pipelineRuntimeStore';
 
 interface PipelineNodeData extends Record<string, unknown> {
@@ -56,6 +57,8 @@ interface PipelineRuntimeViewProps {
   flowLabel?: string;
   flowKey?: 'hibist' | 'sailor' | 'verification';
   moduleKey?: string;
+  snapshot?: PipelineRuntimeSnapshot;
+  readOnly?: boolean;
   onClose?: () => void;
   autoStart?: boolean;
   startToken?: number;
@@ -199,6 +202,8 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   flowLabel = 'DFT',
   flowKey,
   moduleKey,
+  snapshot,
+  readOnly,
   onClose,
   autoStart,
   startToken,
@@ -207,8 +212,13 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   onReady,
   onRuntimeChange,
 }) => {
+  useEffect(() => {
+    subscribePipelineRuntimeUpdates();
+  }, []);
+
   const activeFlowKey =
     flowKey ??
+    snapshot?.flowKey ??
     (flowLabel === '验证' || flowLabel === 'Lander'
       ? 'verification'
       : flowLabel === 'Sailor'
@@ -216,10 +226,10 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
         : 'hibist');
 
   const config = pipelineFlowConfigs[activeFlowKey];
-  const activeModuleKey = moduleKey ?? flowLabel;
+  const activeModuleKey = moduleKey ?? snapshot?.moduleKey ?? flowLabel;
   const runtimeKey = getPipelineRuntimeKey(activeFlowKey, activeModuleKey);
   const runtime = usePipelineRuntimeStore((state) => (
-    state.runtimes[runtimeKey] ?? makeInitialRuntime(activeFlowKey, activeModuleKey, flowLabel)
+    snapshot ?? state.runtimes[runtimeKey] ?? makeInitialRuntime(activeFlowKey, activeModuleKey, flowLabel)
   ));
   const ensureRuntime = usePipelineRuntimeStore((state) => state.ensureRuntime);
   const startRuntime = usePipelineRuntimeStore((state) => state.startRuntime);
@@ -229,16 +239,25 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   const rerunRuntimeTask = usePipelineRuntimeStore((state) => state.rerunTask);
 
   useEffect(() => {
+    if (snapshot) {
+      return;
+    }
     ensureRuntime(activeFlowKey, activeModuleKey, flowLabel);
-  }, [activeFlowKey, activeModuleKey, ensureRuntime, flowLabel]);
+  }, [activeFlowKey, activeModuleKey, ensureRuntime, flowLabel, snapshot]);
 
   const startPipelineWithTerminal = useCallback(() => {
+    if (readOnly) {
+      return;
+    }
     startRuntime(activeFlowKey, activeModuleKey, flowLabel);
-  }, [activeFlowKey, activeModuleKey, flowLabel, startRuntime]);
+  }, [activeFlowKey, activeModuleKey, flowLabel, readOnly, startRuntime]);
 
   const stopAll = useCallback(() => {
+    if (readOnly) {
+      return;
+    }
     stopRuntime(activeFlowKey, activeModuleKey, flowLabel);
-  }, [activeFlowKey, activeModuleKey, flowLabel, stopRuntime]);
+  }, [activeFlowKey, activeModuleKey, flowLabel, readOnly, stopRuntime]);
 
   useEffect(() => {
     onReady?.({
@@ -270,16 +289,25 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   }, [stopAll, stopToken]);
 
   const stopTask = useCallback((id: string) => {
+    if (readOnly) {
+      return;
+    }
     stopRuntimeTask(activeFlowKey, activeModuleKey, id);
-  }, [activeFlowKey, activeModuleKey, stopRuntimeTask]);
+  }, [activeFlowKey, activeModuleKey, readOnly, stopRuntimeTask]);
 
   const rerunTask = useCallback((id: string) => {
+    if (readOnly) {
+      return;
+    }
     rerunRuntimeTask(activeFlowKey, activeModuleKey, id);
-  }, [activeFlowKey, activeModuleKey, rerunRuntimeTask]);
+  }, [activeFlowKey, activeModuleKey, readOnly, rerunRuntimeTask]);
 
   const selectTask = useCallback((id: string) => {
+    if (snapshot) {
+      return;
+    }
     selectRuntimeTask(activeFlowKey, activeModuleKey, id);
-  }, [activeFlowKey, activeModuleKey, selectRuntimeTask]);
+  }, [activeFlowKey, activeModuleKey, selectRuntimeTask, snapshot]);
 
   const handlers = useMemo(
     () => ({ onSelect: selectTask, onRerun: rerunTask, onStop: stopTask }),
@@ -292,7 +320,7 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   const selectedTask = runtime.tasks.find((task) => task.id === runtime.selectedTaskId);
   const failedCount = runtime.tasks.filter((task) => task.status === 'failed').length;
   const runningCount = runtime.tasks.filter((task) => task.status === 'running').length;
-  const canStopAll = runtime.tasks.some((task) => task.status === 'running' || task.status === 'pending');
+  const canStopAll = !readOnly && runtime.tasks.some((task) => task.status === 'running' || task.status === 'pending');
 
   if (!visible) {
     return null;
@@ -560,7 +588,7 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
           <Tag color="processing">运行中 {runningCount}</Tag>
           <Tag color={failedCount > 0 ? 'error' : 'success'}>失败 {failedCount}</Tag>
           <Tag>任务 {runtime.tasks.length}</Tag>
-          <Button type="primary" icon={<PlayCircleOutlined />} onClick={startPipelineWithTerminal}>
+          <Button type="primary" icon={<PlayCircleOutlined />} onClick={startPipelineWithTerminal} disabled={readOnly}>
             启动流水线
           </Button>
           <Button danger icon={<StopOutlined />} onClick={stopAll} disabled={!canStopAll}>
@@ -619,12 +647,12 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
                 </Descriptions>
                 <Space size={8}>
                   {selectedTask.status === 'failed' && (
-                    <Button type="primary" icon={<ReloadOutlined />} onClick={() => rerunTask(selectedTask.id)}>
+                    <Button type="primary" icon={<ReloadOutlined />} onClick={() => rerunTask(selectedTask.id)} disabled={readOnly}>
                       重跑
                     </Button>
                   )}
                   {selectedTask.status === 'running' && (
-                    <Button danger icon={<PauseCircleOutlined />} onClick={() => stopTask(selectedTask.id)}>
+                    <Button danger icon={<PauseCircleOutlined />} onClick={() => stopTask(selectedTask.id)} disabled={readOnly}>
                       停止
                     </Button>
                   )}

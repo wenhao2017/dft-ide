@@ -1,6 +1,6 @@
 import React from 'react';
-import { Drawer, List, Typography, Tag, Empty } from 'antd';
-import { CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, RightOutlined } from '@ant-design/icons';
+import { Button, Drawer, Empty, List, Tag, Typography } from 'antd';
+import { CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, FullscreenOutlined, RightOutlined } from '@ant-design/icons';
 import { ExecutionHistoryRecord } from '../../utils/ipc';
 
 const { Text } = Typography;
@@ -10,6 +10,7 @@ interface Props {
   onClose: () => void;
   history: ExecutionHistoryRecord[];
   onSelect: (record: ExecutionHistoryRecord) => void;
+  onOpenPipeline?: (record: ExecutionHistoryRecord) => void;
 }
 
 const statusMeta = {
@@ -30,7 +31,7 @@ const statusMeta = {
   },
 } as const;
 
-const ExecutionHistoryList: React.FC<Props> = ({ open, onClose, history, onSelect }) => (
+const ExecutionHistoryList: React.FC<Props> = ({ open, onClose, history, onSelect, onOpenPipeline }) => (
   <Drawer
     title="历史执行记录"
     placement="right"
@@ -57,7 +58,24 @@ const ExecutionHistoryList: React.FC<Props> = ({ open, onClose, history, onSelec
                 onSelect(item);
                 onClose();
               }}
-              actions={[<RightOutlined key="open" style={{ color: '#888' }} />]}
+              actions={[
+                item.runtimeSnapshot && onOpenPipeline ? (
+                  <Button
+                    key="pipeline"
+                    size="small"
+                    type="text"
+                    icon={<FullscreenOutlined />}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenPipeline(item);
+                      onClose();
+                    }}
+                  >
+                    打开流水线
+                  </Button>
+                ) : null,
+                <RightOutlined key="open" style={{ color: '#888' }} />,
+              ]}
             >
               <List.Item.Meta
                 avatar={meta.icon}

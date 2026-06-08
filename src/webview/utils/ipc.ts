@@ -475,6 +475,10 @@ export interface ExecutionHistoryRecord {
   status: 'success' | 'error' | 'cancelled';
   logs: string[];
   executedAt: number;
+  flowKey?: 'hibist' | 'sailor' | 'verification';
+  moduleKey?: string;
+  flowLabel?: string;
+  runtimeSnapshot?: unknown;
 }
 
 /**
@@ -496,6 +500,65 @@ export async function getExecutionHistory(
 ): Promise<{ success: boolean; history: ExecutionHistoryRecord[]; error?: string }> {
   const res = await ipcRequest('getExecutionHistory', { flow });
   return res as { success: boolean; history: ExecutionHistoryRecord[]; error?: string };
+}
+
+export async function getPipelineRuntimes(): Promise<{ success: boolean; snapshots: unknown[]; error?: string }> {
+  const res = await ipcRequest('getPipelineRuntimes');
+  return res as { success: boolean; snapshots: unknown[]; error?: string };
+}
+
+export async function ensurePipelineRuntime(options: {
+  flowKey: 'hibist' | 'sailor' | 'verification';
+  moduleKey: string;
+  flowLabel: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('ensurePipelineRuntime', options);
+  return res as { success: boolean; error?: string };
+}
+
+export async function startPipelineRuntime(options: {
+  flowKey: 'hibist' | 'sailor' | 'verification';
+  moduleKey: string;
+  flowLabel: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('startPipelineRuntime', options);
+  return res as { success: boolean; error?: string };
+}
+
+export async function stopPipelineRuntime(options: {
+  flowKey: 'hibist' | 'sailor' | 'verification';
+  moduleKey: string;
+  flowLabel: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('stopPipelineRuntime', options);
+  return res as { success: boolean; error?: string };
+}
+
+export async function selectPipelineTask(options: {
+  flowKey: 'hibist' | 'sailor' | 'verification';
+  moduleKey: string;
+  taskId: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('selectPipelineTask', options);
+  return res as { success: boolean; error?: string };
+}
+
+export async function stopPipelineTask(options: {
+  flowKey: 'hibist' | 'sailor' | 'verification';
+  moduleKey: string;
+  taskId: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('stopPipelineTask', options);
+  return res as { success: boolean; error?: string };
+}
+
+export async function rerunPipelineTask(options: {
+  flowKey: 'hibist' | 'sailor' | 'verification';
+  moduleKey: string;
+  taskId: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('rerunPipelineTask', options);
+  return res as { success: boolean; error?: string };
 }
 
 /**

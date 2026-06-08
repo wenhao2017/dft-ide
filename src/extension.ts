@@ -7,6 +7,11 @@ import { submitJob, queryJobStatus, getDonauResources } from './services/donauSe
 import { gitService } from './services/gitService';
 import { obsService } from './services/obsService';
 import { DftProject } from './webview/services/projectService';
+import {
+  PipelineRuntimeHistoryRecord,
+  PipelineRuntimeService,
+  isPipelineFlowKey,
+} from './services/pipelineRuntimeService';
 
 const VIEW_TYPE = 'dftIde.welcome';
 const GLOBAL_KEY = 'dftIde.hasShownWelcome';
@@ -22,6 +27,19 @@ let activeCategory: string | undefined = undefined;
 let pendingWebviewCommand: { command: 'showWelcome' } | { command: 'loadFlow'; category: string } | undefined;
 const obsReadonlyDocuments = new Map<string, string>();
 const dftDiagnostics = vscode.languages.createDiagnosticCollection('dft-ide');
+const pipelineRuntimeService = new PipelineRuntimeService({
+  onUpdate: (snapshot) => {
+    currentPanel?.webview.postMessage({ command: 'pipelineRuntimeUpdated', snapshot });
+  },
+  onHistory: (record) => {
+    void saveExecutionHistoryRecord(record.flow, record).catch((error) => {
+      console.error('Failed to persist pipeline execution history', error);
+    });
+  },
+  openTerminal: (title, command) => {
+    void openExecutionTerminal({ title, command });
+  },
+});
 /** 优化3：跟踪活跃的任务轮询计时器，以便支持取消 */
 const activeJobTimers = new Map<string, ReturnType<typeof setInterval>>();
 
@@ -451,7 +469,73 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           currentPanel?.webview.postMessage(pendingWebviewCommand);
           pendingWebviewCommand = undefined;
         }
+        currentPanel?.webview.postMessage({
+          command: 'pipelineRuntimesUpdated',
+          snapshots: pipelineRuntimeService.getRuntimes()
+        });
         return;
+
+      case 'getPipelineRuntimes': {
+        const requestId: string = msg.requestId;
+        currentPanel?.webview.postMessage({
+          command: 'getPipelineRuntimesResponse',
+          requestId,
+          success: true,
+          snapshots: pipelineRuntimeService.getRuntimes()
+        });
+        return;
+      }
+
+      case 'ensurePipelineRuntime':
+      case 'startPipelineRuntime':
+      case 'stopPipelineRuntime':
+      case 'selectPipelineTask':
+      case 'stopPipelineTask':
+      case 'rerunPipelineTask': {
+        const requestId: string | undefined = msg.requestId;
+        try {
+          const flowKey = msg.flowKey;
+          const moduleKey = typeof msg.moduleKey === 'string' ? msg.moduleKey : '';
+          const flowLabel = typeof msg.flowLabel === 'string' ? msg.flowLabel : moduleKey;
+          const taskId = typeof msg.taskId === 'string' ? msg.taskId : '';
+
+          if (!isPipelineFlowKey(flowKey) || !moduleKey) {
+            throw new Error('Invalid pipeline runtime payload');
+          }
+
+          if (msg.command === 'ensurePipelineRuntime') {
+            pipelineRuntimeService.ensureRuntime(flowKey, moduleKey, flowLabel);
+          } else if (msg.command === 'startPipelineRuntime') {
+            pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel);
+          } else if (msg.command === 'stopPipelineRuntime') {
+            pipelineRuntimeService.stopRuntime(flowKey, moduleKey, flowLabel);
+          } else if (msg.command === 'selectPipelineTask') {
+            pipelineRuntimeService.selectTask(flowKey, moduleKey, taskId);
+          } else if (msg.command === 'stopPipelineTask') {
+            pipelineRuntimeService.stopTask(flowKey, moduleKey, taskId);
+          } else if (msg.command === 'rerunPipelineTask') {
+            pipelineRuntimeService.rerunTask(flowKey, moduleKey, taskId);
+          }
+
+          if (requestId) {
+            currentPanel?.webview.postMessage({
+              command: `${msg.command}Response`,
+              requestId,
+              success: true
+            });
+          }
+        } catch (err) {
+          if (requestId) {
+            currentPanel?.webview.postMessage({
+              command: `${msg.command}Response`,
+              requestId,
+              success: false,
+              error: String(err)
+            });
+          }
+        }
+        return;
+      }
 
       case 'createWorkspace':
       case 'createProject':
@@ -1448,34 +1532,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         const flow = normalizeHistoryFlow(msg.flow);
         const record = msg.record as Record<string, unknown>;
         try {
-          const projectRoot = resolveProjectRoot();
-          if (!projectRoot) {
-            throw new Error('未找到项目根目录');
-          }
-          const historyDir = path.join(projectRoot, '.dft-ide', 'local-state', 'history', flow);
-          await vscode.workspace.fs.createDirectory(vscode.Uri.file(historyDir));
-          await ensureLocalStateIgnored(projectRoot, path.join(projectRoot, '.dft-ide', 'local-state'));
-
-          // 滚动清理：保留最新 500 条
-          const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(historyDir));
-          const jsonFiles = entries
-            .filter(e => e[1] === vscode.FileType.File && e[0].endsWith('.json'))
-            .map(e => e[0])
-            .sort();
-          if (jsonFiles.length >= 500) {
-            const toDelete = jsonFiles.slice(0, jsonFiles.length - 499);
-            for (const name of toDelete) {
-              await vscode.workspace.fs.delete(vscode.Uri.file(path.join(historyDir, name)));
-            }
-          }
-
-          const id = `exec_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-          const fullRecord = { ...record, id, executedAt: Date.now() };
-          const filePath = path.join(historyDir, `${id}.json`);
-          await vscode.workspace.fs.writeFile(
-            vscode.Uri.file(filePath),
-            Buffer.from(JSON.stringify(fullRecord, null, 2))
-          );
+          await saveExecutionHistoryRecord(flow, record);
 
           currentPanel?.webview.postMessage({
             command: 'saveExecutionHistoryResponse', requestId,
@@ -1924,6 +1981,41 @@ async function openExecutionTerminal(options: {
 function normalizeHistoryFlow(flow: unknown): string {
   const value = typeof flow === 'string' ? flow : 'default';
   return /^[a-z0-9_-]+$/i.test(value) ? value : 'default';
+}
+
+async function saveExecutionHistoryRecord(
+  flow: unknown,
+  record: Record<string, unknown> | PipelineRuntimeHistoryRecord,
+): Promise<void> {
+  const normalizedFlow = normalizeHistoryFlow(flow);
+  const projectRoot = resolveProjectRoot();
+  if (!projectRoot) {
+    throw new Error('未找到项目根目录');
+  }
+
+  const historyDir = path.join(projectRoot, '.dft-ide', 'local-state', 'history', normalizedFlow);
+  await vscode.workspace.fs.createDirectory(vscode.Uri.file(historyDir));
+  await ensureLocalStateIgnored(projectRoot, path.join(projectRoot, '.dft-ide', 'local-state'));
+
+  const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(historyDir));
+  const jsonFiles = entries
+    .filter(e => e[1] === vscode.FileType.File && e[0].endsWith('.json'))
+    .map(e => e[0])
+    .sort();
+  if (jsonFiles.length >= 500) {
+    const toDelete = jsonFiles.slice(0, jsonFiles.length - 499);
+    for (const name of toDelete) {
+      await vscode.workspace.fs.delete(vscode.Uri.file(path.join(historyDir, name)));
+    }
+  }
+
+  const id = `exec_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const fullRecord = { ...record, flow: normalizedFlow, id, executedAt: Date.now() };
+  const filePath = path.join(historyDir, `${id}.json`);
+  await vscode.workspace.fs.writeFile(
+    vscode.Uri.file(filePath),
+    Buffer.from(JSON.stringify(fullRecord, null, 2))
+  );
 }
 
 type DftFlowKind = 'hibist' | 'sailor' | 'verification';

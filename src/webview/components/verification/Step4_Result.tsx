@@ -15,6 +15,8 @@ import ExecutionHistoryList from '../shared/ExecutionHistoryList';
 import { getExecutionHistory, ExecutionHistoryRecord } from '../../utils/ipc';
 import { uploadExecutionData } from '../../services/projectService';
 import useWizardStore from '../../store/wizardStore';
+import PipelineRuntimeView from '../shared/PipelineRuntimeView';
+import { PipelineRuntimeSnapshot } from '../../store/pipelineRuntimeStore';
 
 const { Link } = Typography;
 
@@ -23,6 +25,7 @@ const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onN
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRecords, setHistoryRecords] = useState<ExecutionHistoryRecord[]>([]);
   const [activeRecord, setActiveRecord] = useState<ExecutionHistoryRecord | null>(null);
+  const [historyRuntime, setHistoryRuntime] = useState<PipelineRuntimeSnapshot | null>(null);
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
@@ -60,6 +63,12 @@ const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onN
       message.error('同步失败: ' + String(err));
     } finally {
       setUploading(false);
+    }
+  };
+
+  const openPipelineRuntime = (record: ExecutionHistoryRecord) => {
+    if (isPipelineRuntimeSnapshot(record.runtimeSnapshot)) {
+      setHistoryRuntime(record.runtimeSnapshot);
     }
   };
 
@@ -129,7 +138,20 @@ const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onN
         onClose={() => setHistoryOpen(false)}
         history={historyRecords}
         onSelect={(record) => setActiveRecord(record)}
+        onOpenPipeline={openPipelineRuntime}
       />
+
+      {historyRuntime && (
+        <PipelineRuntimeView
+          flowKey={historyRuntime.flowKey}
+          moduleKey={historyRuntime.moduleKey}
+          flowLabel={historyRuntime.flowLabel}
+          snapshot={historyRuntime}
+          readOnly
+          visible
+          onClose={() => setHistoryRuntime(null)}
+        />
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 32 }}>
         <Button onClick={onPrev} icon={<LeftOutlined />}>
@@ -149,5 +171,16 @@ const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onN
     </div>
   );
 };
+
+function isPipelineRuntimeSnapshot(value: unknown): value is PipelineRuntimeSnapshot {
+  const candidate = value as Partial<PipelineRuntimeSnapshot> | undefined;
+  return !!candidate
+    && (candidate.flowKey === 'hibist' || candidate.flowKey === 'sailor' || candidate.flowKey === 'verification')
+    && typeof candidate.moduleKey === 'string'
+    && typeof candidate.flowLabel === 'string'
+    && Array.isArray(candidate.tasks)
+    && Array.isArray(candidate.links)
+    && Array.isArray(candidate.logs);
+}
 
 export default Step4Result;

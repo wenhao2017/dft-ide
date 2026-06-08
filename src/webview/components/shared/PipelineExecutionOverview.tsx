@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Badge,
   Button,
@@ -25,6 +25,7 @@ import usePipelineRuntimeStore, {
   PipelineRuntimeSnapshot,
   getInitialTaskCount,
   getPipelineRuntimeKey,
+  subscribePipelineRuntimeUpdates,
 } from '../../store/pipelineRuntimeStore';
 
 const { Text } = Typography;
@@ -99,6 +100,10 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   flowLabel,
   moduleKeys,
 }) => {
+  useEffect(() => {
+    subscribePipelineRuntimeUpdates();
+  }, []);
+
   const runtimes = usePipelineRuntimeStore((state) => state.runtimes);
   const ensureRuntime = usePipelineRuntimeStore((state) => state.ensureRuntime);
   const startRuntime = usePipelineRuntimeStore((state) => state.startRuntime);
