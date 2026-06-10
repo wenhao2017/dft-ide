@@ -3,6 +3,7 @@ import {exec, execFile} from 'child_process'
 import * as path from 'path';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
+import * as XLSX from 'xlsx';
 import { submitJob, queryJobStatus, getDonauResources } from './services/donauService';
 import { gitService } from './services/gitService';
 import { obsService } from './services/obsService';
@@ -1406,10 +1407,10 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             throw new Error('Source path and target path are required for comparing.');
           }
           if (!fs.existsSync(sourcePath)) {
-            throw new Error(`来源对比 CSV 文件在磁盘上不存在（${path.basename(sourcePath)}），请在当前页面先执行“确认应用合并决策”来生成。`);
+            throw new Error(`Source comparison file does not exist: ${path.basename(sourcePath)}`);
           }
           if (!fs.existsSync(targetPath)) {
-            throw new Error(`目标对比 CSV 文件在磁盘上不存在（${path.basename(targetPath)}），请在当前页面先执行“确认应用合并决策”来生成。`);
+            throw new Error(`Target comparison file does not exist: ${path.basename(targetPath)}`);
           }
           await vscode.commands.executeCommand('vscode.diff', vscode.Uri.file(sourcePath), vscode.Uri.file(targetPath), title);
           currentPanel?.webview.postMessage({
@@ -3590,7 +3591,7 @@ async function prepareCommonArtifactSyncToRepo(options: SyncPrecheckOptions) {
   const targetLabel = targetRepo === 'data' ? 'Data' : repoLabels[targetRepo];
   const design = artifacts.find((item) => item.key === 'designTree');
   const norm = artifacts.find((item) => item.key === 'normTable');
-  const diffItems = buildCommonSyncDiffItems(design, norm);
+  const diffItems = artifacts.flatMap((artifact) => buildWorkbookDiffItems(artifact));
   const designDiffCount = diffItems.filter((item) => item.fileType === 'designTree').length;
   const normTableDiffCount = diffItems.filter((item) => item.fileType === 'normTable').length;
 
@@ -3602,11 +3603,11 @@ async function prepareCommonArtifactSyncToRepo(options: SyncPrecheckOptions) {
       targetRepo,
       designTreeSource: design?.source ?? '',
       designTreeTarget: design?.target ?? '',
-      designTreeHiddenDir: design ? path.join(path.dirname(design.target), `.${path.basename(design.target, path.extname(design.target))}`) + path.sep : '',
+      designTreeHiddenDir: '',
       designTreeDiffCount: designDiffCount,
       normTableSource: norm?.source ?? '',
       normTableTarget: norm?.target ?? '',
-      normTableHiddenDir: norm ? path.join(path.dirname(norm.target), `.${path.basename(norm.target, path.extname(norm.target))}`) + path.sep : '',
+      normTableHiddenDir: '',
       normTableDiffCount: normTableDiffCount,
       files: artifacts.map(({ label, source, target, exists }) => ({ label, source, target, overwritten: exists })),
     },
@@ -3654,33 +3655,36 @@ async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
     throw new Error('Please choose at least one source XLS/XLSX file.');
   }
 
-  const copiedFiles: Array<{ label: string; path: string; overwritten: boolean }> = [];
-  const generatedCsv: string[] = [];
+  const changedFiles: Array<{ label: string; path: string; overwritten: boolean }> = [];
 
   if (strategy === 'overwrite') {
     for (const artifact of artifacts) {
       await ensureLocalConfigDirectory(path.dirname(artifact.target));
       await vscode.workspace.fs.copy(vscode.Uri.file(artifact.source), vscode.Uri.file(artifact.target), { overwrite: true });
-      copiedFiles.push({
+      changedFiles.push({
         label: artifact.label,
         path: artifact.target,
         overwritten: artifact.exists,
       });
     }
   } else {
-    const design = artifacts.find((item) => item.key === 'designTree');
-    const norm = artifacts.find((item) => item.key === 'normTable');
-    generatedCsv.push(...writeCommonMergeCsvArtifacts(design, norm, strategy, decisions));
+    for (const artifact of artifacts) {
+      await mergeWorkbookArtifact(artifact, strategy, decisions);
+      changedFiles.push({
+        label: artifact.label,
+        path: artifact.target,
+        overwritten: artifact.exists,
+      });
+    }
   }
 
   if (stageAfterApply) {
     await gitService.addFiles(
-      [...copiedFiles.map((file) => file.path), ...generatedCsv].map((filePath) => vscode.Uri.file(filePath)),
+      changedFiles.map((file) => vscode.Uri.file(file.path)),
       vscode.Uri.file(repoRoot)
     );
   }
 
-  const relativeCsvs = generatedCsv.map((filePath) => vscode.workspace.asRelativePath(filePath));
   const resolvedStrategyText = strategy === 'overwrite' ? '直接覆盖' : strategy === 'autoMerge' ? '自动合并' : '手动合并';
   const unresolvedCount = strategy === 'manualMerge'
     ? decisions.length
@@ -3692,29 +3696,22 @@ async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
     strategy: resolvedStrategyText,
     direction,
     backupDir: '',
-    changedXls: copiedFiles.map((file) => vscode.workspace.asRelativePath(file.path)),
-    generatedCsv: relativeCsvs,
+    changedXls: changedFiles.map((file) => vscode.workspace.asRelativePath(file.path)),
+    generatedCsv: [],
     unresolvedCount,
     result: strategy === 'overwrite'
-      ? '同步完成：已将真实 XLS/XLSX 源文件复制到目标路径，未生成隐藏 CSV 合并产物。'
-      : '同步完成：目标 XLS/XLSX 未被覆盖，已按合并策略写入隐藏 CSV 产物。',
+      ? '同步完成：已将真实 XLS/XLSX 源文件复制到目标路径。'
+      : '同步完成：已基于真实 Excel 内容完成合并，并直接写入目标 XLS/XLSX 文件。',
   };
 
   return {
     success: true,
     report,
-    files: [
-      ...copiedFiles.map((file) => ({
+    files: changedFiles.map((file) => ({
         label: file.label,
         path: vscode.workspace.asRelativePath(file.path),
         overwritten: file.overwritten,
       })),
-      ...generatedCsv.map((filePath) => ({
-        label: path.basename(filePath),
-        path: vscode.workspace.asRelativePath(filePath),
-        overwritten: true,
-      })),
-    ],
   };
 }
 
@@ -3804,263 +3801,307 @@ interface CommonSyncDiffItem {
   targetVal: string;
 }
 
-function buildCommonSyncDiffItems(
-  design?: CommonSyncArtifact,
-  norm?: CommonSyncArtifact
-): CommonSyncDiffItem[] {
-  const dtName = design ? path.basename(design.source) : 'design_tree.xls';
-  const ntName = norm ? path.basename(norm.source) : 'normalized_table.xls';
-
-  return [
-    {
-      id: 'dt-1',
-      fileType: 'designTree',
-      fileName: dtName,
-      sheetName: 'design_tree',
-      key: 'SD5888V100_LM_TOP/U_TM_TOP_0/U_TMDP_ESPE',
-      fieldName: 'inst_num',
-      type: 'fieldDifferent',
-      sourceVal: '5000544',
-      targetVal: '5000600',
-    },
-    {
-      id: 'dt-2',
-      fileType: 'designTree',
-      fileName: dtName,
-      sheetName: 'design_tree',
-      key: 'SD5888V100_LM_TOP/U_TM_TOP_0/U_TMDP_UMCBR_0',
-      fieldName: 'int_edt_info',
-      type: 'fieldDifferent',
-      sourceVal: 'default_int{1:1}',
-      targetVal: 'default_int{2:2}',
-    },
-    {
-      id: 'dt-3',
-      fileType: 'designTree',
-      fileName: dtName,
-      sheetName: 'design_tree',
-      key: 'SD5888V100_LM_TOP/U_TM_TOP_1/U_TMCP_FQMC',
-      fieldName: '',
-      type: 'sourceAdded',
-      sourceVal: 'design_name: U_TMCP_FQMC, inst_num: 128, reg_num: 2048, int_edt_info: default_int{4:4}',
-      targetVal: '',
-    },
-    {
-      id: 'dt-4',
-      fileType: 'designTree',
-      fileName: dtName,
-      sheetName: 'design_tree',
-      key: 'SD5888V100_LM_TOP/U_TM_TOP_0/U_TMCP_CME',
-      fieldName: '',
-      type: 'targetRedundant',
-      sourceVal: '',
-      targetVal: 'design_name: U_TMCP_CME, inst_num: 64, reg_num: 512, int_edt_info: default_int{3:3}',
-    },
-    {
-      id: 'nt-1',
-      fileType: 'normTable',
-      fileName: ntName,
-      sheetName: 'Isio_core_top',
-      key: 'Isio_core_top::dft_ram_bypass',
-      fieldName: '',
-      type: 'sourceAdded',
-      sourceVal: 'Pin name: dft_ram_bypass, ctrl_type: direct_ctrl, default_value: 0, scan_insert: X, atpg_sae: *',
-      targetVal: '',
-    },
-    {
-      id: 'nt-2',
-      fileType: 'normTable',
-      fileName: ntName,
-      sheetName: 'Isio_core_top',
-      key: 'Isio_core_top::dft_tcam_ctrl_bus[10:0]',
-      fieldName: '',
-      type: 'targetRedundant',
-      sourceVal: '',
-      targetVal: 'Pin name: dft_tcam_ctrl_bus[10:0], ctrl_type: direct_ctrl, default_value: 1, scan_insert: X, atpg_sae: *',
-    },
-    {
-      id: 'nt-3',
-      fileType: 'normTable',
-      fileName: ntName,
-      sheetName: 'Isio_core_top',
-      key: 'Isio_core_top::dft_ram_ctrl_bus[319:229]',
-      fieldName: 'default_value',
-      type: 'fieldDifferent',
-      sourceVal: '91b0',
-      targetVal: '91b1',
-    },
-    {
-      id: 'nt-4',
-      fileType: 'normTable',
-      fileName: ntName,
-      sheetName: 'Isio_core_top',
-      key: 'Isio_core_top::dft_org_post_mode',
-      fieldName: 'ctrl_type',
-      type: 'fieldDifferent',
-      sourceVal: 'direct_ctrl',
-      targetVal: 'direct_ctrle',
-    },
-    {
-      id: 'nt-5',
-      fileType: 'normTable',
-      fileName: ntName,
-      sheetName: 'Isio_core_top',
-      key: 'Isio_core_top::dft_crg_pre_mode',
-      fieldName: 'default_value',
-      type: 'fieldAnomaly',
-      sourceVal: '0',
-      targetVal: '口',
-    },
-    {
-      id: 'nt-6',
-      fileType: 'normTable',
-      fileName: ntName,
-      sheetName: 'new_module_sheet',
-      key: 'new_module_sheet',
-      fieldName: '',
-      type: 'sheetAdded',
-      sourceVal: 'Sheet exists',
-      targetVal: '',
-    },
-    {
-      id: 'nt-7',
-      fileType: 'normTable',
-      fileName: ntName,
-      sheetName: 'deprecated_module_sheet',
-      key: 'deprecated_module_sheet',
-      fieldName: '',
-      type: 'sheetRedundant',
-      sourceVal: '',
-      targetVal: 'Sheet exists',
-    },
-  ];
+interface WorkbookSheetModel {
+  name: string;
+  rows: string[][];
+  headers: string[];
+  rowByKey: Map<string, { rowIndex: number; values: string[] }>;
 }
 
-function writeCommonMergeCsvArtifacts(
-  design: CommonSyncArtifact | undefined,
-  norm: CommonSyncArtifact | undefined,
+function buildWorkbookDiffItems(artifact: CommonSyncArtifact): CommonSyncDiffItem[] {
+  const sourceBook = XLSX.readFile(artifact.source, { cellDates: false });
+  const targetBook = fs.existsSync(artifact.target)
+    ? XLSX.readFile(artifact.target, { cellDates: false })
+    : XLSX.utils.book_new();
+  const sourceSheets = buildWorkbookSheetModels(sourceBook);
+  const targetSheets = buildWorkbookSheetModels(targetBook);
+  const items: CommonSyncDiffItem[] = [];
+  const sheetNames = new Set([...sourceSheets.keys(), ...targetSheets.keys()]);
+
+  for (const sheetName of sheetNames) {
+    const sourceSheet = sourceSheets.get(sheetName);
+    const targetSheet = targetSheets.get(sheetName);
+    if (sourceSheet && !targetSheet) {
+      items.push(makeWorkbookDiffItem(artifact, sheetName, sheetName, '', 'sheetAdded', 'Sheet exists', ''));
+      continue;
+    }
+    if (!sourceSheet && targetSheet) {
+      items.push(makeWorkbookDiffItem(artifact, sheetName, sheetName, '', 'sheetRedundant', '', 'Sheet exists'));
+      continue;
+    }
+    if (!sourceSheet || !targetSheet) {
+      continue;
+    }
+
+    const rowKeys = new Set([...sourceSheet.rowByKey.keys(), ...targetSheet.rowByKey.keys()]);
+    for (const rowKey of rowKeys) {
+      const sourceRow = sourceSheet.rowByKey.get(rowKey);
+      const targetRow = targetSheet.rowByKey.get(rowKey);
+      if (sourceRow && !targetRow) {
+        items.push(makeWorkbookDiffItem(artifact, sheetName, rowKey, '', 'sourceAdded', rowToDisplay(sourceRow.values), ''));
+        continue;
+      }
+      if (!sourceRow && targetRow) {
+        items.push(makeWorkbookDiffItem(artifact, sheetName, rowKey, '', 'targetRedundant', '', rowToDisplay(targetRow.values)));
+        continue;
+      }
+      if (!sourceRow || !targetRow) {
+        continue;
+      }
+
+      const maxColumns = Math.max(sourceRow.values.length, targetRow.values.length, sourceSheet.headers.length, targetSheet.headers.length);
+      for (let columnIndex = 0; columnIndex < maxColumns; columnIndex += 1) {
+        const sourceVal = sourceRow.values[columnIndex] ?? '';
+        const targetVal = targetRow.values[columnIndex] ?? '';
+        if (sourceVal === targetVal) {
+          continue;
+        }
+        const fieldName = sourceSheet.headers[columnIndex] || targetSheet.headers[columnIndex] || `Column ${columnIndex + 1}`;
+        items.push(makeWorkbookDiffItem(
+          artifact,
+          sheetName,
+          `${rowKey}::${columnIndex}`,
+          fieldName,
+          'fieldDifferent',
+          sourceVal,
+          targetVal
+        ));
+      }
+    }
+  }
+
+  return items;
+}
+
+function mergeWorkbookArtifact(
+  artifact: CommonSyncArtifact,
   strategy: string,
   decisions: Array<{ id: string; choice: 'source' | 'target' | 'custom'; customValue?: string }>
-): string[] {
-  const resolvedDecisions = strategy === 'autoMerge' ? buildAutoMergeDecisions() : decisions;
-  const generatedCsv: string[] = [];
+): void {
+  const sourceBook = XLSX.readFile(artifact.source, { cellDates: false });
+  const targetBook = fs.existsSync(artifact.target)
+    ? XLSX.readFile(artifact.target, { cellDates: false })
+    : XLSX.utils.book_new();
+  const sourceSheets = buildWorkbookSheetModels(sourceBook);
+  const targetSheets = buildWorkbookSheetModels(targetBook);
+  const decisionMap = new Map(decisions.map((decision) => [decision.id, decision]));
+  const sheetNames = new Set([...sourceSheets.keys(), ...targetSheets.keys()]);
+  const mergedBook = XLSX.utils.book_new();
 
-  if (design) {
-    const dtTargetHiddenDir = getCommonSyncHiddenDir(design.target);
-    const dtDecision1 = getDecision(resolvedDecisions, 'dt-1', 'target');
-    const dtVal1 = resolveDecisionValue(resolvedDecisions, 'dt-1', dtDecision1, '5000544', '5000600');
-    const dtDecision2 = getDecision(resolvedDecisions, 'dt-2', 'target');
-    const dtVal2 = resolveDecisionValue(resolvedDecisions, 'dt-2', dtDecision2, 'default_int{1:1}', 'default_int{2:2}');
-    const dtDecision3 = getDecision(resolvedDecisions, 'dt-3', 'target');
-    const dtDecision4 = getDecision(resolvedDecisions, 'dt-4', 'target');
-    const dtRows = [
-      ['SD5888V100_LM_TOP/U_TM_TOP_0/U_TMDP_ESPE', 'SD5888V100_LM_TOP', 'U_TM_TOP_0', 'U_TMDP_ESPE', '', '', 'U_TMDP_ESPE', '1024', dtVal1, 'default_int{1:1}', dtDecision1],
-      ['SD5888V100_LM_TOP/U_TM_TOP_0/U_TMDP_UMCBR_0', 'SD5888V100_LM_TOP', 'U_TM_TOP_0', 'U_TMDP_UMCBR_0', '', '', 'U_TMDP_UMCBR_0', '512', '256', dtVal2, dtDecision2],
-    ];
-    if (dtDecision3 === 'source') {
-      dtRows.push(['SD5888V100_LM_TOP/U_TM_TOP_1/U_TMCP_FQMC', 'SD5888V100_LM_TOP', 'U_TM_TOP_1', 'U_TMCP_FQMC', '', '', 'U_TMCP_FQMC', '2048', '128', 'default_int{4:4}', 'source']);
+  for (const sheetName of sheetNames) {
+    const sourceSheet = sourceSheets.get(sheetName);
+    const targetSheet = targetSheets.get(sheetName);
+    const sheetAddedId = makeWorkbookDiffId(artifact.key, sheetName, sheetName, '');
+    const sheetRedundantId = makeWorkbookDiffId(artifact.key, sheetName, sheetName, '');
+
+    if (sourceSheet && !targetSheet) {
+      const choice = resolveWorkbookChoice(strategy, decisionMap.get(sheetAddedId), 'source');
+      if (choice === 'source') {
+        appendSheet(mergedBook, sheetName, sourceSheet.rows);
+      }
+      continue;
     }
-    if (dtDecision4 === 'target') {
-      dtRows.push(['SD5888V100_LM_TOP/U_TM_TOP_0/U_TMCP_CME', 'SD5888V100_LM_TOP', 'U_TM_TOP_0', 'U_TMCP_CME', '', '', 'U_TMCP_CME', '512', '64', 'default_int{3:3}', 'target']);
+
+    if (!sourceSheet && targetSheet) {
+      const choice = resolveWorkbookChoice(strategy, decisionMap.get(sheetRedundantId), 'target');
+      if (choice === 'target') {
+        appendSheet(mergedBook, sheetName, targetSheet.rows);
+      }
+      continue;
     }
-    const designCsv = path.join(dtTargetHiddenDir, 'design_tree.csv');
-    writeCsvFile(designCsv, ['key', 'level0', 'level1', 'level2', 'level3', 'level4', 'design_name', 'reg_num', 'inst_num', 'int_edt_info', 'decision'], dtRows);
-    generatedCsv.push(designCsv);
+
+    if (!sourceSheet || !targetSheet) {
+      continue;
+    }
+
+    const mergedRows = mergeSheetRows(artifact, sheetName, sourceSheet, targetSheet, strategy, decisionMap);
+    appendSheet(mergedBook, sheetName, mergedRows);
   }
 
-  if (norm) {
-    const ntTargetHiddenDir = getCommonSyncHiddenDir(norm.target);
-    const ntDecision1 = getDecision(resolvedDecisions, 'nt-1', 'target');
-    const ntDecision2 = getDecision(resolvedDecisions, 'nt-2', 'target');
-    const ntDecision3 = getDecision(resolvedDecisions, 'nt-3', 'target');
-    const ntVal3 = resolveDecisionValue(resolvedDecisions, 'nt-3', ntDecision3, '91b0', '91b1');
-    const ntDecision4 = getDecision(resolvedDecisions, 'nt-4', 'target');
-    const ntVal4 = resolveDecisionValue(resolvedDecisions, 'nt-4', ntDecision4, 'direct_ctrl', 'direct_ctrle');
-    const ntDecision5 = getDecision(resolvedDecisions, 'nt-5', 'target');
-    const ntVal5 = resolveDecisionValue(resolvedDecisions, 'nt-5', ntDecision5, '0', '口');
-    const ntRows = [
-      ['Isio_core_top::dft_ram_ctrl_bus[319:229]', 'dft_ram_ctrl_bus[319:229]', 'U_RAM_CTRL', 'input', ntVal4, ntVal3, 'X', '1', ntDecision3],
-      ['Isio_core_top::dft_org_post_mode', 'dft_org_post_mode', 'U_POST_MODE', 'input', ntVal4, '0', 'X', '1', ntDecision4],
-      ['Isio_core_top::dft_crg_pre_mode', 'dft_crg_pre_mode', 'U_PRE_MODE', 'input', 'direct_ctrl', ntVal5, 'X', '1', ntDecision5],
-    ];
-    if (ntDecision1 === 'source') {
-      ntRows.push(['Isio_core_top::dft_ram_bypass', 'dft_ram_bypass', 'U_BYPASS', 'input', 'direct_ctrl', '0', 'X', '*', 'source']);
-    }
-    if (ntDecision2 === 'target') {
-      ntRows.push(['Isio_core_top::dft_tcam_ctrl_bus[10:0]', 'dft_tcam_ctrl_bus[10:0]', 'U_TCAM_CTRL', 'input', 'direct_ctrl', '1', 'X', '*', 'target']);
-    }
-    const normCsv = path.join(ntTargetHiddenDir, 'Isio_core_top.csv');
-    writeCsvFile(normCsv, ['key', 'pin_name', 'dummy_inst_name', 'pin_attribute', 'ctrl_type', 'default_value', 'scan_insert', 'atpg_sae', 'decision'], ntRows);
-    generatedCsv.push(normCsv);
+  if (mergedBook.SheetNames.length === 0) {
+    throw new Error(`Merge produced an empty workbook for ${artifact.target}`);
+  }
+  fs.mkdirSync(path.dirname(artifact.target), { recursive: true });
+  XLSX.writeFile(mergedBook, artifact.target, { bookType: getWorkbookBookType(artifact.target) });
+}
 
-    if (getDecision(resolvedDecisions, 'nt-6', 'target') === 'source') {
-      const sheetCsv = path.join(ntTargetHiddenDir, 'new_module_sheet.csv');
-      writeCsvFile(sheetCsv, ['key', 'status'], [['new_module_sheet', 'Sheet exists']]);
-      generatedCsv.push(sheetCsv);
+function mergeSheetRows(
+  artifact: CommonSyncArtifact,
+  sheetName: string,
+  sourceSheet: WorkbookSheetModel,
+  targetSheet: WorkbookSheetModel,
+  strategy: string,
+  decisionMap: Map<string, { id: string; choice: 'source' | 'target' | 'custom'; customValue?: string }>
+): string[][] {
+  const header = targetSheet.headers.length > 0 ? targetSheet.headers : sourceSheet.headers;
+  const rows: string[][] = [header];
+  const rowKeys = new Set([...targetSheet.rowByKey.keys(), ...sourceSheet.rowByKey.keys()]);
+
+  for (const rowKey of rowKeys) {
+    const sourceRow = sourceSheet.rowByKey.get(rowKey);
+    const targetRow = targetSheet.rowByKey.get(rowKey);
+    const rowId = makeWorkbookDiffId(artifact.key, sheetName, rowKey, '');
+
+    if (sourceRow && !targetRow) {
+      if (resolveWorkbookChoice(strategy, decisionMap.get(rowId), 'source') === 'source') {
+        rows.push(sourceRow.values);
+      }
+      continue;
     }
-    if (getDecision(resolvedDecisions, 'nt-7', 'target') === 'target') {
-      const sheetCsv = path.join(ntTargetHiddenDir, 'deprecated_module_sheet.csv');
-      writeCsvFile(sheetCsv, ['key', 'status'], [['deprecated_module_sheet', 'Sheet exists']]);
-      generatedCsv.push(sheetCsv);
+
+    if (!sourceRow && targetRow) {
+      if (resolveWorkbookChoice(strategy, decisionMap.get(rowId), 'target') === 'target') {
+        rows.push(targetRow.values);
+      }
+      continue;
     }
+
+    if (!sourceRow || !targetRow) {
+      continue;
+    }
+
+    const maxColumns = Math.max(sourceRow.values.length, targetRow.values.length, header.length);
+    const mergedRow: string[] = [];
+    for (let columnIndex = 0; columnIndex < maxColumns; columnIndex += 1) {
+      const sourceVal = sourceRow.values[columnIndex] ?? '';
+      const targetVal = targetRow.values[columnIndex] ?? '';
+      if (sourceVal === targetVal) {
+        mergedRow[columnIndex] = targetVal;
+        continue;
+      }
+      const fieldName = sourceSheet.headers[columnIndex] || targetSheet.headers[columnIndex] || `Column ${columnIndex + 1}`;
+      const cellId = makeWorkbookDiffId(artifact.key, sheetName, `${rowKey}::${columnIndex}`, fieldName);
+      const decision = decisionMap.get(cellId);
+      const choice = resolveWorkbookChoice(strategy, decision, 'target');
+      mergedRow[columnIndex] = choice === 'source'
+        ? sourceVal
+        : choice === 'custom'
+          ? decision?.customValue ?? ''
+          : targetVal;
+    }
+    rows.push(mergedRow);
   }
 
-  return generatedCsv;
+  return rows;
 }
 
-function buildAutoMergeDecisions(): Array<{ id: string; choice: 'source' | 'target' }> {
-  return [
-    { id: 'dt-3', choice: 'source' },
-    { id: 'dt-4', choice: 'target' },
-    { id: 'nt-1', choice: 'source' },
-    { id: 'nt-2', choice: 'target' },
-    { id: 'nt-6', choice: 'source' },
-    { id: 'nt-7', choice: 'target' },
-  ];
+function buildWorkbookSheetModels(workbook: XLSX.WorkBook): Map<string, WorkbookSheetModel> {
+  const models = new Map<string, WorkbookSheetModel>();
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const rows = normalizeWorksheetRows(XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: '', blankrows: false }));
+    if (rows.length === 0) {
+      models.set(sheetName, { name: sheetName, rows: [], headers: [], rowByKey: new Map() });
+      continue;
+    }
+    const headers = rows[0].map((value, index) => value || `Column ${index + 1}`);
+    const keyIndex = findKeyColumnIndex(headers);
+    const rowByKey = new Map<string, { rowIndex: number; values: string[] }>();
+    rows.slice(1).forEach((row, offset) => {
+      if (row.every((value) => value === '')) {
+        return;
+      }
+      const rawKey = (row[keyIndex] || row.find((value) => value !== '') || `row-${offset + 2}`).trim();
+      const key = makeUniqueRowKey(rowByKey, rawKey || `row-${offset + 2}`);
+      rowByKey.set(key, { rowIndex: offset + 1, values: row });
+    });
+    models.set(sheetName, { name: sheetName, rows, headers, rowByKey });
+  }
+  return models;
 }
 
-function getDecision(
-  decisions: Array<{ id: string; choice: 'source' | 'target' | 'custom'; customValue?: string }>,
-  id: string,
-  fallback: 'source' | 'target' | 'custom'
+function normalizeWorksheetRows(rows: string[][]): string[][] {
+  return rows.map((row) => row.map((value) => normalizeCellValue(value)));
+}
+
+function normalizeCellValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  return String(value);
+}
+
+function findKeyColumnIndex(headers: string[]): number {
+  const normalized = headers.map((header) => header.trim().toLowerCase());
+  const preferred = ['key', 'id', 'name', 'design_name', 'pin_name', 'module', 'module_name'];
+  for (const key of preferred) {
+    const index = normalized.indexOf(key);
+    if (index >= 0) {
+      return index;
+    }
+  }
+  return 0;
+}
+
+function makeUniqueRowKey(rowByKey: Map<string, unknown>, rawKey: string): string {
+  let key = rawKey;
+  let suffix = 2;
+  while (rowByKey.has(key)) {
+    key = `${rawKey}#${suffix}`;
+    suffix += 1;
+  }
+  return key;
+}
+
+function makeWorkbookDiffItem(
+  artifact: CommonSyncArtifact,
+  sheetName: string,
+  key: string,
+  fieldName: string,
+  type: CommonSyncDiffItem['type'],
+  sourceVal: string,
+  targetVal: string
+): CommonSyncDiffItem {
+  return {
+    id: makeWorkbookDiffId(artifact.key, sheetName, key, fieldName),
+    fileType: artifact.key,
+    fileName: path.basename(artifact.source),
+    sheetName,
+    key,
+    fieldName,
+    type,
+    sourceVal,
+    targetVal,
+  };
+}
+
+function makeWorkbookDiffId(fileType: CommonSyncArtifact['key'], sheetName: string, key: string, fieldName: string): string {
+  return `${fileType}|${encodeDiffPart(sheetName)}|${encodeDiffPart(key)}|${encodeDiffPart(fieldName)}`;
+}
+
+function encodeDiffPart(value: string): string {
+  return Buffer.from(value, 'utf-8').toString('base64url');
+}
+
+function resolveWorkbookChoice(
+  strategy: string,
+  decision: { choice: 'source' | 'target' | 'custom'; customValue?: string } | undefined,
+  autoChoice: 'source' | 'target'
 ): 'source' | 'target' | 'custom' {
-  return decisions.find((decision) => decision.id === id)?.choice ?? fallback;
-}
-
-function resolveDecisionValue(
-  decisions: Array<{ id: string; choice: 'source' | 'target' | 'custom'; customValue?: string }>,
-  id: string,
-  choice: 'source' | 'target' | 'custom',
-  sourceValue: string,
-  targetValue: string
-): string {
-  if (choice === 'source') {
-    return sourceValue;
+  if (strategy === 'autoMerge') {
+    return autoChoice;
   }
-  if (choice === 'custom') {
-    return decisions.find((decision) => decision.id === id)?.customValue ?? '';
-  }
-  return targetValue;
+  return decision?.choice ?? autoChoice;
 }
 
-function getCommonSyncHiddenDir(filePath: string): string {
-  return path.join(path.dirname(filePath), `.${path.basename(filePath, path.extname(filePath))}`);
+function rowToDisplay(row: string[]): string {
+  return row.filter((value) => value !== '').join(', ');
 }
 
-function writeCsvFile(filePath: string, headers: string[], rows: string[][]): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const lines = [
-    headers.join(','),
-    ...rows.map((row) =>
-      row.map((value) => {
-        if (value.includes(',') || value.includes('"') || value.includes('\n')) {
-          return `"${value.replace(/"/g, '""')}"`;
-        }
-        return value;
-      }).join(',')
-    ),
-  ];
-  fs.writeFileSync(filePath, lines.join('\n'), 'utf-8');
+function appendSheet(workbook: XLSX.WorkBook, sheetName: string, rows: string[][]): void {
+  const worksheet = XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(workbook, worksheet, sanitizeSheetName(sheetName));
+}
+
+function sanitizeSheetName(sheetName: string): string {
+  return sheetName.replace(/[:\\/?*\[\]]/g, '_').slice(0, 31) || 'Sheet1';
+}
+
+function getWorkbookBookType(filePath: string): XLSX.BookType {
+  return path.extname(filePath).toLowerCase() === '.xls' ? 'xls' : 'xlsx';
 }
 
 export function deactivate() {}

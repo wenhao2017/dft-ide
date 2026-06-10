@@ -52,7 +52,6 @@ import {
   openFileInEditor,
   prepareCommonArtifactSync,
   applyCommonArtifactSync,
-  openVsCodeDiff,
 } from '../utils/ipc';
 
 const { Text, Title, Paragraph } = Typography;
@@ -521,7 +520,7 @@ const CommonFlow: React.FC = () => {
       icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
       content: selectedStrategy === 'overwrite'
         ? '将把源 XLS/XLSX 文件复制到目标文件或目标目录。目标文件不会额外创建备份，请使用 Git 审查和回退。'
-        : '将保留目标 XLS/XLSX 文件不变，只按合并策略写入隐藏 CSV 产物。请使用 Git 审查和提交变更。',
+        : '将基于真实 Excel 内容合并，并直接写入目标 XLS/XLSX 文件。请使用 Git 审查和提交变更。',
       okText: '确认',
       cancelText: '取消',
       onOk: async () => {
@@ -840,7 +839,7 @@ const CommonFlow: React.FC = () => {
                 <Radio value="manualMerge">
                   <Text strong>手动合并 (推荐)</Text>
                   <div style={{ fontSize: 12, color: 'var(--vscode-descriptionForeground)', marginLeft: 24, marginTop: 4 }}>
-                    逐项确认差异，按决策生成目标隐藏 CSV，不覆盖目标 XLS/XLSX 文件。
+                    逐项确认真实 Excel 差异，按决策直接写入目标 XLS/XLSX 文件。
                   </div>
                 </Radio>
               </Card>
@@ -1108,7 +1107,6 @@ const CommonFlow: React.FC = () => {
   const renderStep2Report = () => {
     if (!syncReport) return <Spin />;
     const changedFiles = Array.isArray(syncReport.changedXls) ? syncReport.changedXls : [];
-    const generatedCsv = Array.isArray(syncReport.generatedCsv) ? syncReport.generatedCsv : [];
 
     return (
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -1116,7 +1114,7 @@ const CommonFlow: React.FC = () => {
           type="success"
           showIcon
           message="公共表格同步完成"
-          description="真实 XLS/XLSX 文件已经复制到目标路径；本次操作没有生成 demo 差异、CSV 或占位文件。"
+          description="同步结果已直接写入目标 XLS/XLSX 文件；未生成额外隐藏目录。"
         />
 
         <Card size="small" style={{ borderRadius: 8 }}>
@@ -1128,14 +1126,6 @@ const CommonFlow: React.FC = () => {
                 {changedFiles.map((file: string) => <li key={file}><code>{file}</code></li>)}
               </ul>
             </div>
-            {generatedCsv.length > 0 && (
-              <div>
-                <Text type="secondary">已写入的隐藏 CSV 文件：</Text>
-                <ul style={{ margin: '4px 0 4px 16px', padding: 0 }}>
-                  {generatedCsv.map((file: string) => <li key={file}><code>{file}</code></li>)}
-                </ul>
-              </div>
-            )}
             <div><Text type="secondary">合并前冲突数：</Text> <Badge count={syncReport.unresolvedCount ?? 0} style={{ backgroundColor: '#faad14' }} /></div>
             <div><Text type="secondary">执行结果：</Text> {syncReport.result}</div>
           </Space>
