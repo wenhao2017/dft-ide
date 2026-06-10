@@ -215,7 +215,13 @@ const CommonFlow: React.FC = () => {
 
   // Wizard state declarations for advanced common file synchronization
   const [wizardStep, setWizardStep] = useState<number>(0);
-  const selectedStrategy = 'overwrite';
+  const [selectedStrategy, setSelectedStrategy] = useState<'overwrite' | 'autoMerge' | 'manualMerge'>('manualMerge');
+  const [diffItems, setDiffItems] = useState<any[]>([]);
+  const [activeDiffId, setActiveDiffId] = useState<string | null>(null);
+  const [filterFileType, setFilterFileType] = useState<'all' | 'designTree' | 'normTable'>('all');
+  const [filterDiffType, setFilterDiffType] = useState<string>('all');
+  const [filterSheet, setFilterSheet] = useState<string>('all');
+  const [showValidationErrors, setShowValidationErrors] = useState<boolean>(false);
   const [precheckInfo, setPrecheckInfo] = useState<any>(null);
   const [syncReport, setSyncReport] = useState<any>(null);
   const [isApplying, setIsApplying] = useState<boolean>(false);
@@ -471,6 +477,9 @@ const CommonFlow: React.FC = () => {
       
       if (res.success) {
         setPrecheckInfo(res.precheck);
+        const nextDiffItems = Array.isArray(res.diffItems) ? res.diffItems : [];
+        setDiffItems(nextDiffItems);
+        setActiveDiffId(nextDiffItems[0]?.id || null);
       } else {
         message.error(res.error || '预检查失败');
         return;
@@ -481,11 +490,32 @@ const CommonFlow: React.FC = () => {
     }
     
     setWizardStep(0);
+    setSelectedStrategy('manualMerge');
+    setShowValidationErrors(false);
     setSyncReport(null);
     setConfirmModalOpen(true);
   };
 
+  const handleDecisionChange = (id: string, decision: 'source' | 'target' | 'custom', customVal?: string) => {
+    setDiffItems((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? { ...item, decision, customVal: customVal !== undefined ? customVal : item.customVal }
+          : item
+      )
+    );
+  };
+
   const handleApplySync = async () => {
+    if (selectedStrategy === 'manualMerge') {
+      const unresolved = diffItems.filter((item) => !item.decision);
+      if (unresolved.length > 0) {
+        setShowValidationErrors(true);
+        message.error(`存在 ${unresolved.length} 项未决策的差异，请先处理`);
+        return;
+      }
+    }
+
     Modal.confirm({
       title: '确认执行同步',
       icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
@@ -500,6 +530,13 @@ const CommonFlow: React.FC = () => {
           const tgtDesign = syncDirection === 'dataToTarget' ? targetDesignTree.value : dataDesignTree.value;
           const tgtTable = syncDirection === 'dataToTarget' ? targetNormTable.value : dataNormTable.value;
           const tgt = syncDirection === 'dataToTarget' ? selectedRepo : selectedDataRepo;
+          const decisions = selectedStrategy === 'manualMerge'
+            ? diffItems.map((item) => ({
+                id: item.id,
+                choice: item.decision || 'target',
+                customValue: item.customVal,
+              }))
+            : [];
 
           const res = await applyCommonArtifactSync({
             targetRepo: tgt,
@@ -509,7 +546,7 @@ const CommonFlow: React.FC = () => {
             sourceNormTable: srcTable,
             targetDesignTree: tgtDesign,
             targetNormTable: tgtTable,
-            decisions: [],
+            decisions,
             stageAfterApply: false,
           });
 
@@ -528,6 +565,40 @@ const CommonFlow: React.FC = () => {
         }
       }
     });
+  };
+
+  const filteredItems = useMemo(() => {
+    return diffItems.filter((item) => {
+      const matchFile = filterFileType === 'all' || item.fileType === filterFileType;
+      const matchType = filterDiffType === 'all' || item.type === filterDiffType;
+      const matchSheet = filterSheet === 'all' || item.sheetName === filterSheet;
+      return matchFile && matchType && matchSheet;
+    });
+  }, [diffItems, filterFileType, filterDiffType, filterSheet]);
+
+  const uniqueSheets = useMemo(() => {
+    const sheets = new Set<string>();
+    diffItems.forEach((item) => {
+      if (item.sheetName) sheets.add(item.sheetName);
+    });
+    return Array.from(sheets);
+  }, [diffItems]);
+
+  const getDiffTypeTag = (type: string) => {
+    switch (type) {
+      case 'sourceAdded':
+      case 'sheetAdded':
+        return <Tag color="green">来源新增</Tag>;
+      case 'targetRedundant':
+      case 'sheetRedundant':
+        return <Tag color="orange">目标独有</Tag>;
+      case 'fieldDifferent':
+        return <Tag color="blue">字段不同</Tag>;
+      case 'fieldAnomaly':
+        return <Tag color="red">字段异常</Tag>;
+      default:
+        return <Tag>{type}</Tag>;
+    }
   };
 
   const setSelectedRepoByGroup = (repo: RepoKey, group: number) => {
@@ -712,6 +783,7 @@ const CommonFlow: React.FC = () => {
   const renderStep0Precheck = () => {
     if (!precheckInfo) return <Spin />;
     const files = Array.isArray(precheckInfo.files) ? precheckInfo.files : [];
+    const hasConflicts = diffItems.some((item) => item.type === 'fieldDifferent' || item.type === 'fieldAnomaly');
 
     return (
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -746,17 +818,295 @@ const CommonFlow: React.FC = () => {
           </Space>
         </Card>
 
+        <div>
+          <Title level={5} style={{ margin: '0 0 10px 0' }}>请选择同步策略：</Title>
+          <Radio.Group
+            value={selectedStrategy}
+            onChange={(event) => setSelectedStrategy(event.target.value)}
+            style={{ width: '100%' }}
+          >
+            <Space direction="vertical" style={{ width: '100%' }} size={10}>
+              <Card
+                size="small"
+                hoverable
+                onClick={() => setSelectedStrategy('manualMerge')}
+                style={{
+                  borderRadius: 8,
+                  border: selectedStrategy === 'manualMerge' ? '1px solid var(--vscode-focusBorder)' : '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
+                }}
+              >
+                <Radio value="manualMerge">
+                  <Text strong>手动合并 (推荐)</Text>
+                  <div style={{ fontSize: 12, color: 'var(--vscode-descriptionForeground)', marginLeft: 24, marginTop: 4 }}>
+                    逐项确认差异，按决策生成目标隐藏 CSV，同时复制真实 XLS/XLSX 文件并保留备份。
+                  </div>
+                </Radio>
+              </Card>
+
+              <Card
+                size="small"
+                hoverable
+                onClick={() => setSelectedStrategy('autoMerge')}
+                style={{
+                  borderRadius: 8,
+                  border: selectedStrategy === 'autoMerge' ? '1px solid var(--vscode-focusBorder)' : '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
+                }}
+              >
+                <Radio value="autoMerge">
+                  <Text strong>自动合并</Text>
+                  {hasConflicts && <Tag color="orange" style={{ marginLeft: 8 }}>冲突字段保留目标值</Tag>}
+                  <div style={{ fontSize: 12, color: 'var(--vscode-descriptionForeground)', marginLeft: 24, marginTop: 4 }}>
+                    自动引入来源新增项，保留目标独有项；字段冲突和异常字段按目标值保守处理。
+                  </div>
+                </Radio>
+              </Card>
+
+              <Card
+                size="small"
+                hoverable
+                onClick={() => setSelectedStrategy('overwrite')}
+                style={{
+                  borderRadius: 8,
+                  border: selectedStrategy === 'overwrite' ? '1px solid var(--vscode-focusBorder)' : '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
+                }}
+              >
+                <Radio value="overwrite">
+                  <Text strong>直接覆盖</Text>
+                  <div style={{ fontSize: 12, color: 'var(--vscode-descriptionForeground)', marginLeft: 24, marginTop: 4 }}>
+                    直接用来源 XLS/XLSX 覆盖目标文件；目标文件和隐藏 CSV 目录会先备份。
+                  </div>
+                </Radio>
+              </Card>
+            </Space>
+          </Radio.Group>
+        </div>
+
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
           <Button onClick={() => setConfirmModalOpen(false)}>取消同步</Button>
-          <Button type="primary" loading={isApplying} onClick={handleApplySync}>执行同步</Button>
+          <Button
+            type="primary"
+            onClick={() => {
+              setWizardStep(1);
+            }}
+          >
+            下一步
+          </Button>
         </div>
       </Space>
+    );
+  };
+
+  const renderOverwriteConfirmation = () => {
+    const files = Array.isArray(precheckInfo?.files) ? precheckInfo.files : [];
+
+    return (
+      <Space direction="vertical" size={14} style={{ width: '100%' }}>
+        <Alert
+          type="warning"
+          showIcon
+          message="直接覆盖确认"
+          description="目标文件已有内容时会先生成时间戳备份；执行后目标 XLS/XLSX 将由来源文件覆盖。"
+        />
+        <Card size="small" style={{ borderRadius: 8 }}>
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            {files.map((file: any) => (
+              <div key={file.label}>
+                <Text strong>{file.label}</Text>
+                <div><Text type="secondary">目标：</Text><code>{file.target}</code></div>
+              </div>
+            ))}
+          </Space>
+        </Card>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+          <Button onClick={() => setWizardStep(0)}>返回上一步</Button>
+          <Button type="primary" danger loading={isApplying} onClick={handleApplySync}>确认直接覆盖</Button>
+        </div>
+      </Space>
+    );
+  };
+
+  const renderAutoMergePreview = () => {
+    const autoItems = diffItems.filter((item) =>
+      item.type === 'sourceAdded' ||
+      item.type === 'targetRedundant' ||
+      item.type === 'sheetAdded' ||
+      item.type === 'sheetRedundant'
+    );
+
+    return (
+      <Space direction="vertical" size={14} style={{ width: '100%' }}>
+        <Alert
+          type="success"
+          showIcon
+          message="自动合并结果预览"
+          description="来源新增会引入，目标独有会保留；字段冲突和异常字段会保留目标值。"
+        />
+        <Card size="small" style={{ borderRadius: 8 }}>
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            {autoItems.map((item) => (
+              <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                <Text ellipsis={{ tooltip: item.key }}>{item.key}</Text>
+                {getDiffTypeTag(item.type)}
+              </div>
+            ))}
+          </Space>
+        </Card>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+          <Button onClick={() => setWizardStep(0)}>返回上一步</Button>
+          <Button type="primary" loading={isApplying} onClick={handleApplySync}>应用自动合并结果</Button>
+        </div>
+      </Space>
+    );
+  };
+
+  const renderManualMergeScreen = () => {
+    const activeItem = diffItems.find((item) => item.id === activeDiffId);
+    const unresolvedCount = diffItems.filter((item) => !item.decision).length;
+
+    return (
+      <Row gutter={16}>
+        <Col span={9}>
+          <Space direction="vertical" style={{ width: '100%' }} size={10}>
+            <Card size="small" style={{ borderRadius: 8 }}>
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Radio.Group size="small" value={filterFileType} onChange={(event) => setFilterFileType(event.target.value)}>
+                  <Radio.Button value="all">全部</Radio.Button>
+                  <Radio.Button value="designTree">Design Tree</Radio.Button>
+                  <Radio.Button value="normTable">归一化表</Radio.Button>
+                </Radio.Group>
+                <Radio.Group size="small" value={filterDiffType} onChange={(event) => setFilterDiffType(event.target.value)}>
+                  <Radio.Button value="all">全部</Radio.Button>
+                  <Radio.Button value="fieldDifferent">不同</Radio.Button>
+                  <Radio.Button value="fieldAnomaly">异常</Radio.Button>
+                  <Radio.Button value="sourceAdded">新增</Radio.Button>
+                  <Radio.Button value="targetRedundant">目标独有</Radio.Button>
+                </Radio.Group>
+                {uniqueSheets.length > 0 && (
+                  <Radio.Group size="small" value={filterSheet} onChange={(event) => setFilterSheet(event.target.value)}>
+                    <Radio.Button value="all">全部 Sheet</Radio.Button>
+                    {uniqueSheets.map((sheet) => (
+                      <Radio.Button key={sheet} value={sheet}>{sheet.length > 12 ? `${sheet.slice(0, 10)}...` : sheet}</Radio.Button>
+                    ))}
+                  </Radio.Group>
+                )}
+              </Space>
+            </Card>
+
+            {showValidationErrors && unresolvedCount > 0 && (
+              <Alert type="error" showIcon message={`尚有 ${unresolvedCount} 项差异未决定，请在列表中处理。`} />
+            )}
+
+            <div style={{ height: 380, overflowY: 'auto', border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))', borderRadius: 8, padding: 6 }}>
+              {filteredItems.map((item) => {
+                const isSelected = item.id === activeDiffId;
+                const hasDecision = item.decision !== undefined;
+                const showErr = showValidationErrors && !hasDecision;
+
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => setActiveDiffId(item.id)}
+                    style={{
+                      padding: '10px 12px',
+                      marginBottom: 6,
+                      borderRadius: 6,
+                      border: isSelected ? '1px solid var(--vscode-focusBorder)' : showErr ? '1px solid var(--vscode-errorForeground, #ff4d4f)' : '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
+                      background: isSelected ? 'color-mix(in srgb, var(--vscode-editor-background, #fff) 90%, var(--vscode-focusBorder, #1677ff))' : 'var(--vscode-editor-background)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Space size={6} style={{ width: '100%', justifyContent: 'space-between' }}>
+                      <Space size={6}>
+                        {hasDecision ? <CheckCircleOutlined style={{ color: '#389e0d' }} /> : <WarningOutlined style={{ color: showErr ? '#ff4d4f' : '#faad14' }} />}
+                        <Text style={{ fontSize: 12, fontWeight: 600 }} ellipsis={{ tooltip: item.key }}>
+                          {String(item.key).includes('::') ? String(item.key).split('::')[1] : String(item.key).split(/[\\/]/).pop()}
+                        </Text>
+                      </Space>
+                      {getDiffTypeTag(item.type)}
+                    </Space>
+                    <div style={{ marginTop: 4, fontSize: 11, color: 'var(--vscode-descriptionForeground)' }}>
+                      Sheet: {item.sheetName}{item.fieldName ? ` / 字段: ${item.fieldName}` : ''}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Space>
+        </Col>
+
+        <Col span={15}>
+          {activeItem ? (
+            <Card size="small" title="差异业务对比与决策" style={{ borderRadius: 8, height: '100%' }}>
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <div><Text type="secondary">业务 Key：</Text><code>{activeItem.key}</code></div>
+                {activeItem.fieldName && <div><Text type="secondary">变更字段：</Text><Tag color="orange">{activeItem.fieldName}</Tag></div>}
+                <Row gutter={12}>
+                  <Col span={12}>
+                    <Card size="small" title="来源值" style={{ height: 130, overflowY: 'auto' }}>
+                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{activeItem.sourceVal || '(空/不存在)'}</Text>
+                    </Card>
+                  </Col>
+                  <Col span={12}>
+                    <Card size="small" title="目标值" style={{ height: 130, overflowY: 'auto' }}>
+                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{activeItem.targetVal || '(空/不存在)'}</Text>
+                    </Card>
+                  </Col>
+                </Row>
+
+                <Card size="small" title="合并决策选择" style={{ borderRadius: 6 }}>
+                  {activeItem.type === 'sourceAdded' || activeItem.type === 'sheetAdded' ? (
+                    <Radio.Group value={activeItem.decision} onChange={(event) => handleDecisionChange(activeItem.id, event.target.value)}>
+                      <Space direction="vertical">
+                        <Radio value="source">引入：将该项引入到目标仓</Radio>
+                        <Radio value="target">不引入：舍弃该项</Radio>
+                      </Space>
+                    </Radio.Group>
+                  ) : activeItem.type === 'targetRedundant' || activeItem.type === 'sheetRedundant' ? (
+                    <Radio.Group value={activeItem.decision} onChange={(event) => handleDecisionChange(activeItem.id, event.target.value)}>
+                      <Space direction="vertical">
+                        <Radio value="target">保留：保留目标仓中多余的项</Radio>
+                        <Radio value="source">删除：在目标仓中移除该项</Radio>
+                      </Space>
+                    </Radio.Group>
+                  ) : (
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      <Radio.Group value={activeItem.decision} onChange={(event) => handleDecisionChange(activeItem.id, event.target.value)}>
+                        <Space direction="vertical">
+                          <Radio value="source">使用来源值</Radio>
+                          <Radio value="target">使用目标值</Radio>
+                          <Radio value="custom">手动输入自定义值</Radio>
+                        </Space>
+                      </Radio.Group>
+                      {activeItem.decision === 'custom' && (
+                        <Input.TextArea
+                          rows={2}
+                          value={activeItem.customVal || ''}
+                          onChange={(event) => handleDecisionChange(activeItem.id, 'custom', event.target.value)}
+                          placeholder="请输入自定义值..."
+                        />
+                      )}
+                    </Space>
+                  )}
+                </Card>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
+                  <Button onClick={() => setWizardStep(0)}>返回上一步</Button>
+                  <Button type="primary" loading={isApplying} onClick={handleApplySync}>确认应用合并决策</Button>
+                </div>
+              </Space>
+            </Card>
+          ) : (
+            <Alert type="info" showIcon message="请选择左侧差异项" />
+          )}
+        </Col>
+      </Row>
     );
   };
 
   const renderStep2Report = () => {
     if (!syncReport) return <Spin />;
     const changedFiles = Array.isArray(syncReport.changedXls) ? syncReport.changedXls : [];
+    const generatedCsv = Array.isArray(syncReport.generatedCsv) ? syncReport.generatedCsv : [];
 
     return (
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -779,6 +1129,15 @@ const CommonFlow: React.FC = () => {
                 {changedFiles.map((file: string) => <li key={file}><code>{file}</code></li>)}
               </ul>
             </div>
+            {generatedCsv.length > 0 && (
+              <div>
+                <Text type="secondary">已写入的隐藏 CSV 文件：</Text>
+                <ul style={{ margin: '4px 0 4px 16px', padding: 0 }}>
+                  {generatedCsv.map((file: string) => <li key={file}><code>{file}</code></li>)}
+                </ul>
+              </div>
+            )}
+            <div><Text type="secondary">合并前冲突数：</Text> <Badge count={syncReport.unresolvedCount ?? 0} style={{ backgroundColor: '#faad14' }} /></div>
             <div><Text type="secondary">执行结果：</Text> {syncReport.result}</div>
           </Space>
         </Card>
@@ -917,7 +1276,7 @@ const CommonFlow: React.FC = () => {
             }
           }}
           footer={null}
-          width={750}
+          width={wizardStep === 1 && selectedStrategy === 'manualMerge' ? 1150 : 750}
           style={{ top: 40 }}
           destroyOnClose
         >
@@ -958,7 +1317,13 @@ const CommonFlow: React.FC = () => {
             {/* Modal Body content based on step */}
             {wizardStep === 0 && renderStep0Precheck()}
 
-            {wizardStep === 1 && renderStep0Precheck()}
+            {wizardStep === 1 && (
+              selectedStrategy === 'overwrite'
+                ? renderOverwriteConfirmation()
+                : selectedStrategy === 'autoMerge'
+                  ? renderAutoMergePreview()
+                  : renderManualMergeScreen()
+            )}
 
             {wizardStep === 2 && renderStep2Report()}
 

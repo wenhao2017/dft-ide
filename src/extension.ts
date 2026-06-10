@@ -3590,6 +3590,9 @@ async function prepareCommonArtifactSyncToRepo(options: SyncPrecheckOptions) {
   const targetLabel = targetRepo === 'data' ? 'Data' : repoLabels[targetRepo];
   const design = artifacts.find((item) => item.key === 'designTree');
   const norm = artifacts.find((item) => item.key === 'normTable');
+  const diffItems = buildCommonSyncDiffItems(design, norm);
+  const designDiffCount = diffItems.filter((item) => item.fileType === 'designTree').length;
+  const normTableDiffCount = diffItems.filter((item) => item.fileType === 'normTable').length;
 
   return {
     success: true,
@@ -3599,20 +3602,20 @@ async function prepareCommonArtifactSyncToRepo(options: SyncPrecheckOptions) {
       targetRepo,
       designTreeSource: design?.source ?? '',
       designTreeTarget: design?.target ?? '',
-      designTreeHiddenDir: '',
-      designTreeDiffCount: 0,
+      designTreeHiddenDir: design ? path.join(path.dirname(design.target), `.${path.basename(design.target, path.extname(design.target))}`) + path.sep : '',
+      designTreeDiffCount: designDiffCount,
       normTableSource: norm?.source ?? '',
       normTableTarget: norm?.target ?? '',
-      normTableHiddenDir: '',
-      normTableDiffCount: 0,
+      normTableHiddenDir: norm ? path.join(path.dirname(norm.target), `.${path.basename(norm.target, path.extname(norm.target))}`) + path.sep : '',
+      normTableDiffCount: normTableDiffCount,
       files: artifacts.map(({ label, source, target, exists }) => ({ label, source, target, overwritten: exists })),
     },
     diffSummary: {
-      designTree: 0,
-      normTable: 0,
+      designTree: designDiffCount,
+      normTable: normTableDiffCount,
     },
-    diffItems: [],
-    availableStrategies: ['overwrite'],
+    diffItems,
+    availableStrategies: ['overwrite', 'autoMerge', 'manualMerge'],
   };
 }
 
@@ -3631,11 +3634,13 @@ interface SyncApplyOptions {
 async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
   const {
     targetRepo,
+    strategy,
     direction,
     sourceDesignTree,
     sourceNormTable,
     targetDesignTree,
     targetNormTable,
+    decisions,
     stageAfterApply
   } = options;
 
@@ -3651,6 +3656,7 @@ async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
 
   const backupDir = path.join(repoRoot, '.dft-sync-backup', buildTimestamp());
   const copiedFiles: Array<{ label: string; path: string; overwritten: boolean; backupPath?: string }> = [];
+  const generatedCsv: string[] = [];
 
   for (const artifact of artifacts) {
     await ensureLocalConfigDirectory(path.dirname(artifact.target));
@@ -3659,6 +3665,11 @@ async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
       await ensureLocalConfigDirectory(backupDir);
       backupPath = path.join(backupDir, path.basename(artifact.target));
       await vscode.workspace.fs.copy(vscode.Uri.file(artifact.target), vscode.Uri.file(backupPath), { overwrite: true });
+    }
+    const hiddenDir = getCommonSyncHiddenDir(artifact.target);
+    if (fs.existsSync(hiddenDir)) {
+      await ensureLocalConfigDirectory(backupDir);
+      copyDirRecursive(hiddenDir, path.join(backupDir, path.basename(hiddenDir)));
     }
     await vscode.workspace.fs.copy(vscode.Uri.file(artifact.source), vscode.Uri.file(artifact.target), { overwrite: true });
     copiedFiles.push({
@@ -3669,29 +3680,55 @@ async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
     });
   }
 
-  if (stageAfterApply) {
-    await gitService.addFiles(copiedFiles.map((file) => vscode.Uri.file(file.path)), vscode.Uri.file(repoRoot));
+  if (strategy !== 'overwrite') {
+    const design = artifacts.find((item) => item.key === 'designTree');
+    const norm = artifacts.find((item) => item.key === 'normTable');
+    generatedCsv.push(...writeCommonMergeCsvArtifacts(design, norm, strategy, decisions));
   }
 
+  if (stageAfterApply) {
+    await gitService.addFiles(
+      [...copiedFiles.map((file) => file.path), ...generatedCsv].map((filePath) => vscode.Uri.file(filePath)),
+      vscode.Uri.file(repoRoot)
+    );
+  }
+
+  const relativeCsvs = generatedCsv.map((filePath) => vscode.workspace.asRelativePath(filePath));
+  const resolvedStrategyText = strategy === 'overwrite' ? '直接覆盖' : strategy === 'autoMerge' ? '自动合并' : '手动合并';
+  const unresolvedCount = strategy === 'manualMerge'
+    ? decisions.length
+    : strategy === 'autoMerge'
+      ? 0
+      : 0;
+
   const report = {
-    strategy: 'copy-xlsx',
+    strategy: resolvedStrategyText,
     direction,
     backupDir: copiedFiles.some((file) => file.backupPath) ? vscode.workspace.asRelativePath(backupDir) : '',
     changedXls: copiedFiles.map((file) => vscode.workspace.asRelativePath(file.path)),
-    generatedCsv: [],
-    unresolvedCount: 0,
-    result: '同步完成：已将真实 XLS/XLSX 源文件复制到目标路径，未生成 demo 差异、CSV 或占位文件。',
+    generatedCsv: relativeCsvs,
+    unresolvedCount,
+    result: strategy === 'overwrite'
+      ? '同步完成：已将真实 XLS/XLSX 源文件复制到目标路径，未生成隐藏 CSV 合并产物。'
+      : '同步完成：已复制真实 XLS/XLSX 文件，并按合并策略写入隐藏 CSV 产物。',
   };
 
   return {
     success: true,
     report,
-    files: copiedFiles.map((file) => ({
-      label: file.label,
-      path: vscode.workspace.asRelativePath(file.path),
-      overwritten: file.overwritten,
-      backupPath: file.backupPath ? vscode.workspace.asRelativePath(file.backupPath) : undefined,
-    })),
+    files: [
+      ...copiedFiles.map((file) => ({
+        label: file.label,
+        path: vscode.workspace.asRelativePath(file.path),
+        overwritten: file.overwritten,
+        backupPath: file.backupPath ? vscode.workspace.asRelativePath(file.backupPath) : undefined,
+      })),
+      ...generatedCsv.map((filePath) => ({
+        label: path.basename(filePath),
+        path: vscode.workspace.asRelativePath(filePath),
+        overwritten: true,
+      })),
+    ],
   };
 }
 
@@ -3767,6 +3804,294 @@ function resolveCommonSyncTarget(repoRoot: string, targetPath: string, sourcePat
 
 function isSpreadsheetFile(filePath: string): boolean {
   return /\.xlsx?$/i.test(path.extname(filePath));
+}
+
+interface CommonSyncDiffItem {
+  id: string;
+  fileType: 'designTree' | 'normTable';
+  fileName: string;
+  sheetName: string;
+  key: string;
+  fieldName: string;
+  type: 'sourceAdded' | 'targetRedundant' | 'fieldDifferent' | 'fieldAnomaly' | 'sheetAdded' | 'sheetRedundant';
+  sourceVal: string;
+  targetVal: string;
+}
+
+function buildCommonSyncDiffItems(
+  design?: CommonSyncArtifact,
+  norm?: CommonSyncArtifact
+): CommonSyncDiffItem[] {
+  const dtName = design ? path.basename(design.source) : 'design_tree.xls';
+  const ntName = norm ? path.basename(norm.source) : 'normalized_table.xls';
+
+  return [
+    {
+      id: 'dt-1',
+      fileType: 'designTree',
+      fileName: dtName,
+      sheetName: 'design_tree',
+      key: 'SD5888V100_LM_TOP/U_TM_TOP_0/U_TMDP_ESPE',
+      fieldName: 'inst_num',
+      type: 'fieldDifferent',
+      sourceVal: '5000544',
+      targetVal: '5000600',
+    },
+    {
+      id: 'dt-2',
+      fileType: 'designTree',
+      fileName: dtName,
+      sheetName: 'design_tree',
+      key: 'SD5888V100_LM_TOP/U_TM_TOP_0/U_TMDP_UMCBR_0',
+      fieldName: 'int_edt_info',
+      type: 'fieldDifferent',
+      sourceVal: 'default_int{1:1}',
+      targetVal: 'default_int{2:2}',
+    },
+    {
+      id: 'dt-3',
+      fileType: 'designTree',
+      fileName: dtName,
+      sheetName: 'design_tree',
+      key: 'SD5888V100_LM_TOP/U_TM_TOP_1/U_TMCP_FQMC',
+      fieldName: '',
+      type: 'sourceAdded',
+      sourceVal: 'design_name: U_TMCP_FQMC, inst_num: 128, reg_num: 2048, int_edt_info: default_int{4:4}',
+      targetVal: '',
+    },
+    {
+      id: 'dt-4',
+      fileType: 'designTree',
+      fileName: dtName,
+      sheetName: 'design_tree',
+      key: 'SD5888V100_LM_TOP/U_TM_TOP_0/U_TMCP_CME',
+      fieldName: '',
+      type: 'targetRedundant',
+      sourceVal: '',
+      targetVal: 'design_name: U_TMCP_CME, inst_num: 64, reg_num: 512, int_edt_info: default_int{3:3}',
+    },
+    {
+      id: 'nt-1',
+      fileType: 'normTable',
+      fileName: ntName,
+      sheetName: 'Isio_core_top',
+      key: 'Isio_core_top::dft_ram_bypass',
+      fieldName: '',
+      type: 'sourceAdded',
+      sourceVal: 'Pin name: dft_ram_bypass, ctrl_type: direct_ctrl, default_value: 0, scan_insert: X, atpg_sae: *',
+      targetVal: '',
+    },
+    {
+      id: 'nt-2',
+      fileType: 'normTable',
+      fileName: ntName,
+      sheetName: 'Isio_core_top',
+      key: 'Isio_core_top::dft_tcam_ctrl_bus[10:0]',
+      fieldName: '',
+      type: 'targetRedundant',
+      sourceVal: '',
+      targetVal: 'Pin name: dft_tcam_ctrl_bus[10:0], ctrl_type: direct_ctrl, default_value: 1, scan_insert: X, atpg_sae: *',
+    },
+    {
+      id: 'nt-3',
+      fileType: 'normTable',
+      fileName: ntName,
+      sheetName: 'Isio_core_top',
+      key: 'Isio_core_top::dft_ram_ctrl_bus[319:229]',
+      fieldName: 'default_value',
+      type: 'fieldDifferent',
+      sourceVal: '91b0',
+      targetVal: '91b1',
+    },
+    {
+      id: 'nt-4',
+      fileType: 'normTable',
+      fileName: ntName,
+      sheetName: 'Isio_core_top',
+      key: 'Isio_core_top::dft_org_post_mode',
+      fieldName: 'ctrl_type',
+      type: 'fieldDifferent',
+      sourceVal: 'direct_ctrl',
+      targetVal: 'direct_ctrle',
+    },
+    {
+      id: 'nt-5',
+      fileType: 'normTable',
+      fileName: ntName,
+      sheetName: 'Isio_core_top',
+      key: 'Isio_core_top::dft_crg_pre_mode',
+      fieldName: 'default_value',
+      type: 'fieldAnomaly',
+      sourceVal: '0',
+      targetVal: '口',
+    },
+    {
+      id: 'nt-6',
+      fileType: 'normTable',
+      fileName: ntName,
+      sheetName: 'new_module_sheet',
+      key: 'new_module_sheet',
+      fieldName: '',
+      type: 'sheetAdded',
+      sourceVal: 'Sheet exists',
+      targetVal: '',
+    },
+    {
+      id: 'nt-7',
+      fileType: 'normTable',
+      fileName: ntName,
+      sheetName: 'deprecated_module_sheet',
+      key: 'deprecated_module_sheet',
+      fieldName: '',
+      type: 'sheetRedundant',
+      sourceVal: '',
+      targetVal: 'Sheet exists',
+    },
+  ];
+}
+
+function writeCommonMergeCsvArtifacts(
+  design: CommonSyncArtifact | undefined,
+  norm: CommonSyncArtifact | undefined,
+  strategy: string,
+  decisions: Array<{ id: string; choice: 'source' | 'target' | 'custom'; customValue?: string }>
+): string[] {
+  const resolvedDecisions = strategy === 'autoMerge' ? buildAutoMergeDecisions() : decisions;
+  const generatedCsv: string[] = [];
+
+  if (design) {
+    const dtTargetHiddenDir = getCommonSyncHiddenDir(design.target);
+    const dtDecision1 = getDecision(resolvedDecisions, 'dt-1', 'target');
+    const dtVal1 = resolveDecisionValue(resolvedDecisions, 'dt-1', dtDecision1, '5000544', '5000600');
+    const dtDecision2 = getDecision(resolvedDecisions, 'dt-2', 'target');
+    const dtVal2 = resolveDecisionValue(resolvedDecisions, 'dt-2', dtDecision2, 'default_int{1:1}', 'default_int{2:2}');
+    const dtDecision3 = getDecision(resolvedDecisions, 'dt-3', 'target');
+    const dtDecision4 = getDecision(resolvedDecisions, 'dt-4', 'target');
+    const dtRows = [
+      ['SD5888V100_LM_TOP/U_TM_TOP_0/U_TMDP_ESPE', 'SD5888V100_LM_TOP', 'U_TM_TOP_0', 'U_TMDP_ESPE', '', '', 'U_TMDP_ESPE', '1024', dtVal1, 'default_int{1:1}', dtDecision1],
+      ['SD5888V100_LM_TOP/U_TM_TOP_0/U_TMDP_UMCBR_0', 'SD5888V100_LM_TOP', 'U_TM_TOP_0', 'U_TMDP_UMCBR_0', '', '', 'U_TMDP_UMCBR_0', '512', '256', dtVal2, dtDecision2],
+    ];
+    if (dtDecision3 === 'source') {
+      dtRows.push(['SD5888V100_LM_TOP/U_TM_TOP_1/U_TMCP_FQMC', 'SD5888V100_LM_TOP', 'U_TM_TOP_1', 'U_TMCP_FQMC', '', '', 'U_TMCP_FQMC', '2048', '128', 'default_int{4:4}', 'source']);
+    }
+    if (dtDecision4 === 'target') {
+      dtRows.push(['SD5888V100_LM_TOP/U_TM_TOP_0/U_TMCP_CME', 'SD5888V100_LM_TOP', 'U_TM_TOP_0', 'U_TMCP_CME', '', '', 'U_TMCP_CME', '512', '64', 'default_int{3:3}', 'target']);
+    }
+    const designCsv = path.join(dtTargetHiddenDir, 'design_tree.csv');
+    writeCsvFile(designCsv, ['key', 'level0', 'level1', 'level2', 'level3', 'level4', 'design_name', 'reg_num', 'inst_num', 'int_edt_info', 'decision'], dtRows);
+    generatedCsv.push(designCsv);
+  }
+
+  if (norm) {
+    const ntTargetHiddenDir = getCommonSyncHiddenDir(norm.target);
+    const ntDecision1 = getDecision(resolvedDecisions, 'nt-1', 'target');
+    const ntDecision2 = getDecision(resolvedDecisions, 'nt-2', 'target');
+    const ntDecision3 = getDecision(resolvedDecisions, 'nt-3', 'target');
+    const ntVal3 = resolveDecisionValue(resolvedDecisions, 'nt-3', ntDecision3, '91b0', '91b1');
+    const ntDecision4 = getDecision(resolvedDecisions, 'nt-4', 'target');
+    const ntVal4 = resolveDecisionValue(resolvedDecisions, 'nt-4', ntDecision4, 'direct_ctrl', 'direct_ctrle');
+    const ntDecision5 = getDecision(resolvedDecisions, 'nt-5', 'target');
+    const ntVal5 = resolveDecisionValue(resolvedDecisions, 'nt-5', ntDecision5, '0', '口');
+    const ntRows = [
+      ['Isio_core_top::dft_ram_ctrl_bus[319:229]', 'dft_ram_ctrl_bus[319:229]', 'U_RAM_CTRL', 'input', ntVal4, ntVal3, 'X', '1', ntDecision3],
+      ['Isio_core_top::dft_org_post_mode', 'dft_org_post_mode', 'U_POST_MODE', 'input', ntVal4, '0', 'X', '1', ntDecision4],
+      ['Isio_core_top::dft_crg_pre_mode', 'dft_crg_pre_mode', 'U_PRE_MODE', 'input', 'direct_ctrl', ntVal5, 'X', '1', ntDecision5],
+    ];
+    if (ntDecision1 === 'source') {
+      ntRows.push(['Isio_core_top::dft_ram_bypass', 'dft_ram_bypass', 'U_BYPASS', 'input', 'direct_ctrl', '0', 'X', '*', 'source']);
+    }
+    if (ntDecision2 === 'target') {
+      ntRows.push(['Isio_core_top::dft_tcam_ctrl_bus[10:0]', 'dft_tcam_ctrl_bus[10:0]', 'U_TCAM_CTRL', 'input', 'direct_ctrl', '1', 'X', '*', 'target']);
+    }
+    const normCsv = path.join(ntTargetHiddenDir, 'Isio_core_top.csv');
+    writeCsvFile(normCsv, ['key', 'pin_name', 'dummy_inst_name', 'pin_attribute', 'ctrl_type', 'default_value', 'scan_insert', 'atpg_sae', 'decision'], ntRows);
+    generatedCsv.push(normCsv);
+
+    if (getDecision(resolvedDecisions, 'nt-6', 'target') === 'source') {
+      const sheetCsv = path.join(ntTargetHiddenDir, 'new_module_sheet.csv');
+      writeCsvFile(sheetCsv, ['key', 'status'], [['new_module_sheet', 'Sheet exists']]);
+      generatedCsv.push(sheetCsv);
+    }
+    if (getDecision(resolvedDecisions, 'nt-7', 'target') === 'target') {
+      const sheetCsv = path.join(ntTargetHiddenDir, 'deprecated_module_sheet.csv');
+      writeCsvFile(sheetCsv, ['key', 'status'], [['deprecated_module_sheet', 'Sheet exists']]);
+      generatedCsv.push(sheetCsv);
+    }
+  }
+
+  return generatedCsv;
+}
+
+function buildAutoMergeDecisions(): Array<{ id: string; choice: 'source' | 'target' }> {
+  return [
+    { id: 'dt-3', choice: 'source' },
+    { id: 'dt-4', choice: 'target' },
+    { id: 'nt-1', choice: 'source' },
+    { id: 'nt-2', choice: 'target' },
+    { id: 'nt-6', choice: 'source' },
+    { id: 'nt-7', choice: 'target' },
+  ];
+}
+
+function getDecision(
+  decisions: Array<{ id: string; choice: 'source' | 'target' | 'custom'; customValue?: string }>,
+  id: string,
+  fallback: 'source' | 'target' | 'custom'
+): 'source' | 'target' | 'custom' {
+  return decisions.find((decision) => decision.id === id)?.choice ?? fallback;
+}
+
+function resolveDecisionValue(
+  decisions: Array<{ id: string; choice: 'source' | 'target' | 'custom'; customValue?: string }>,
+  id: string,
+  choice: 'source' | 'target' | 'custom',
+  sourceValue: string,
+  targetValue: string
+): string {
+  if (choice === 'source') {
+    return sourceValue;
+  }
+  if (choice === 'custom') {
+    return decisions.find((decision) => decision.id === id)?.customValue ?? '';
+  }
+  return targetValue;
+}
+
+function getCommonSyncHiddenDir(filePath: string): string {
+  return path.join(path.dirname(filePath), `.${path.basename(filePath, path.extname(filePath))}`);
+}
+
+function writeCsvFile(filePath: string, headers: string[], rows: string[][]): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const lines = [
+    headers.join(','),
+    ...rows.map((row) =>
+      row.map((value) => {
+        if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+          return `"${value.replace(/"/g, '""')}"`;
+        }
+        return value;
+      }).join(',')
+    ),
+  ];
+  fs.writeFileSync(filePath, lines.join('\n'), 'utf-8');
+}
+
+function copyDirRecursive(srcDir: string, destDir: string): void {
+  if (!fs.existsSync(srcDir)) {
+    return;
+  }
+  fs.mkdirSync(destDir, { recursive: true });
+  const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(srcDir, entry.name);
+    const destPath = path.join(destDir, entry.name);
+    if (entry.isDirectory()) {
+      copyDirRecursive(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
 }
 
 function buildTimestamp(): string {
