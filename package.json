@@ -183,6 +183,7 @@
     "antd": "^5.25.1",
     "dagre": "^0.8.5",
     "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-hook-form": "^7.56.3",
