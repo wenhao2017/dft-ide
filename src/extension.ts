@@ -3654,33 +3654,20 @@ async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
     throw new Error('Please choose at least one source XLS/XLSX file.');
   }
 
-  const backupDir = path.join(repoRoot, '.dft-sync-backup', buildTimestamp());
-  const copiedFiles: Array<{ label: string; path: string; overwritten: boolean; backupPath?: string }> = [];
+  const copiedFiles: Array<{ label: string; path: string; overwritten: boolean }> = [];
   const generatedCsv: string[] = [];
 
-  for (const artifact of artifacts) {
-    await ensureLocalConfigDirectory(path.dirname(artifact.target));
-    let backupPath: string | undefined;
-    if (artifact.exists) {
-      await ensureLocalConfigDirectory(backupDir);
-      backupPath = path.join(backupDir, path.basename(artifact.target));
-      await vscode.workspace.fs.copy(vscode.Uri.file(artifact.target), vscode.Uri.file(backupPath), { overwrite: true });
+  if (strategy === 'overwrite') {
+    for (const artifact of artifacts) {
+      await ensureLocalConfigDirectory(path.dirname(artifact.target));
+      await vscode.workspace.fs.copy(vscode.Uri.file(artifact.source), vscode.Uri.file(artifact.target), { overwrite: true });
+      copiedFiles.push({
+        label: artifact.label,
+        path: artifact.target,
+        overwritten: artifact.exists,
+      });
     }
-    const hiddenDir = getCommonSyncHiddenDir(artifact.target);
-    if (fs.existsSync(hiddenDir)) {
-      await ensureLocalConfigDirectory(backupDir);
-      copyDirRecursive(hiddenDir, path.join(backupDir, path.basename(hiddenDir)));
-    }
-    await vscode.workspace.fs.copy(vscode.Uri.file(artifact.source), vscode.Uri.file(artifact.target), { overwrite: true });
-    copiedFiles.push({
-      label: artifact.label,
-      path: artifact.target,
-      overwritten: artifact.exists,
-      backupPath,
-    });
-  }
-
-  if (strategy !== 'overwrite') {
+  } else {
     const design = artifacts.find((item) => item.key === 'designTree');
     const norm = artifacts.find((item) => item.key === 'normTable');
     generatedCsv.push(...writeCommonMergeCsvArtifacts(design, norm, strategy, decisions));
@@ -3704,13 +3691,13 @@ async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
   const report = {
     strategy: resolvedStrategyText,
     direction,
-    backupDir: copiedFiles.some((file) => file.backupPath) ? vscode.workspace.asRelativePath(backupDir) : '',
+    backupDir: '',
     changedXls: copiedFiles.map((file) => vscode.workspace.asRelativePath(file.path)),
     generatedCsv: relativeCsvs,
     unresolvedCount,
     result: strategy === 'overwrite'
       ? '同步完成：已将真实 XLS/XLSX 源文件复制到目标路径，未生成隐藏 CSV 合并产物。'
-      : '同步完成：已复制真实 XLS/XLSX 文件，并按合并策略写入隐藏 CSV 产物。',
+      : '同步完成：目标 XLS/XLSX 未被覆盖，已按合并策略写入隐藏 CSV 产物。',
   };
 
   return {
@@ -3721,7 +3708,6 @@ async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
         label: file.label,
         path: vscode.workspace.asRelativePath(file.path),
         overwritten: file.overwritten,
-        backupPath: file.backupPath ? vscode.workspace.asRelativePath(file.backupPath) : undefined,
       })),
       ...generatedCsv.map((filePath) => ({
         label: path.basename(filePath),
@@ -4075,33 +4061,6 @@ function writeCsvFile(filePath: string, headers: string[], rows: string[][]): vo
     ),
   ];
   fs.writeFileSync(filePath, lines.join('\n'), 'utf-8');
-}
-
-function copyDirRecursive(srcDir: string, destDir: string): void {
-  if (!fs.existsSync(srcDir)) {
-    return;
-  }
-  fs.mkdirSync(destDir, { recursive: true });
-  const entries = fs.readdirSync(srcDir, { withFileTypes: true });
-  for (const entry of entries) {
-    const srcPath = path.join(srcDir, entry.name);
-    const destPath = path.join(destDir, entry.name);
-    if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, destPath);
-    } else {
-      fs.copyFileSync(srcPath, destPath);
-    }
-  }
-}
-
-function buildTimestamp(): string {
-  const now = new Date();
-  return now.getFullYear() +
-    String(now.getMonth() + 1).padStart(2, '0') +
-    String(now.getDate()).padStart(2, '0') + '_' +
-    String(now.getHours()).padStart(2, '0') +
-    String(now.getMinutes()).padStart(2, '0') +
-    String(now.getSeconds()).padStart(2, '0');
 }
 
 export function deactivate() {}

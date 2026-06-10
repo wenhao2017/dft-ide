@@ -519,7 +519,9 @@ const CommonFlow: React.FC = () => {
     Modal.confirm({
       title: '确认执行同步',
       icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
-      content: '将把源 XLS/XLSX 文件复制到目标文件或目标目录；若目标文件已存在，会先创建备份。',
+      content: selectedStrategy === 'overwrite'
+        ? '将把源 XLS/XLSX 文件复制到目标文件或目标目录。目标文件不会额外创建备份，请使用 Git 审查和回退。'
+        : '将保留目标 XLS/XLSX 文件不变，只按合并策略写入隐藏 CSV 产物。请使用 Git 审查和提交变更。',
       okText: '确认',
       cancelText: '取消',
       onOk: async () => {
@@ -811,7 +813,7 @@ const CommonFlow: React.FC = () => {
                 <Space direction="vertical" size={2} style={{ minWidth: 0 }}>
                   <Text ellipsis={{ tooltip: file.source }}><Text type="secondary">源文件：</Text>{file.source}</Text>
                   <Text ellipsis={{ tooltip: file.target }}><Text type="secondary">目标：</Text>{file.target}</Text>
-                  {file.overwritten && <Tag color="orange">目标已存在，将先备份</Tag>}
+                  {file.overwritten && <Tag color="orange">目标已存在</Tag>}
                 </Space>
               </div>
             ))}
@@ -838,7 +840,7 @@ const CommonFlow: React.FC = () => {
                 <Radio value="manualMerge">
                   <Text strong>手动合并 (推荐)</Text>
                   <div style={{ fontSize: 12, color: 'var(--vscode-descriptionForeground)', marginLeft: 24, marginTop: 4 }}>
-                    逐项确认差异，按决策生成目标隐藏 CSV，同时复制真实 XLS/XLSX 文件并保留备份。
+                    逐项确认差异，按决策生成目标隐藏 CSV，不覆盖目标 XLS/XLSX 文件。
                   </div>
                 </Radio>
               </Card>
@@ -873,7 +875,7 @@ const CommonFlow: React.FC = () => {
                 <Radio value="overwrite">
                   <Text strong>直接覆盖</Text>
                   <div style={{ fontSize: 12, color: 'var(--vscode-descriptionForeground)', marginLeft: 24, marginTop: 4 }}>
-                    直接用来源 XLS/XLSX 覆盖目标文件；目标文件和隐藏 CSV 目录会先备份。
+                    直接用来源 XLS/XLSX 覆盖目标文件；不额外创建备份，请使用 Git 审查和回退。
                   </div>
                 </Radio>
               </Card>
@@ -905,7 +907,7 @@ const CommonFlow: React.FC = () => {
           type="warning"
           showIcon
           message="直接覆盖确认"
-          description="目标文件已有内容时会先生成时间戳备份；执行后目标 XLS/XLSX 将由来源文件覆盖。"
+          description="执行后目标 XLS/XLSX 将由来源文件覆盖；不会额外创建备份目录。"
         />
         <Card size="small" style={{ borderRadius: 8 }}>
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -1120,9 +1122,6 @@ const CommonFlow: React.FC = () => {
         <Card size="small" style={{ borderRadius: 8 }}>
           <Space direction="vertical" size={8} style={{ width: '100%', fontSize: 13 }}>
             <div><Text type="secondary">同步方式：</Text> <Tag color="blue">{syncReport.strategy}</Tag></div>
-            {syncReport.backupDir && (
-              <div><Text type="secondary">备份目录：</Text> <code style={{ color: 'var(--vscode-textPreformat-foreground)' }}>{syncReport.backupDir}</code></div>
-            )}
             <div>
               <Text type="secondary">已更新的 Excel 文件：</Text>
               <ul style={{ margin: '4px 0 4px 16px', padding: 0 }}>
