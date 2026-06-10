@@ -855,9 +855,9 @@ const CommonFlow: React.FC = () => {
               >
                 <Radio value="autoMerge">
                   <Text strong>自动合并</Text>
-                  {hasConflicts && <Tag color="orange" style={{ marginLeft: 8 }}>冲突字段保留目标值</Tag>}
+                  {hasConflicts && <Tag color="orange" style={{ marginLeft: 8 }}>冲突字段使用来源值</Tag>}
                   <div style={{ fontSize: 12, color: 'var(--vscode-descriptionForeground)', marginLeft: 24, marginTop: 4 }}>
-                    自动引入来源新增项，保留目标独有项；字段冲突和异常字段按目标值保守处理。
+                    自动引入来源新增项，保留目标独有项；字段冲突和异常字段默认使用来源值。
                   </div>
                 </Radio>
               </Card>
@@ -940,7 +940,7 @@ const CommonFlow: React.FC = () => {
           type="success"
           showIcon
           message="自动合并结果预览"
-          description="来源新增会引入，目标独有会保留；字段冲突和异常字段会保留目标值。"
+          description="来源新增会引入，目标独有会保留；字段冲突和异常字段会使用来源值。"
         />
         <Card size="small" style={{ borderRadius: 8 }}>
           <Space direction="vertical" size={8} style={{ width: '100%' }}>

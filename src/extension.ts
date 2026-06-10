@@ -3972,7 +3972,7 @@ function mergeSheetRows(
       const fieldName = sourceSheet.headers[columnIndex] || targetSheet.headers[columnIndex] || `Column ${columnIndex + 1}`;
       const cellId = makeWorkbookDiffId(artifact.key, sheetName, `${rowKey}::${columnIndex}`, fieldName);
       const decision = decisionMap.get(cellId);
-      const choice = resolveWorkbookChoice(strategy, decision, 'target');
+      const choice = resolveWorkbookChoice(strategy, decision, 'source');
       mergedRow[columnIndex] = choice === 'source'
         ? sourceVal
         : choice === 'custom'
