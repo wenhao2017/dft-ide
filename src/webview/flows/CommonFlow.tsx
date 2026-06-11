@@ -110,6 +110,23 @@ function shouldKeepDiffItem(item: CommonDiffItem): boolean {
   return !isSameDisplayValue(item.sourceVal, item.targetVal);
 }
 
+function hasSyncPath(value: string): boolean {
+  return value.trim().length > 0;
+}
+
+function getIncompleteSyncPathMessage(
+  label: string,
+  sourcePath: string,
+  targetPath: string
+): string | null {
+  const hasSource = hasSyncPath(sourcePath);
+  const hasTarget = hasSyncPath(targetPath);
+  if (hasSource === hasTarget) {
+    return null;
+  }
+  return `${label} 的源路径和目标路径需要同时填写；如果不想同步该项，请两边都留空。`;
+}
+
 const pageStyle: React.CSSProperties = {
   padding: 4,
   color: 'var(--vscode-foreground)',
@@ -501,6 +518,14 @@ const CommonFlow: React.FC = () => {
     const srcTable = syncDirection === 'dataToTarget' ? dataNormTable.value : targetNormTable.value;
     const tgtDesign = syncDirection === 'dataToTarget' ? targetDesignTree.value : dataDesignTree.value;
     const tgtTable = syncDirection === 'dataToTarget' ? targetNormTable.value : dataNormTable.value;
+    const incompleteMessage =
+      getIncompleteSyncPathMessage('Design Tree', srcDesign, tgtDesign) ??
+      getIncompleteSyncPathMessage('归一化表格', srcTable, tgtTable);
+
+    if (incompleteMessage) {
+      message.warning(incompleteMessage);
+      return;
+    }
 
     try {
       const res = await prepareCommonArtifactSync({
@@ -1090,12 +1115,12 @@ const CommonFlow: React.FC = () => {
                 <Row gutter={12}>
                   <Col span={12}>
                     <Card size="small" title="来源值" style={{ height: 130, overflowY: 'auto' }}>
-                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{activeItem.sourceVal || '(空/不存在)'}</Text>
+                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(activeItem.sourceVal || '(空/不存在)')}</Text>
                     </Card>
                   </Col>
                   <Col span={12}>
                     <Card size="small" title="目标值" style={{ height: 130, overflowY: 'auto' }}>
-                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{activeItem.targetVal || '(空/不存在)'}</Text>
+                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(activeItem.targetVal || '(空/不存在)')}</Text>
                     </Card>
                   </Col>
                 </Row>
