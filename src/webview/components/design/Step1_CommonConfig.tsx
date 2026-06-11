@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Badge, Button, Card, Col, Form, Radio, Row, Select, Space, Spin, message, RadioChangeEvent } from 'antd';
+import { Badge, Button, Card, Col, Form, Radio, Row, Select, Space, Spin, message, RadioChangeEvent, Modal } from 'antd';
 import {
   BranchesOutlined,
   FileAddOutlined,
+  FileTextOutlined,
   MinusCircleOutlined,
   PlusOutlined,
   RightOutlined,
@@ -15,6 +16,7 @@ import { generateDefaultFlowConfigs, getGitInfo } from '../../utils/ipc';
 import useWizardStore from '../../store/wizardStore';
 import CollapsibleSection from '../shared/CollapsibleSection';
 import ControlledPathInput from '../shared/ControlledPathInput';
+import Link from 'antd/es/typography/Link';
 
 interface Props {
   onNext?: () => void;
@@ -32,14 +34,29 @@ const pageStyle: React.CSSProperties = {
   color: 'var(--vscode-foreground)',
 };
 
+const domainOptions = [
+  {
+    value: 1,
+    label:'网络'
+  },
+  {
+    value: 2,
+    label:'连接'
+  },
+  {
+    value: 3,
+    label:'图灵'
+  },
+];
+
 const emptyNormalizeCfg = (): NormalizeCfg => ({ commandCfg: '', jsonCfg: '' });
 
 const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => {
   const flowKey = category.toLowerCase();
   const project = useVscodePath();
   const workPath = useVscodePath();
-  const sailorCfg = useVscodePath();
-  const [domainCfg, setDomainCfg] = useState<string>('');
+  // const sailorCfg = useVscodePath();
+  const [domainCfg, setDomainCfg] = useState<number>(1);
 
   const [currentBranch, setCurrentBranch] = useState<string>('');
   const [normalizeCfgs, setNormalizeCfgs] = useState<NormalizeCfg[]>([emptyNormalizeCfg()]);
@@ -69,7 +86,8 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
     const source = (savedData.step1 as Record<string, unknown> | undefined) ?? savedData;
     if (source.project) project.setValue(String(source.project));
     if (source.workPath) workPath.setValue(String(source.workPath));
-    if (source.sailorCfg) sailorCfg.setValue(String(source.sailorCfg));
+    // if (source.sailorCfg) sailorCfg.setValue(String(source.sailorCfg));
+    if (source.domainCfg) setDomainCfg(Number(source.domainCfg))
 
     if (Array.isArray(source.normalizeCfgs)) {
       const nextCfgs = source.normalizeCfgs
@@ -96,7 +114,8 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
   const collectFormData = () => ({
     project: project.value,
     workPath: workPath.value,
-    sailorCfg: sailorCfg.value,
+    domainCfg,
+    // sailorCfg: sailorCfg.value,
     normalizeCfgs,
     normalizeIndex,
   });
@@ -144,8 +163,8 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
   const configHeader = (
     <Row style={{ marginBottom: 4 }}>
       <Col span={1} />
-      <Col span={11} style={{ marginLeft: 4 }}>命令入口</Col>
-      <Col span={11} style={{ marginLeft: 4 }}>配置json文件</Col>
+      <Col span={22} style={{ marginLeft: 4 }}>执行脚本</Col>
+      {/* <Col span={11} style={{ marginLeft: 4 }}>配置json文件</Col> */}
     </Row>
   );
 
@@ -159,7 +178,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
       }
       message.success(`已生成 ${result.created} 个默认 cfg，目录：${result.configsDir ?? 'configs'}`);
     } finally {
-      setGenerating(false);
+      // setGenerating(false);
     }
   };
 
@@ -184,7 +203,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
               />
             </Form.Item>
 
-            <Form.Item label={`common ${category} cfg`}>
+            {/* <Form.Item label={`common ${category} cfg`}>
               <PathInput
                 state={sailorCfg}
                 pathSources={['local']}
@@ -192,7 +211,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
                 showOpen
                 showSelectFile
               />
-            </Form.Item>
+            </Form.Item> */}
 
             <Form.Item label="选择领域">
               <Select
@@ -200,11 +219,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
                 onChange={(value) => setDomainCfg(value)}
                 allowClear
                 placeholder="请选择领域"
-                options={[
-                  { label: '领域 1', value: 'domain-1' },
-                  { label: '领域 2', value: 'domain-2' },
-                  { label: '领域 3', value: 'domain-3' },
-                ]}
+                options={domainOptions}
               />
             </Form.Item>
           </Card>
@@ -219,17 +234,17 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
                       <Radio checked={normalizeIndex === index} onChange={handleRadioChange} value={index} />
                     </Space>
                   </Col>
-                  <Col span={11} className="dft-path-input">
+                  <Col span={22} className="dft-path-input">
                     <ControlledPathInput
                       value={normalizeCfg.commandCfg}
                       onChange={(value) => setNormalCfg(index, value, 1)}
-                      placeholder="请选择命令入口"
+                      placeholder="请选择执行脚本"
                       pathSources={['local']}
                       showSelectFile
                       showOpen
                     />
                   </Col>
-                  <Col span={11} className="dft-path-input">
+                  {/* <Col span={11} className="dft-path-input">
                     <ControlledPathInput
                       value={normalizeCfg.jsonCfg}
                       onChange={(value) => setNormalCfg(index, value, 2)}
@@ -238,7 +253,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
                       showSelectFile
                       showOpen
                     />
-                  </Col>
+                  </Col> */}
                   <Col span={1}>
                     <Button
                       type="text"
@@ -256,7 +271,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
           </Card>
 
           <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
-            <Button icon={<FileAddOutlined />} loading={generating} onClick={onGenerateDefaults}>
+            <Button icon={<FileAddOutlined />} onClick={onGenerateDefaults}>
               产生默认配置
             </Button>
             <Badge dot={hasUnsaved} offset={[-4, 4]}>
@@ -270,6 +285,49 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
           </div>
         </div>
       </Form>
+
+      <Modal
+          title={
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '90%' }}>
+              <span style={{ fontSize: 16, fontWeight: 700 }}>产生配置日志</span>
+            </div>
+          }
+          open={generating}
+          onCancel={() => {setGenerating(false)}}
+          footer={null}
+          width={750}
+          style={{ top: 40 }}
+          destroyOnHidden
+        >
+          <div style={{ marginTop: 12, marginBottom: 20 }}>
+            {/* Steps bar */}
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              borderBottom: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
+              paddingBottom: 12,
+              marginBottom: 16
+            }}>
+              <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                <Space size="large">
+                  <Link>
+                    <FileTextOutlined /> {flowKey}/normalized-table.md
+                  </Link>
+                  <Link>
+                    <FileTextOutlined /> {flowKey}/design_tree.mock.json
+                  </Link>
+                  <Link>
+                    <FileTextOutlined /> {flowKey}/execution.log
+                  </Link>
+                </Space>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+                  <Button onClick={() => setGenerating(false)}>关闭</Button>
+                </div>
+              </Space>
+            </div>
+          </div>
+        </Modal>
     </Spin>
   );
 };
