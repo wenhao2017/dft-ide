@@ -53,6 +53,23 @@ import {
   prepareCommonArtifactSync,
   applyCommonArtifactSync,
 } from '../utils/ipc';
+import {
+  accentPanelStyle,
+  activeRepoCardStyle,
+  cardStyle,
+  directionArrowStyle,
+  directionNodeStyle,
+  greenPanelStyle,
+  inactiveRepoCardStyle,
+  mutedTextStyle,
+  pageStyle,
+  sectionHeaderStyle,
+  sourceTagStyle,
+  stepBadgeStyle,
+  swapButtonStyle,
+  targetTagStyle,
+  warmPanelStyle,
+} from './commonFlowStyles';
 
 const { Text, Title, Paragraph } = Typography;
 
@@ -85,6 +102,10 @@ type CommonDiffItem = {
   decision?: 'source' | 'target' | 'custom';
   customVal?: string;
 };
+
+const diffListHeight = 380;
+const diffRowHeight = 74;
+const diffListOverscan = 6;
 
 function normalizeDiffDisplayValue(value: unknown): string {
   return String(value ?? '')
@@ -127,119 +148,6 @@ function getIncompleteSyncPathMessage(
   return `${label} 的源路径和目标路径需要同时填写；如果不想同步该项，请两边都留空。`;
 }
 
-const pageStyle: React.CSSProperties = {
-  padding: 4,
-  color: 'var(--vscode-foreground)',
-};
-
-const cardStyle: React.CSSProperties = {
-  borderRadius: 12,
-  border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
-  background: 'var(--vscode-editor-background)',
-};
-
-const mutedTextStyle: React.CSSProperties = {
-  color: 'var(--vscode-descriptionForeground)',
-};
-
-const accentPanelStyle: React.CSSProperties = {
-  border: '1px solid var(--vscode-focusBorder, rgba(22,119,255,0.45))',
-  background:
-    'linear-gradient(135deg, rgba(22,119,255,0.18), rgba(82,196,26,0.08)), var(--vscode-editor-background)',
-};
-
-const warmPanelStyle: React.CSSProperties = {
-  border: '1px solid rgba(250, 173, 20, 0.38)',
-  background:
-    'linear-gradient(135deg, rgba(250,173,20,0.16), rgba(22,119,255,0.06)), var(--vscode-editor-background)',
-};
-
-const greenPanelStyle: React.CSSProperties = {
-  border: '1px solid rgba(82, 196, 26, 0.34)',
-  background:
-    'linear-gradient(135deg, rgba(82,196,26,0.14), rgba(22,119,255,0.05)), var(--vscode-editor-background)',
-};
-
-const sectionHeaderStyle: React.CSSProperties = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'flex-start',
-  gap: 12,
-  marginBottom: 14,
-};
-
-const sectionTitleStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-};
-
-const stepBadgeStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: 22,
-  height: 22,
-  borderRadius: '50%',
-  fontSize: 12,
-  fontWeight: 600,
-  background: 'var(--vscode-badge-background, rgba(22, 119, 255, 0.16))',
-  color: 'var(--vscode-badge-foreground, #ffffff)',
-};
-
-const directionNodeStyle: React.CSSProperties = {
-  flex: '1 1 220px',
-  minWidth: 220,
-  borderRadius: 12,
-  border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
-  background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))',
-  padding: '12px 14px',
-};
-
-const directionArrowStyle: React.CSSProperties = {
-  width: 54,
-  height: 54,
-  borderRadius: '50%',
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  border: '1px solid var(--vscode-focusBorder, rgba(22,119,255,0.45))',
-  background: 'linear-gradient(135deg, rgba(22,119,255,0.95), rgba(82,196,26,0.85))',
-  color: '#ffffff',
-  boxShadow: '0 6px 18px rgba(0,0,0,0.18)',
-  fontSize: 20,
-};
-
-const swapButtonStyle: React.CSSProperties = {
-  border: '1px solid rgba(250, 173, 20, 0.55)',
-  background: 'linear-gradient(135deg, rgba(250,173,20,0.95), rgba(250,140,22,0.9))',
-  color: '#1f1f1f',
-  fontWeight: 600,
-};
-
-const sourceTagStyle: React.CSSProperties = {
-  border: '1px solid rgba(22,119,255,0.45)',
-  background: 'rgba(22,119,255,0.16)',
-  color: 'var(--vscode-foreground)',
-};
-
-const targetTagStyle: React.CSSProperties = {
-  border: '1px solid rgba(82,196,26,0.45)',
-  background: 'rgba(82,196,26,0.16)',
-  color: 'var(--vscode-foreground)',
-};
-
-const activeRepoCardStyle: React.CSSProperties = {
-  background:
-    'color-mix(in srgb, var(--vscode-editor-background, #fff) 88%, var(--vscode-focusBorder, #1677ff))',
-  color: 'var(--vscode-foreground)',
-};
-
-const inactiveRepoCardStyle: React.CSSProperties = {
-  background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))',
-  color: 'var(--vscode-foreground)',
-};
-
 const CommonFlow: React.FC = () => {
   const dataDesignTree = useVscodePath();
   const dataNormTable = useVscodePath();
@@ -275,6 +183,7 @@ const CommonFlow: React.FC = () => {
   const [filterFileType, setFilterFileType] = useState<'all' | 'designTree' | 'normTable'>('all');
   const [filterDiffType, setFilterDiffType] = useState<string>('all');
   const [filterSheet, setFilterSheet] = useState<string>('all');
+  const [diffListScrollTop, setDiffListScrollTop] = useState(0);
   const [showValidationErrors, setShowValidationErrors] = useState<boolean>(false);
   const [precheckInfo, setPrecheckInfo] = useState<any>(null);
   const [syncReport, setSyncReport] = useState<any>(null);
@@ -646,6 +555,23 @@ const CommonFlow: React.FC = () => {
         return matchFile && matchType && matchSheet;
       });
   }, [diffItems, filterFileType, filterDiffType, filterSheet]);
+
+  useEffect(() => {
+    setDiffListScrollTop(0);
+  }, [filterFileType, filterDiffType, filterSheet, confirmModalOpen]);
+
+  const virtualDiffWindow = useMemo(() => {
+    const startIndex = Math.max(0, Math.floor(diffListScrollTop / diffRowHeight) - diffListOverscan);
+    const visibleCount = Math.ceil(diffListHeight / diffRowHeight) + diffListOverscan * 2;
+    const endIndex = Math.min(filteredItems.length, startIndex + visibleCount);
+    return {
+      startIndex,
+      endIndex,
+      items: filteredItems.slice(startIndex, endIndex),
+      topPadding: startIndex * diffRowHeight,
+      bottomPadding: Math.max(0, (filteredItems.length - endIndex) * diffRowHeight),
+    };
+  }, [diffListScrollTop, filteredItems]);
 
   const uniqueSheets = useMemo(() => {
     const sheets = new Set<string>();
@@ -1068,8 +994,12 @@ const CommonFlow: React.FC = () => {
               <Alert type="error" showIcon message={`尚有 ${unresolvedCount} 项差异未决定，请在列表中处理。`} />
             )}
 
-            <div style={{ height: 380, overflowY: 'auto', border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))', borderRadius: 8, padding: 6 }}>
-              {filteredItems.map((item) => {
+            <div
+              style={{ height: diffListHeight, overflowY: 'auto', border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))', borderRadius: 8, padding: 6 }}
+              onScroll={(event) => setDiffListScrollTop(event.currentTarget.scrollTop)}
+            >
+              <div style={{ height: virtualDiffWindow.topPadding }} />
+              {virtualDiffWindow.items.map((item) => {
                 const isSelected = item.id === activeDiffId;
                 const hasDecision = item.decision !== undefined;
                 const showErr = showValidationErrors && !hasDecision;
@@ -1102,6 +1032,7 @@ const CommonFlow: React.FC = () => {
                   </div>
                 );
               })}
+              <div style={{ height: virtualDiffWindow.bottomPadding }} />
             </div>
           </Space>
         </Col>

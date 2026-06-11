@@ -72,7 +72,7 @@
       "properties": {
         "dftIde.apiBase": {
           "type": "string",
-          "default": "http://pandas.hisi.huawei.com/dft-ide-server",
+          "default": "",
           "description": "DFT IDE backend API base URL, for example http://localhost:8080."
         },
         "dftIde.localProjectsRoot": {
@@ -157,7 +157,7 @@
         },
         "dftIde.gitlabHost": {
           "type": "string",
-          "default": "http://code-dg.hisi.huawei.com/DFT_IDE",
+          "default": "http://7.227.4.70/test11",
           "description": "gitlab host."
         }
       }
