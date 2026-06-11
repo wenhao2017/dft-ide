@@ -1,140 +1,28 @@
-diff --git a/src/extension.ts b/src/extension.ts
-index 44acac7..31ad2f1 100644
---- a/src/extension.ts
-+++ b/src/extension.ts
-@@ -23,7 +23,6 @@ const LOCAL_STATE_DIR_NAME = '.dft-ide';
- const LOCAL_STATE_SUBDIR = 'local-state';
- const OBS_READONLY_SCHEME = 'dft-obs-readonly';
- const PROJECT_REPOS = ['data', 'hibist', 'sailor', 'verification'] as const;
--const GITLAB_HOST = 'http://7.227.4.70/test11';
- 
- let currentPanel: vscode.WebviewPanel | undefined = undefined;
- let activeCategory: string | undefined = undefined;
-@@ -128,8 +127,11 @@ export function activate(context: vscode.ExtensionContext) {
- 
-   context.subscriptions.push(
-     vscode.commands.registerCommand('dftIde.whoami', async function (): Promise<string> {
--      const stdout = await executeShellCommand("whoami");
--      return stdout.split('\\')[1].trim().toLowerCase();
-+      let username = await executeShellCommand("whoami");
-+      if (username.includes('\\')) {
-+        username = username.split('\\')[1];
-+      }
-+      return username.trim().toLowerCase();
-     })
-   );
- 
-@@ -1599,8 +1601,11 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
-       case 'openGitlabHost': {
-         const requestId: string = msg.requestId;
-         const repoGitName = normalizeHistoryFlow(msg.repoGitName);
--        const config = vscode.workspace.getConfiguration('dftIde');
--        const gitlabHost = config.get<string>('gitlabHost', GITLAB_HOST).replace(/\/+$/, '');
-+
-+        let gitlabHost =
-+        process.env.GITLAB_HOST ??
-+        vscode.workspace.getConfiguration('dftIde').get<string>('gitlabHost', '');
-+        gitlabHost = gitlabHost.replace(/\/+$/, '');
- 
-         try {
-           const targetUrl = vscode.Uri.parse(`${gitlabHost}/${repoGitName}`);
-@@ -1853,7 +1858,7 @@ function getWebviewHtml(
-   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-   <meta http-equiv="Content-Security-Policy"
-         content="default-src 'none';
--                 connect-src http://localhost:* http://127.0.0.1:* https:;
-+                 connect-src http://localhost:* http://127.0.0.1:* http://pandas.hisi.huawei.com/dft-ide-server/ https:;
-                  style-src ${webview.cspSource} 'unsafe-inline';
-                  script-src 'nonce-${nonce}';
-                  font-src ${webview.cspSource};
-@@ -2435,6 +2440,7 @@ async function initProjectWorkspace(project:DftProject): Promise<string> {
-   const repoProjectPrefix = toGitLabProjectPrefix(projectName);
-   const repos: Array<{ key: string; gitlabProjectName: string; localPath: string }> = [];
-   const folders: Array<{ name: string; path: string }> = [];
-+  await setGitCredentialHelper();
-   for (const repo of PROJECT_REPOS) {
-     const repoItem = project.repos.find((item) => item.key === repo);
-     if (!repoItem) continue;
-@@ -2446,7 +2452,7 @@ async function initProjectWorkspace(project:DftProject): Promise<string> {
-       if (!repoItem.http_url_to_repo) {
-         throw new Error(`Missing clone URL for ${repoItem.gitlabProjectName}.`);
+diff -ruN --strip-trailing-cr '--exclude=.git' '--exclude=node_modules' '--exclude=out' '--exclude=dist' '--exclude=build' '--exclude=.vscode-test' '--exclude=coverage' '--exclude=*.vsix' '--exclude=changes.diff' dft-ide-gitlab/.env.example dft_ide/.env.example
+--- dft-ide-gitlab/.env.example	2026-06-11 19:11:04.000000000 +0800
++++ dft_ide/.env.example	2026-06-11 19:16:32.000000000 +0800
+@@ -1 +1,2 @@
+ DFT_IDE_API_BASE = http://localhost:8000
++GITLAB_HOST = http://7.227.4.70/test11
+\ No newline at end of file
+diff -ruN --strip-trailing-cr '--exclude=.git' '--exclude=node_modules' '--exclude=out' '--exclude=dist' '--exclude=build' '--exclude=.vscode-test' '--exclude=coverage' '--exclude=*.vsix' '--exclude=changes.diff' dft-ide-gitlab/package.json dft_ide/package.json
+--- dft-ide-gitlab/package.json	2026-06-11 19:11:04.000000000 +0800
++++ dft_ide/package.json	2026-06-11 19:16:32.000000000 +0800
+@@ -72,7 +72,7 @@
+       "properties": {
+         "dftIde.apiBase": {
+           "type": "string",
+-          "default": "http://pandas.hisi.huawei.com/dft-ide-server",
++          "default": "",
+           "description": "DFT IDE backend API base URL, for example http://localhost:8080."
+         },
+         "dftIde.localProjectsRoot": {
+@@ -157,7 +157,7 @@
+         },
+         "dftIde.gitlabHost": {
+           "type": "string",
+-          "default": "http://code-dg.hisi.huawei.com/DFT_IDE",
++          "default": "http://7.227.4.70/test11",
+           "description": "gitlab host."
+         }
        }
--      await executeFileCommand('git', ['clone', repoItem.http_url_to_repo], projectPath);
-+      await cloneRepoWithTerminal(repoItem.http_url_to_repo, projectPath);
-     }
-     await writeFileIfMissing(
-       vscode.Uri.joinPath(repoUri, 'README.md'),
-@@ -2481,6 +2487,42 @@ async function initProjectWorkspace(project:DftProject): Promise<string> {
-   return projectPath;
- }
- 
-+async function cloneRepoWithTerminal(repoUrl: string, projectPath: string) {
-+  const terminal = vscode.window.createTerminal({
-+    name: 'Git Clone',
-+    cwd: projectPath
-+  });
-+
-+  await new Promise<void>((resolve, reject) => {
-+    terminal.sendText(`git clone ${repoUrl}`);
-+    const disposable = vscode.window.onDidEndTerminalShellExecution(data => {
-+      disposable.dispose();
-+      if (data?.exitCode === 0) {
-+        terminal.dispose();
-+        resolve();
-+      } else {
-+        reject(new Error('Failed to clone the Git repository. See terminal logs for specific error details'));
-+      }
-+    });
-+  });
-+}
-+
-+async function setGitCredentialHelper() {
-+  if (process.platform !== 'linux') return;
-+  try {
-+    const stdout = await executeFileCommand('git', ['config', '--global', '--get', 'credential.helper']);
-+    if (!stdout.trim()) {
-+      throw new Error('No credential helper configured');
-+    }
-+  } catch {
-+    try {
-+      await executeFileCommand('git', ['config', '--global', 'credential.helper', 'cache']);
-+    } catch (error) {
-+      console.error('Failed to set git credential helper:', error);
-+    }
-+  }
-+}
-+
- async function writeDefaultLocalState(localStateUri: vscode.Uri, repos: {
-   key: string,
-   gitlabProjectName: string,
-diff --git a/src/webview/services/projectService.ts b/src/webview/services/projectService.ts
-index 8d180a2..1f43959 100644
---- a/src/webview/services/projectService.ts
-+++ b/src/webview/services/projectService.ts
-@@ -280,7 +280,7 @@ export async function fetchProjectMembers(projectId: string): Promise<ProjectMem
-     };
-   }
- 
--  const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/members`);
-+  const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/members/`);
-   if (!response.ok) {
-     throw new Error(`Fetch project members failed: ${response.status}`);
-   }
-@@ -370,7 +370,7 @@ export async function fetchUsers(): Promise<UserInfo[]> {
-     return [];
-   }
- 
--  const response = await fetch(`${apiBase}/api/dft-ide/users?state=active`);
-+  const response = await fetch(`${apiBase}/api/dft-ide/users/?state=active`);
-   if (!response.ok) {
-     throw new Error(`Fetch users failed: ${response.status}`);
-   }
-@@ -384,7 +384,7 @@ export async function fetchSingleUser(employeeId: string): Promise<UserInfo | nu
-     return null;
-   }
- 
--  const response = await fetch(`${apiBase}/api/dft-ide/users/${employeeId}`);
-+  const response = await fetch(`${apiBase}/api/dft-ide/users/${employeeId}/`);
-   if (!response.ok) {
-     // throw new Error(`Fetch user ${employeeId} failed: ${response.status}`);
-     return null;
