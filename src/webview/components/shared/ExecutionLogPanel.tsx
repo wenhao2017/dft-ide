@@ -1,86 +1,48 @@
 import React from 'react';
-import { Space, Typography } from 'antd';
-import { CheckCircleOutlined, CloseCircleOutlined, CodeOutlined, InfoCircleOutlined, WarningOutlined } from '@ant-design/icons';
+import { Button, Divider, Space } from 'antd';
+import { LeftOutlined, RightOutlined, SaveOutlined } from '@ant-design/icons';
+import PipelineExecutionOverview from '../shared/PipelineExecutionOverview';
+import ToolConfig from './ToolConfig';
 
-const { Text } = Typography;
-
-export type ExecutionStatus = 'idle' | 'running' | 'success' | 'error' | 'cancelled';
-
-export interface ExecutionLogPanelProps {
-  title: string;
-  logs: string[];
-  status?: ExecutionStatus;
-  minHeight?: number;
+interface Props {
+  onNext: () => void;
+  onPrev: () => void;
+  category?: string;
+  moduleKey?: string;
+  moduleKeys?: string[];
 }
 
-const getEventIcon = (log: string): { icon: React.ReactNode; color: string } => {
-  if (log.includes('[ERROR]')) return { icon: <CloseCircleOutlined />, color: '#cf1322' };
-  if (log.includes('[WARN]')) return { icon: <WarningOutlined />, color: '#d48806' };
-  if (log.includes('已发送') || log.includes('success')) return { icon: <CheckCircleOutlined />, color: '#389e0d' };
-  return { icon: <InfoCircleOutlined />, color: '#1677ff' };
-};
-
-const stripPrefix = (log: string): string => log.replace(/^\[(INFO|WARN|ERROR)\]\s*/, '');
-
-const ExecutionLogPanel: React.FC<ExecutionLogPanelProps> = ({
-  title,
-  logs,
-  minHeight = 128,
-}) => {
-  const commandLogs = logs.filter((log) => log.startsWith('$'));
-  const eventLogs = logs.filter((log) => !log.startsWith('$'));
-  const latestCommand = commandLogs[commandLogs.length - 1]?.slice(2);
+const Step3Execution: React.FC<Props> = ({ onNext, onPrev, category, moduleKeys = ['top_abc'], moduleKey}) => {
+  const repo = category?.toLowerCase() === 'sailor' ? 'sailor' : 'hibist';
+  const flowLabel = repo === 'sailor' ? 'Sailor' : 'DFTM';
 
   return (
-    <section
-      style={{
-        border: '1px solid var(--vscode-panel-border, #e5e7eb)',
-        borderRadius: 8,
-        padding: 16,
-        minHeight,
-        background: 'color-mix(in srgb, var(--vscode-editor-background, #fff) 96%, var(--vscode-focusBorder, #1677ff))',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <CodeOutlined style={{ color: 'var(--vscode-textLink-foreground, #1677ff)' }} />
-        <Text strong>{title}</Text>
-      </div>
+    <div>
+      <ToolConfig
+        moduleKey={moduleKey || ''}
+        category={category || ''}
+      />
+      <PipelineExecutionOverview
+        flowKey={repo}
+        flowLabel={flowLabel}
+        moduleKeys={moduleKeys}
+      />
 
-      {latestCommand && (
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 8,
-            border: '1px solid var(--vscode-input-border, #d9d9d9)',
-            borderRadius: 6,
-            padding: '6px 10px',
-            marginBottom: 12,
-            background: 'var(--vscode-input-background, #fff)',
-          }}
-        >
-          <Text type="secondary">Command</Text>
-          <Text code>{latestCommand}</Text>
-        </div>
-      )}
-
-      <div style={{ display: 'grid', gap: 8 }}>
-        {eventLogs.length === 0 ? (
-          <Text type="secondary">尚未发送执行请求。</Text>
-        ) : (
-          eventLogs.map((log, index) => {
-            const event = getEventIcon(log);
-            return (
-              <Space key={`${index}-${log}`} size={8} align="start">
-                <span style={{ color: event.color, lineHeight: '22px' }}>{event.icon}</span>
-                <Text>{stripPrefix(log)}</Text>
-              </Space>
-            );
-          })
-        )}
-      </div>
-    </section>
+      <Divider style={{ margin: '18px 0 14px' }} />
+      <Space style={{ width: '100%', justifyContent: 'flex-end' }} wrap>
+        <Button onClick={onPrev} icon={<LeftOutlined />}>
+          上一页
+        </Button>
+        <Button icon={<SaveOutlined />}>
+          保存
+        </Button>
+        <Button type="primary" onClick={onNext}>
+          下一页
+          <RightOutlined />
+        </Button>
+      </Space>
+    </div>
   );
 };
 
-export default ExecutionLogPanel;
+export default Step3Execution;
