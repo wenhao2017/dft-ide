@@ -98,11 +98,16 @@ function normalizeDiffDisplayValue(value: unknown): string {
     .trim();
 }
 
+function isSameDisplayValue(sourceVal: unknown, targetVal: unknown): boolean {
+  return normalizeDiffDisplayValue(sourceVal) === normalizeDiffDisplayValue(targetVal);
+}
+
 function shouldKeepDiffItem(item: CommonDiffItem): boolean {
   if (item.type !== 'fieldDifferent') {
     return true;
   }
-  return normalizeDiffDisplayValue(item.sourceVal) !== normalizeDiffDisplayValue(item.targetVal);
+
+  return !isSameDisplayValue(item.sourceVal, item.targetVal);
 }
 
 const pageStyle: React.CSSProperties = {
@@ -489,7 +494,7 @@ const CommonFlow: React.FC = () => {
     await handleSave(collectFormData());
     setCommitMsg('');
     setPushAfterCommit(false);
-    
+
     const src = syncDirection === 'dataToTarget' ? selectedDataRepo : selectedRepo;
     const tgt = syncDirection === 'dataToTarget' ? selectedRepo : selectedDataRepo;
     const srcDesign = syncDirection === 'dataToTarget' ? dataDesignTree.value : targetDesignTree.value;
@@ -506,7 +511,7 @@ const CommonFlow: React.FC = () => {
         targetNormTable: tgtTable,
         direction: syncDirection,
       });
-      
+
       if (res.success) {
         setPrecheckInfo(res.precheck);
         const nextDiffItems = Array.isArray(res.diffItems)
@@ -522,7 +527,7 @@ const CommonFlow: React.FC = () => {
       message.error(err?.message || '预检查失败');
       return;
     }
-    
+
     setWizardStep(0);
     setSelectedStrategy('manualMerge');
     setShowValidationErrors(false);
@@ -542,7 +547,8 @@ const CommonFlow: React.FC = () => {
 
   const handleApplySync = async () => {
     if (selectedStrategy === 'manualMerge') {
-      const unresolved = diffItems.filter(shouldKeepDiffItem).filter((item) => !item.decision);
+      const manualItems = diffItems.filter(shouldKeepDiffItem);
+      const unresolved = manualItems.filter((item) => !item.decision);
       if (unresolved.length > 0) {
         setShowValidationErrors(true);
         message.error(`存在 ${unresolved.length} 项未决策的差异，请先处理`);
@@ -567,7 +573,9 @@ const CommonFlow: React.FC = () => {
           const tgtTable = syncDirection === 'dataToTarget' ? targetNormTable.value : dataNormTable.value;
           const tgt = syncDirection === 'dataToTarget' ? selectedRepo : selectedDataRepo;
           const decisions = selectedStrategy === 'manualMerge'
-            ? diffItems.filter(shouldKeepDiffItem).map((item) => ({
+            ? diffItems
+              .filter(shouldKeepDiffItem)
+              .map((item) => ({
                 id: item.id,
                 choice: item.decision || 'target',
                 customValue: item.customVal,
@@ -729,7 +737,7 @@ const CommonFlow: React.FC = () => {
   );
 
   const renderDataSection = (step: number) => (
-    <Card size="small" style={{ ...cardStyle, ...greenPanelStyle, marginBottom: 14 }} styles={{body: {padding: 16}}}>
+    <Card size="small" style={{ ...cardStyle, ...greenPanelStyle, marginBottom: 14 }} styles={{ body: { padding: 16 } }}>
       <div style={sectionHeaderStyle}>
         {renderStepTitle(step, 'Data 公共仓', '公共输入文件的集中维护位置')}
         <Space size="small" wrap>
@@ -772,7 +780,7 @@ const CommonFlow: React.FC = () => {
   );
 
   const renderTargetSection = (step: number) => (
-    <Card size="small" style={{ ...cardStyle, ...warmPanelStyle, marginBottom: 14 }} styles={{body: {padding: 16}}}>
+    <Card size="small" style={{ ...cardStyle, ...warmPanelStyle, marginBottom: 14 }} styles={{ body: { padding: 16 } }}>
       <div style={sectionHeaderStyle}>
         {renderStepTitle(step, '目标流程仓', '选择 Hibist / Sailor / 验证仓，并配置接收文件路径')}
         <Space size="small" wrap>
@@ -998,8 +1006,9 @@ const CommonFlow: React.FC = () => {
   };
 
   const renderManualMergeScreen = () => {
-    const activeItem = diffItems.find((item) => item.id === activeDiffId);
-    const unresolvedCount = diffItems.filter((item) => !item.decision).length;
+    const manualItems = diffItems.filter(shouldKeepDiffItem);
+    const activeItem = manualItems.find((item) => item.id === activeDiffId);
+    const unresolvedCount = manualItems.filter((item) => !item.decision).length;
 
     return (
       <Row gutter={16}>
@@ -1081,12 +1090,12 @@ const CommonFlow: React.FC = () => {
                 <Row gutter={12}>
                   <Col span={12}>
                     <Card size="small" title="来源值" style={{ height: 130, overflowY: 'auto' }}>
-                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(activeItem.sourceVal || '(空/不存在)')}</Text>
+                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{activeItem.sourceVal || '(空/不存在)'}</Text>
                     </Card>
                   </Col>
                   <Col span={12}>
                     <Card size="small" title="目标值" style={{ height: 130, overflowY: 'auto' }}>
-                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(activeItem.targetVal || '(空/不存在)')}</Text>
+                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{activeItem.targetVal || '(空/不存在)'}</Text>
                     </Card>
                   </Col>
                 </Row>
@@ -1168,10 +1177,10 @@ const CommonFlow: React.FC = () => {
           </Space>
         </Card>
 
-        <div style={{ 
-          background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))', 
-          padding: '12px 14px', 
-          borderRadius: 8, 
+        <div style={{
+          background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))',
+          padding: '12px 14px',
+          borderRadius: 8,
           border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.22))',
           display: 'flex',
           justifyContent: 'space-between',
@@ -1209,7 +1218,7 @@ const CommonFlow: React.FC = () => {
           />
         )}
 
-        <Card size="small" style={{ ...cardStyle, ...accentPanelStyle, marginBottom: 14 }} styles={{body: {padding: 18}}}>
+        <Card size="small" style={{ ...cardStyle, ...accentPanelStyle, marginBottom: 14 }} styles={{ body: { padding: 18 } }}>
           <div style={sectionHeaderStyle}>
             <div>
               <Space size={8} wrap>
@@ -1249,7 +1258,7 @@ const CommonFlow: React.FC = () => {
           </>
         )}
 
-        <Card size="small" style={{ ...cardStyle, border: '1px solid rgba(22,119,255,0.35)' }} styles={{body: {padding: 16}}}>
+        <Card size="small" style={{ ...cardStyle, border: '1px solid rgba(22,119,255,0.35)' }} styles={{ body: { padding: 16 } }}>
           <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
             <Space direction="vertical" size={2}>
               <Space size={6}>
@@ -1276,7 +1285,7 @@ const CommonFlow: React.FC = () => {
                   fontWeight: 700,
                   boxShadow: '0 6px 16px rgba(22,119,255,0.24)',
                 }}
-                // disabled={syncDirection === 'targetToData' && !canManageMembers }
+              // disabled={syncDirection === 'targetToData' && !canManageMembers }
               >
                 {primaryButtonText}
               </Button>
@@ -1308,31 +1317,31 @@ const CommonFlow: React.FC = () => {
         >
           <div style={{ marginTop: 12, marginBottom: 20 }}>
             {/* Steps bar */}
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
               alignItems: 'center',
               borderBottom: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
               paddingBottom: 12,
               marginBottom: 16
             }}>
               <Space size="large">
-                <span style={{ 
-                  fontWeight: wizardStep === 0 ? 'bold' : 'normal', 
+                <span style={{
+                  fontWeight: wizardStep === 0 ? 'bold' : 'normal',
                   color: wizardStep === 0 ? 'var(--vscode-focusBorder)' : 'var(--vscode-descriptionForeground)'
                 }}>
                   1. 预检查与策略选择
                 </span>
                 <Text type="secondary">/</Text>
-                <span style={{ 
-                  fontWeight: wizardStep === 1 ? 'bold' : 'normal', 
+                <span style={{
+                  fontWeight: wizardStep === 1 ? 'bold' : 'normal',
                   color: wizardStep === 1 ? 'var(--vscode-focusBorder)' : 'var(--vscode-descriptionForeground)'
                 }}>
                   2. 差异确认
                 </span>
                 <Text type="secondary">/</Text>
-                <span style={{ 
-                  fontWeight: wizardStep === 2 ? 'bold' : 'normal', 
+                <span style={{
+                  fontWeight: wizardStep === 2 ? 'bold' : 'normal',
                   color: wizardStep === 2 ? 'var(--vscode-focusBorder)' : 'var(--vscode-descriptionForeground)'
                 }}>
                   3. 同步合并报告
