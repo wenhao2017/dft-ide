@@ -9,6 +9,7 @@ import { obsService } from './services/obsService';
 import {
   buildCommonSyncArtifacts,
   buildWorkbookDiffItems,
+  areSpreadsheetFilesIdentical,
   isSpreadsheetFile,
   mergeWorkbookArtifact,
 } from './services/commonWorkbookSyncService';
@@ -3587,7 +3588,10 @@ async function prepareCommonArtifactSyncToRepo(options: SyncPrecheckOptions) {
   const targetLabel = targetRepo === 'data' ? 'Data' : repoLabels[targetRepo];
   const design = artifacts.find((item) => item.key === 'designTree');
   const norm = artifacts.find((item) => item.key === 'normTable');
-  const diffItems = artifacts.flatMap((artifact) => buildWorkbookDiffItems(artifact));
+  const diffGroups = await Promise.all(
+    artifacts.map(async (artifact) => buildWorkbookDiffItems(artifact))
+  );
+  const diffItems = diffGroups.flat();
   const designDiffCount = diffItems.filter((item) => item.fileType === 'designTree').length;
   const normTableDiffCount = diffItems.filter((item) => item.fileType === 'normTable').length;
 
@@ -3655,6 +3659,9 @@ async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
 
   if (strategy === 'overwrite') {
     for (const artifact of artifacts) {
+      if (areSpreadsheetFilesIdentical(artifact.source, artifact.target)) {
+        continue;
+      }
       await ensureLocalConfigDirectory(path.dirname(artifact.target));
       await vscode.workspace.fs.copy(vscode.Uri.file(artifact.source), vscode.Uri.file(artifact.target), { overwrite: true });
       changedFiles.push({
@@ -3665,7 +3672,10 @@ async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
     }
   } else {
     for (const artifact of artifacts) {
-      await mergeWorkbookArtifact(artifact, strategy, decisions);
+      const changed = await mergeWorkbookArtifact(artifact, strategy, decisions);
+      if (!changed) {
+        continue;
+      }
       changedFiles.push({
         label: artifact.label,
         path: artifact.target,

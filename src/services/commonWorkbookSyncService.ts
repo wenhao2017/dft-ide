@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import * as XLSX from 'xlsx';
 
 export interface CommonSyncArtifactInput {
@@ -120,31 +121,54 @@ const workbookReadOptions: XLSX.ParsingOptions = {
   cellStyles: true,
 };
 
+export function areSpreadsheetFilesIdentical(sourcePath: string, targetPath: string): boolean {
+  if (!fs.existsSync(sourcePath) || !fs.existsSync(targetPath)) {
+    return false;
+  }
+
+  const sourceStat = fs.statSync(sourcePath);
+  const targetStat = fs.statSync(targetPath);
+  if (!sourceStat.isFile() || !targetStat.isFile() || sourceStat.size !== targetStat.size) {
+    return false;
+  }
+
+  return hashFile(sourcePath) === hashFile(targetPath);
+}
+
 export function buildWorkbookDiffItems(artifact: CommonSyncArtifact): CommonSyncDiffItem[] {
+  if (areSpreadsheetFilesIdentical(artifact.source, artifact.target)) {
+    return [];
+  }
+
   const sourceBook = readWorkbookFile(artifact.source);
   const targetBook = fs.existsSync(artifact.target)
     ? readWorkbookFile(artifact.target)
     : XLSX.utils.book_new();
-  const sourceSheets = buildWorkbookSheetModels(sourceBook);
-  const targetSheets = buildWorkbookSheetModels(targetBook);
+  const sourceSheetSignatures = buildWorkbookSheetSignatures(sourceBook);
+  const targetSheetSignatures = buildWorkbookSheetSignatures(targetBook);
   const items: CommonSyncDiffItem[] = [];
-  const sheetNames = new Set([...sourceSheets.keys(), ...targetSheets.keys()]);
+  const sheetNames = new Set([...sourceBook.SheetNames, ...targetBook.SheetNames]);
 
   for (const sheetName of sheetNames) {
-    const sourceSheet = sourceSheets.get(sheetName);
-    const targetSheet = targetSheets.get(sheetName);
-    if (sourceSheet && !targetSheet) {
+    const sourceWorksheet = sourceBook.Sheets[sheetName];
+    const targetWorksheet = targetBook.Sheets[sheetName];
+    if (sourceWorksheet && !targetWorksheet) {
       items.push(makeWorkbookDiffItem(artifact, sheetName, sheetName, '', 'sheetAdded', 'Sheet exists', ''));
       continue;
     }
-    if (!sourceSheet && targetSheet) {
+    if (!sourceWorksheet && targetWorksheet) {
       items.push(makeWorkbookDiffItem(artifact, sheetName, sheetName, '', 'sheetRedundant', '', 'Sheet exists'));
       continue;
     }
-    if (!sourceSheet || !targetSheet) {
+    if (!sourceWorksheet || !targetWorksheet) {
+      continue;
+    }
+    if (sourceSheetSignatures.get(sheetName) === targetSheetSignatures.get(sheetName)) {
       continue;
     }
 
+    const sourceSheet = buildWorkbookSheetModel(sheetName, sourceWorksheet);
+    const targetSheet = buildWorkbookSheetModel(sheetName, targetWorksheet);
     const rowKeys = new Set([...sourceSheet.rowByKey.keys(), ...targetSheet.rowByKey.keys()]);
     for (const rowKey of rowKeys) {
       const sourceRow = sourceSheet.rowByKey.get(rowKey);
@@ -192,54 +216,65 @@ export async function mergeWorkbookArtifact(
   artifact: CommonSyncArtifact,
   strategy: string,
   decisions: Array<{ id: string; choice: 'source' | 'target' | 'custom'; customValue?: string }>
-): Promise<void> {
+): Promise<boolean> {
+  if (areSpreadsheetFilesIdentical(artifact.source, artifact.target)) {
+    return false;
+  }
+
   if (!fs.existsSync(artifact.target)) {
     fs.mkdirSync(path.dirname(artifact.target), { recursive: true });
     await vscode.workspace.fs.copy(vscode.Uri.file(artifact.source), vscode.Uri.file(artifact.target), { overwrite: true });
-    return;
+    return true;
   }
 
   const sourceBook = readWorkbookFile(artifact.source);
   const targetBook = fs.existsSync(artifact.target)
     ? readWorkbookFile(artifact.target)
     : XLSX.utils.book_new();
-  const sourceSheets = buildWorkbookSheetModels(sourceBook);
-  const targetSheets = buildWorkbookSheetModels(targetBook);
+  const sourceSheetSignatures = buildWorkbookSheetSignatures(sourceBook);
+  const targetSheetSignatures = buildWorkbookSheetSignatures(targetBook);
   const decisionMap = new Map(decisions.map((decision) => [decision.id, decision]));
-  const sheetNames = new Set([...sourceSheets.keys(), ...targetSheets.keys()]);
+  const sheetNames = new Set([...sourceBook.SheetNames, ...targetBook.SheetNames]);
   const mergedBook = createMergedWorkbook(sourceBook);
 
   for (const sheetName of sheetNames) {
-    const sourceSheet = sourceSheets.get(sheetName);
-    const targetSheet = targetSheets.get(sheetName);
+    const sourceWorksheet = sourceBook.Sheets[sheetName];
+    const targetWorksheet = targetBook.Sheets[sheetName];
     const sheetAddedId = makeWorkbookDiffId(artifact.key, sheetName, sheetName, '');
     const sheetRedundantId = makeWorkbookDiffId(artifact.key, sheetName, sheetName, '');
 
-    if (sourceSheet && !targetSheet) {
+    if (sourceWorksheet && !targetWorksheet) {
       const choice = resolveWorkbookChoice(strategy, decisionMap.get(sheetAddedId), 'source');
       if (choice === 'source') {
-        appendWorksheet(mergedBook, sheetName, cloneWorksheet(sourceBook.Sheets[sheetName]));
+        appendWorksheet(mergedBook, sheetName, cloneWorksheet(sourceWorksheet));
       }
       continue;
     }
 
-    if (!sourceSheet && targetSheet) {
+    if (!sourceWorksheet && targetWorksheet) {
       const choice = resolveWorkbookChoice(strategy, decisionMap.get(sheetRedundantId), 'source');
       if (choice === 'target') {
-        appendWorksheet(mergedBook, sheetName, cloneWorksheet(targetBook.Sheets[sheetName]));
+        appendWorksheet(mergedBook, sheetName, cloneWorksheet(targetWorksheet));
       }
       continue;
     }
 
-    if (!sourceSheet || !targetSheet) {
+    if (!sourceWorksheet || !targetWorksheet) {
       continue;
     }
 
+    if (sourceSheetSignatures.get(sheetName) === targetSheetSignatures.get(sheetName)) {
+      appendWorksheet(mergedBook, sheetName, cloneWorksheet(sourceWorksheet));
+      continue;
+    }
+
+    const sourceSheet = buildWorkbookSheetModel(sheetName, sourceWorksheet);
+    const targetSheet = buildWorkbookSheetModel(sheetName, targetWorksheet);
     const mergedSheet = mergeSheetWorksheet(
       artifact,
       sheetName,
-      sourceBook.Sheets[sheetName],
-      targetBook.Sheets[sheetName],
+      sourceWorksheet,
+      targetWorksheet,
       sourceSheet,
       targetSheet,
       strategy,
@@ -253,10 +288,41 @@ export async function mergeWorkbookArtifact(
   }
   fs.mkdirSync(path.dirname(artifact.target), { recursive: true });
   XLSX.writeFile(mergedBook, artifact.target, { bookType: getWorkbookBookType(artifact.target) });
+  return true;
 }
 
 function readWorkbookFile(filePath: string): XLSX.WorkBook {
   return XLSX.readFile(filePath, workbookReadOptions);
+}
+
+function hashFile(filePath: string): string {
+  const hash = crypto.createHash('sha256');
+  hash.update(fs.readFileSync(filePath));
+  return hash.digest('hex');
+}
+
+function buildWorkbookSheetSignatures(workbook: XLSX.WorkBook): Map<string, string> {
+  const signatures = new Map<string, string>();
+  for (const sheetName of workbook.SheetNames) {
+    signatures.set(sheetName, createSheetSignature(workbook.Sheets[sheetName]));
+  }
+  return signatures;
+}
+
+function createSheetSignature(worksheet: XLSX.WorkSheet): string {
+  const hash = crypto.createHash('sha256');
+  hash.update(String(worksheet['!ref'] ?? ''));
+  const cellAddresses = Object.keys(worksheet)
+    .filter((key) => !key.startsWith('!'))
+    .sort();
+  for (const address of cellAddresses) {
+    const cell = (worksheet as Record<string, XLSX.CellObject | undefined>)[address];
+    hash.update('\0');
+    hash.update(address);
+    hash.update('\0');
+    hash.update(normalizeCellValue(cell?.v));
+  }
+  return hash.digest('hex');
 }
 
 function createMergedWorkbook(sourceBook: XLSX.WorkBook): XLSX.WorkBook {
@@ -589,51 +655,74 @@ function cloneWorksheet(worksheet: XLSX.WorkSheet): XLSX.WorkSheet {
 }
 
 function cloneWorkbookValue<T>(value: T): T {
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
   if (value instanceof Date) {
     return new Date(value.getTime()) as T;
   }
-  if (Array.isArray(value)) {
-    return value.map((item) => cloneWorkbookValue(item)) as T;
-  }
-  if (value && typeof value === 'object') {
-    const cloned: Record<string, unknown> = {};
-    for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
-      cloned[key] = cloneWorkbookValue(nestedValue);
+
+  const root = Array.isArray(value) ? [] : {};
+  const seen = new WeakMap<object, unknown>([[value as object, root]]);
+  const stack: Array<{ source: Record<string, unknown> | unknown[]; target: Record<string, unknown> | unknown[] }> = [
+    { source: value as Record<string, unknown> | unknown[], target: root as Record<string, unknown> | unknown[] },
+  ];
+
+  while (stack.length > 0) {
+    const { source, target } = stack.pop()!;
+
+    for (const [key, nestedValue] of Object.entries(source)) {
+      if (!nestedValue || typeof nestedValue !== 'object') {
+        (target as Record<string, unknown>)[key] = nestedValue;
+        continue;
+      }
+
+      if (nestedValue instanceof Date) {
+        (target as Record<string, unknown>)[key] = new Date(nestedValue.getTime());
+        continue;
+      }
+
+      const nestedObject = nestedValue as Record<string, unknown> | unknown[];
+      const existing = seen.get(nestedObject);
+      if (existing) {
+        (target as Record<string, unknown>)[key] = existing;
+        continue;
+      }
+
+      const cloned = Array.isArray(nestedValue) ? [] : {};
+      seen.set(nestedObject, cloned);
+      (target as Record<string, unknown>)[key] = cloned;
+      stack.push({ source: nestedObject, target: cloned as Record<string, unknown> | unknown[] });
     }
-    return cloned as T;
   }
-  return value;
+
+  return root as T;
 }
 
-function buildWorkbookSheetModels(workbook: XLSX.WorkBook): Map<string, WorkbookSheetModel> {
-  const models = new Map<string, WorkbookSheetModel>();
-  for (const sheetName of workbook.SheetNames) {
-    const sheet = workbook.Sheets[sheetName];
-    const rows = normalizeWorksheetRows(XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: '', blankrows: true }));
-    if (rows.length === 0) {
-      models.set(sheetName, { name: sheetName, rows: [], headers: [], rowKeys: [], rowEntries: [], rowByKey: new Map() });
-      continue;
-    }
-    const headers = rows[0].map((value, index) => value || `Column ${index + 1}`);
-    const keyIndex = findKeyColumnIndex(headers);
-    const rowKeys: string[] = [];
-    const rowEntries: WorkbookRowEntry[] = [];
-    const rowByKey = new Map<string, WorkbookRowModel>();
-    rows.slice(1).forEach((row, offset) => {
-      const rowIndex = offset + 1;
-      if (row.every((value) => value === '')) {
-        rowEntries.push({ kind: 'blank', rowIndex });
-        return;
-      }
-      const rawKey = (row[keyIndex] || row.find((value) => value !== '') || `row-${rowIndex + 1}`).trim();
-      const key = makeUniqueRowKey(rowByKey, rawKey || `row-${rowIndex + 1}`);
-      rowKeys.push(key);
-      rowEntries.push({ kind: 'data', key, rowIndex });
-      rowByKey.set(key, { rowIndex, values: row, signature: createRowSignature(row) });
-    });
-    models.set(sheetName, { name: sheetName, rows, headers, rowKeys, rowEntries, rowByKey });
+function buildWorkbookSheetModel(sheetName: string, sheet: XLSX.WorkSheet): WorkbookSheetModel {
+  const rows = normalizeWorksheetRows(XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: '', blankrows: true }));
+  if (rows.length === 0) {
+    return { name: sheetName, rows: [], headers: [], rowKeys: [], rowEntries: [], rowByKey: new Map() };
   }
-  return models;
+  const headers = rows[0].map((value, index) => value || `Column ${index + 1}`);
+  const keyIndex = findKeyColumnIndex(headers);
+  const rowKeys: string[] = [];
+  const rowEntries: WorkbookRowEntry[] = [];
+  const rowByKey = new Map<string, WorkbookRowModel>();
+  rows.slice(1).forEach((row, offset) => {
+    const rowIndex = offset + 1;
+    if (row.every((value) => value === '')) {
+      rowEntries.push({ kind: 'blank', rowIndex });
+      return;
+    }
+    const rawKey = (row[keyIndex] || row.find((value) => value !== '') || `row-${rowIndex + 1}`).trim();
+    const key = makeUniqueRowKey(rowByKey, rawKey || `row-${rowIndex + 1}`);
+    rowKeys.push(key);
+    rowEntries.push({ kind: 'data', key, rowIndex });
+    rowByKey.set(key, { rowIndex, values: row, signature: createRowSignature(row) });
+  });
+  return { name: sheetName, rows, headers, rowKeys, rowEntries, rowByKey };
 }
 
 function normalizeWorksheetRows(rows: string[][]): string[][] {
