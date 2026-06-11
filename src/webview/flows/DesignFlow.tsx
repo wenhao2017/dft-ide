@@ -22,27 +22,28 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
 
   const steps = [
     {
-      title: '公共配置',
+      title: '环境配置',
       description: '路径与模块',
       content: <Step1CommonConfig onNext={nextStep} category={category} />,
     },
-    {
-      title: '工具配置',
-      description: '版本与资源',
-      content: (
-        <Step2ToolConfig
-          moduleKey={selectedModule}
-          onNext={nextStep}
-          onPrev={prevStep}
-          category={category}
-        />
-      ),
-    },
+    // {
+    //   title: '工具配置',
+    //   description: '版本与资源',
+    //   content: (
+    //     <Step2ToolConfig
+    //       moduleKey={selectedModule}
+    //       onNext={nextStep}
+    //       onPrev={prevStep}
+    //       category={category}
+    //     />
+    //   ),
+    // },
     {
       title: '执行配置',
       description: '脚本与任务',
       content: (
         <Step3Execution
+          moduleKey={selectedModule}
           onNext={nextStep}
           onPrev={prevStep}
           category={category}
