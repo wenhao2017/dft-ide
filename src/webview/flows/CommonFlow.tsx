@@ -72,6 +72,39 @@ const repoShortLabels: Record<RepoKey, string> = {
   verification: '验证仓',
 };
 
+type CommonDiffItem = {
+  id: string;
+  fileType: 'designTree' | 'normTable';
+  fileName?: string;
+  sheetName?: string;
+  key?: string;
+  fieldName?: string;
+  type: string;
+  sourceVal?: unknown;
+  targetVal?: unknown;
+  decision?: 'source' | 'target' | 'custom';
+  customVal?: string;
+};
+
+function normalizeDiffDisplayValue(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .replace(/\uFEFF/g, '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F]/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[\u0009\u000B\u000C\u0020\u00A0\u1680\u180E\u2000-\u200A\u202F\u205F\u3000]/g, ' ')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+function shouldKeepDiffItem(item: CommonDiffItem): boolean {
+  if (item.type !== 'fieldDifferent') {
+    return true;
+  }
+  return normalizeDiffDisplayValue(item.sourceVal) !== normalizeDiffDisplayValue(item.targetVal);
+}
+
 const pageStyle: React.CSSProperties = {
   padding: 4,
   color: 'var(--vscode-foreground)',
@@ -215,7 +248,7 @@ const CommonFlow: React.FC = () => {
   // Wizard state declarations for advanced common file synchronization
   const [wizardStep, setWizardStep] = useState<number>(0);
   const [selectedStrategy, setSelectedStrategy] = useState<'overwrite' | 'autoMerge' | 'manualMerge'>('manualMerge');
-  const [diffItems, setDiffItems] = useState<any[]>([]);
+  const [diffItems, setDiffItems] = useState<CommonDiffItem[]>([]);
   const [activeDiffId, setActiveDiffId] = useState<string | null>(null);
   const [filterFileType, setFilterFileType] = useState<'all' | 'designTree' | 'normTable'>('all');
   const [filterDiffType, setFilterDiffType] = useState<string>('all');
@@ -476,7 +509,9 @@ const CommonFlow: React.FC = () => {
       
       if (res.success) {
         setPrecheckInfo(res.precheck);
-        const nextDiffItems = Array.isArray(res.diffItems) ? res.diffItems : [];
+        const nextDiffItems = Array.isArray(res.diffItems)
+          ? (res.diffItems as CommonDiffItem[]).filter(shouldKeepDiffItem)
+          : [];
         setDiffItems(nextDiffItems);
         setActiveDiffId(nextDiffItems[0]?.id || null);
       } else {
@@ -507,7 +542,7 @@ const CommonFlow: React.FC = () => {
 
   const handleApplySync = async () => {
     if (selectedStrategy === 'manualMerge') {
-      const unresolved = diffItems.filter((item) => !item.decision);
+      const unresolved = diffItems.filter(shouldKeepDiffItem).filter((item) => !item.decision);
       if (unresolved.length > 0) {
         setShowValidationErrors(true);
         message.error(`存在 ${unresolved.length} 项未决策的差异，请先处理`);
@@ -532,7 +567,7 @@ const CommonFlow: React.FC = () => {
           const tgtTable = syncDirection === 'dataToTarget' ? targetNormTable.value : dataNormTable.value;
           const tgt = syncDirection === 'dataToTarget' ? selectedRepo : selectedDataRepo;
           const decisions = selectedStrategy === 'manualMerge'
-            ? diffItems.map((item) => ({
+            ? diffItems.filter(shouldKeepDiffItem).map((item) => ({
                 id: item.id,
                 choice: item.decision || 'target',
                 customValue: item.customVal,
@@ -569,17 +604,19 @@ const CommonFlow: React.FC = () => {
   };
 
   const filteredItems = useMemo(() => {
-    return diffItems.filter((item) => {
-      const matchFile = filterFileType === 'all' || item.fileType === filterFileType;
-      const matchType = filterDiffType === 'all' || item.type === filterDiffType;
-      const matchSheet = filterSheet === 'all' || item.sheetName === filterSheet;
-      return matchFile && matchType && matchSheet;
-    });
+    return diffItems
+      .filter(shouldKeepDiffItem)
+      .filter((item) => {
+        const matchFile = filterFileType === 'all' || item.fileType === filterFileType;
+        const matchType = filterDiffType === 'all' || item.type === filterDiffType;
+        const matchSheet = filterSheet === 'all' || item.sheetName === filterSheet;
+        return matchFile && matchType && matchSheet;
+      });
   }, [diffItems, filterFileType, filterDiffType, filterSheet]);
 
   const uniqueSheets = useMemo(() => {
     const sheets = new Set<string>();
-    diffItems.forEach((item) => {
+    diffItems.filter(shouldKeepDiffItem).forEach((item) => {
       if (item.sheetName) sheets.add(item.sheetName);
     });
     return Array.from(sheets);
@@ -1044,12 +1081,12 @@ const CommonFlow: React.FC = () => {
                 <Row gutter={12}>
                   <Col span={12}>
                     <Card size="small" title="来源值" style={{ height: 130, overflowY: 'auto' }}>
-                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{activeItem.sourceVal || '(空/不存在)'}</Text>
+                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(activeItem.sourceVal || '(空/不存在)')}</Text>
                     </Card>
                   </Col>
                   <Col span={12}>
                     <Card size="small" title="目标值" style={{ height: 130, overflowY: 'auto' }}>
-                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{activeItem.targetVal || '(空/不存在)'}</Text>
+                      <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(activeItem.targetVal || '(空/不存在)')}</Text>
                     </Card>
                   </Col>
                 </Row>

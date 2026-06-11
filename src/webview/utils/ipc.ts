@@ -586,7 +586,7 @@ export async function prepareCommonArtifactSync(options: {
   availableStrategies: string[];
   error?: string;
 }> {
-  const res = await ipcRequest('prepareCommonArtifactSync', options, 60_000);
+  const res = await ipcRequest('prepareCommonArtifactSync', options, 10 * 60_000);
   return res as any;
 }
 
@@ -606,7 +606,7 @@ export async function applyCommonArtifactSync(options: {
   files: any[];
   error?: string;
 }> {
-  const res = await ipcRequest('applyCommonArtifactSync', options, 90_000);
+  const res = await ipcRequest('applyCommonArtifactSync', options, 10 * 90_000);
   return res as any;
 }
 
