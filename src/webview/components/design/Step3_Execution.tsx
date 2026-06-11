@@ -1,21 +1,27 @@
 import React from 'react';
 import { Button, Divider, Space } from 'antd';
-import { LeftOutlined, RightOutlined } from '@ant-design/icons';
+import { LeftOutlined, RightOutlined, SaveOutlined } from '@ant-design/icons';
 import PipelineExecutionOverview from '../shared/PipelineExecutionOverview';
+import ToolConfig from './ToolConfig';
 
 interface Props {
   onNext: () => void;
   onPrev: () => void;
   category?: string;
+  moduleKey?: string;
   moduleKeys?: string[];
 }
 
-const Step3Execution: React.FC<Props> = ({ onNext, onPrev, category, moduleKeys = ['top_abc'] }) => {
+const Step3Execution: React.FC<Props> = ({ onNext, onPrev, category, moduleKeys = ['top_abc'], moduleKey}) => {
   const repo = category?.toLowerCase() === 'sailor' ? 'sailor' : 'hibist';
   const flowLabel = repo === 'sailor' ? 'Sailor' : 'DFTM';
 
   return (
     <div>
+      <ToolConfig
+        moduleKey={moduleKey || ''}
+        category={category || ''}
+      />
       <PipelineExecutionOverview
         flowKey={repo}
         flowLabel={flowLabel}
@@ -26,6 +32,9 @@ const Step3Execution: React.FC<Props> = ({ onNext, onPrev, category, moduleKeys 
       <Space style={{ width: '100%', justifyContent: 'flex-end' }} wrap>
         <Button onClick={onPrev} icon={<LeftOutlined />}>
           上一页
+        </Button>
+        <Button icon={<SaveOutlined />}>
+          保存
         </Button>
         <Button type="primary" onClick={onNext}>
           下一页
