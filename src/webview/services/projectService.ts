@@ -280,7 +280,7 @@ export async function fetchProjectMembers(projectId: string): Promise<ProjectMem
     };
   }
 
-  const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/members`);
+  const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/members/`);
   if (!response.ok) {
     throw new Error(`Fetch project members failed: ${response.status}`);
   }
@@ -370,7 +370,7 @@ export async function fetchUsers(): Promise<UserInfo[]> {
     return [];
   }
 
-  const response = await fetch(`${apiBase}/api/dft-ide/users?state=active`);
+  const response = await fetch(`${apiBase}/api/dft-ide/users/?state=active`);
   if (!response.ok) {
     throw new Error(`Fetch users failed: ${response.status}`);
   }
@@ -384,7 +384,7 @@ export async function fetchSingleUser(employeeId: string): Promise<UserInfo | nu
     return null;
   }
 
-  const response = await fetch(`${apiBase}/api/dft-ide/users/${employeeId}`);
+  const response = await fetch(`${apiBase}/api/dft-ide/users/${employeeId}/`);
   if (!response.ok) {
     // throw new Error(`Fetch user ${employeeId} failed: ${response.status}`);
     return null;

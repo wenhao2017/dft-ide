@@ -21,7 +21,6 @@ const LOCAL_STATE_DIR_NAME = '.dft-ide';
 const LOCAL_STATE_SUBDIR = 'local-state';
 const OBS_READONLY_SCHEME = 'dft-obs-readonly';
 const PROJECT_REPOS = ['data', 'hibist', 'sailor', 'verification'] as const;
-const GITLAB_HOST = 'http://7.227.4.70/test11';
 
 let currentPanel: vscode.WebviewPanel | undefined = undefined;
 let activeCategory: string | undefined = undefined;
@@ -126,8 +125,11 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('dftIde.whoami', async function (): Promise<string> {
-      const stdout = await executeShellCommand("whoami");
-      return stdout.split('\\')[1].trim().toLowerCase();
+      let username = await executeShellCommand("whoami");
+      if (username.includes('\\')) {
+        username = username.split('\\')[1];
+      }
+      return username.trim().toLowerCase();
     })
   );
 
@@ -1597,8 +1599,11 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'openGitlabHost': {
         const requestId: string = msg.requestId;
         const repoGitName = normalizeHistoryFlow(msg.repoGitName);
-        const config = vscode.workspace.getConfiguration('dftIde');
-        const gitlabHost = config.get<string>('gitlabHost', GITLAB_HOST).replace(/\/+$/, '');
+
+        let gitlabHost =
+        process.env.GITLAB_HOST ??
+        vscode.workspace.getConfiguration('dftIde').get<string>('gitlabHost', '');
+        gitlabHost = gitlabHost.replace(/\/+$/, '');
 
         try {
           const targetUrl = vscode.Uri.parse(`${gitlabHost}/${repoGitName}`);
@@ -1851,7 +1856,7 @@ function getWebviewHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'none';
-                 connect-src http://localhost:* http://127.0.0.1:* https:;
+                 connect-src http://localhost:* http://127.0.0.1:* http://pandas.hisi.huawei.com/dft-ide-server/ https:;
                  style-src ${webview.cspSource} 'unsafe-inline';
                  script-src 'nonce-${nonce}';
                  font-src ${webview.cspSource};
@@ -2433,6 +2438,7 @@ async function initProjectWorkspace(project:DftProject): Promise<string> {
   const repoProjectPrefix = toGitLabProjectPrefix(projectName);
   const repos: Array<{ key: string; gitlabProjectName: string; localPath: string }> = [];
   const folders: Array<{ name: string; path: string }> = [];
+  await setGitCredentialHelper();
   for (const repo of PROJECT_REPOS) {
     const repoItem = project.repos.find((item) => item.key === repo);
     if (!repoItem) continue;
@@ -2444,7 +2450,7 @@ async function initProjectWorkspace(project:DftProject): Promise<string> {
       if (!repoItem.http_url_to_repo) {
         throw new Error(`Missing clone URL for ${repoItem.gitlabProjectName}.`);
       }
-      await executeFileCommand('git', ['clone', repoItem.http_url_to_repo], projectPath);
+      await cloneRepoWithTerminal(repoItem.http_url_to_repo, projectPath);
     }
     await writeFileIfMissing(
       vscode.Uri.joinPath(repoUri, 'README.md'),
@@ -2477,6 +2483,42 @@ async function initProjectWorkspace(project:DftProject): Promise<string> {
   await writeFileIfMissing(workspaceFile, JSON.stringify(workspaceContent, null, 2));
 
   return projectPath;
+}
+
+async function cloneRepoWithTerminal(repoUrl: string, projectPath: string) {
+  const terminal = vscode.window.createTerminal({
+    name: 'Git Clone',
+    cwd: projectPath
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    terminal.sendText(`git clone ${repoUrl}`);
+    const disposable = vscode.window.onDidEndTerminalShellExecution(data => {
+      disposable.dispose();
+      if (data?.exitCode === 0) {
+        terminal.dispose();
+        resolve();
+      } else {
+        reject(new Error('Failed to clone the Git repository. See terminal logs for specific error details'));
+      }
+    });
+  });
+}
+
+async function setGitCredentialHelper() {
+  if (process.platform !== 'linux') return;
+  try {
+    const stdout = await executeFileCommand('git', ['config', '--global', '--get', 'credential.helper']);
+    if (!stdout.trim()) {
+      throw new Error('No credential helper configured');
+    }
+  } catch {
+    try {
+      await executeFileCommand('git', ['config', '--global', 'credential.helper', 'cache']);
+    } catch (error) {
+      console.error('Failed to set git credential helper:', error);
+    }
+  }
 }
 
 async function writeDefaultLocalState(localStateUri: vscode.Uri, repos: {
@@ -3805,13 +3847,21 @@ interface WorkbookSheetModel {
   name: string;
   rows: string[][];
   headers: string[];
+  rowKeys: string[];
   rowByKey: Map<string, { rowIndex: number; values: string[] }>;
 }
 
+const workbookReadOptions: XLSX.ParsingOptions = {
+  cellDates: false,
+  cellFormula: true,
+  cellHTML: false,
+  cellStyles: true,
+};
+
 function buildWorkbookDiffItems(artifact: CommonSyncArtifact): CommonSyncDiffItem[] {
-  const sourceBook = XLSX.readFile(artifact.source, { cellDates: false });
+  const sourceBook = readWorkbookFile(artifact.source);
   const targetBook = fs.existsSync(artifact.target)
-    ? XLSX.readFile(artifact.target, { cellDates: false })
+    ? readWorkbookFile(artifact.target)
     : XLSX.utils.book_new();
   const sourceSheets = buildWorkbookSheetModels(sourceBook);
   const targetSheets = buildWorkbookSheetModels(targetBook);
@@ -3884,15 +3934,15 @@ async function mergeWorkbookArtifact(
     return;
   }
 
-  const sourceBook = XLSX.readFile(artifact.source, { cellDates: false });
+  const sourceBook = readWorkbookFile(artifact.source);
   const targetBook = fs.existsSync(artifact.target)
-    ? XLSX.readFile(artifact.target, { cellDates: false })
+    ? readWorkbookFile(artifact.target)
     : XLSX.utils.book_new();
   const sourceSheets = buildWorkbookSheetModels(sourceBook);
   const targetSheets = buildWorkbookSheetModels(targetBook);
   const decisionMap = new Map(decisions.map((decision) => [decision.id, decision]));
   const sheetNames = new Set([...sourceSheets.keys(), ...targetSheets.keys()]);
-  const mergedBook = XLSX.utils.book_new();
+  const mergedBook = createMergedWorkbook(sourceBook);
 
   for (const sheetName of sheetNames) {
     const sourceSheet = sourceSheets.get(sheetName);
@@ -3903,15 +3953,15 @@ async function mergeWorkbookArtifact(
     if (sourceSheet && !targetSheet) {
       const choice = resolveWorkbookChoice(strategy, decisionMap.get(sheetAddedId), 'source');
       if (choice === 'source') {
-        appendSheet(mergedBook, sheetName, sourceSheet.rows);
+        appendWorksheet(mergedBook, sheetName, cloneWorksheet(sourceBook.Sheets[sheetName]));
       }
       continue;
     }
 
     if (!sourceSheet && targetSheet) {
-      const choice = resolveWorkbookChoice(strategy, decisionMap.get(sheetRedundantId), 'target');
+      const choice = resolveWorkbookChoice(strategy, decisionMap.get(sheetRedundantId), 'source');
       if (choice === 'target') {
-        appendSheet(mergedBook, sheetName, targetSheet.rows);
+        appendWorksheet(mergedBook, sheetName, cloneWorksheet(targetBook.Sheets[sheetName]));
       }
       continue;
     }
@@ -3920,8 +3970,17 @@ async function mergeWorkbookArtifact(
       continue;
     }
 
-    const mergedRows = mergeSheetRows(artifact, sheetName, sourceSheet, targetSheet, strategy, decisionMap);
-    appendSheet(mergedBook, sheetName, mergedRows);
+    const mergedSheet = mergeSheetWorksheet(
+      artifact,
+      sheetName,
+      sourceBook.Sheets[sheetName],
+      targetBook.Sheets[sheetName],
+      sourceSheet,
+      targetSheet,
+      strategy,
+      decisionMap
+    );
+    appendWorksheet(mergedBook, sheetName, mergedSheet);
   }
 
   if (mergedBook.SheetNames.length === 0) {
@@ -3931,17 +3990,60 @@ async function mergeWorkbookArtifact(
   XLSX.writeFile(mergedBook, artifact.target, { bookType: getWorkbookBookType(artifact.target) });
 }
 
-function mergeSheetRows(
+function readWorkbookFile(filePath: string): XLSX.WorkBook {
+  return XLSX.readFile(filePath, workbookReadOptions);
+}
+
+function createMergedWorkbook(sourceBook: XLSX.WorkBook): XLSX.WorkBook {
+  const workbook = XLSX.utils.book_new();
+  const sourceRecord = sourceBook as unknown as Record<string, unknown>;
+  const workbookRecord = workbook as unknown as Record<string, unknown>;
+
+  for (const key of ['Props', 'Custprops', 'SSF', 'vbaraw']) {
+    const value = sourceRecord[key];
+    if (value !== undefined) {
+      workbookRecord[key] = cloneWorkbookValue(value);
+    }
+  }
+
+  return workbook;
+}
+
+function mergeSheetWorksheet(
   artifact: CommonSyncArtifact,
   sheetName: string,
+  sourceWorksheet: XLSX.WorkSheet,
+  targetWorksheet: XLSX.WorkSheet,
   sourceSheet: WorkbookSheetModel,
   targetSheet: WorkbookSheetModel,
   strategy: string,
   decisionMap: Map<string, { id: string; choice: 'source' | 'target' | 'custom'; customValue?: string }>
-): string[][] {
-  const header = targetSheet.headers.length > 0 ? targetSheet.headers : sourceSheet.headers;
-  const rows: string[][] = [header];
-  const rowKeys = new Set([...targetSheet.rowByKey.keys(), ...sourceSheet.rowByKey.keys()]);
+): XLSX.WorkSheet {
+  const worksheet: XLSX.WorkSheet = {};
+  const header = sourceSheet.headers.length > 0 ? sourceSheet.headers : targetSheet.headers;
+  const rowKeys = planMergedRowOrder(sourceSheet, targetSheet);
+  const maxColumns = Math.max(
+    header.length,
+    getWorksheetColumnCount(sourceWorksheet),
+    getWorksheetColumnCount(targetWorksheet),
+    ...sourceSheet.rows.map((row) => row.length),
+    ...targetSheet.rows.map((row) => row.length)
+  );
+  const sourceRowMap = new Map<number, number>();
+  const targetRowMap = new Map<number, number>();
+  let outputRowIndex = 0;
+
+  if (sourceSheet.headers.length > 0) {
+    copyWorksheetRow(sourceWorksheet, worksheet, 0, outputRowIndex, maxColumns);
+    sourceRowMap.set(0, outputRowIndex);
+  } else if (targetSheet.headers.length > 0) {
+    copyWorksheetRow(targetWorksheet, worksheet, 0, outputRowIndex, maxColumns);
+    targetRowMap.set(0, outputRowIndex);
+  } else {
+    writeWorksheetRowValues(worksheet, outputRowIndex, header);
+  }
+  copyWorksheetRowMeta(sourceWorksheet, targetWorksheet, worksheet, 0, undefined, outputRowIndex);
+  outputRowIndex += 1;
 
   for (const rowKey of rowKeys) {
     const sourceRow = sourceSheet.rowByKey.get(rowKey);
@@ -3950,14 +4052,20 @@ function mergeSheetRows(
 
     if (sourceRow && !targetRow) {
       if (resolveWorkbookChoice(strategy, decisionMap.get(rowId), 'source') === 'source') {
-        rows.push(sourceRow.values);
+        copyWorksheetRow(sourceWorksheet, worksheet, sourceRow.rowIndex, outputRowIndex, maxColumns);
+        copyWorksheetRowMeta(sourceWorksheet, targetWorksheet, worksheet, sourceRow.rowIndex, undefined, outputRowIndex);
+        sourceRowMap.set(sourceRow.rowIndex, outputRowIndex);
+        outputRowIndex += 1;
       }
       continue;
     }
 
     if (!sourceRow && targetRow) {
-      if (resolveWorkbookChoice(strategy, decisionMap.get(rowId), 'target') === 'target') {
-        rows.push(targetRow.values);
+      if (resolveWorkbookChoice(strategy, decisionMap.get(rowId), 'source') === 'target') {
+        copyWorksheetRow(targetWorksheet, worksheet, targetRow.rowIndex, outputRowIndex, maxColumns);
+        copyWorksheetRowMeta(sourceWorksheet, targetWorksheet, worksheet, undefined, targetRow.rowIndex, outputRowIndex);
+        targetRowMap.set(targetRow.rowIndex, outputRowIndex);
+        outputRowIndex += 1;
       }
       continue;
     }
@@ -3966,29 +4074,257 @@ function mergeSheetRows(
       continue;
     }
 
-    const maxColumns = Math.max(sourceRow.values.length, targetRow.values.length, header.length);
-    const mergedRow: string[] = [];
     for (let columnIndex = 0; columnIndex < maxColumns; columnIndex += 1) {
       const sourceVal = sourceRow.values[columnIndex] ?? '';
       const targetVal = targetRow.values[columnIndex] ?? '';
       if (sourceVal === targetVal) {
-        mergedRow[columnIndex] = targetVal;
+        copyWorksheetCell(sourceWorksheet, worksheet, sourceRow.rowIndex, columnIndex, outputRowIndex, columnIndex);
         continue;
       }
+
       const fieldName = sourceSheet.headers[columnIndex] || targetSheet.headers[columnIndex] || `Column ${columnIndex + 1}`;
       const cellId = makeWorkbookDiffId(artifact.key, sheetName, `${rowKey}::${columnIndex}`, fieldName);
       const decision = decisionMap.get(cellId);
       const choice = resolveWorkbookChoice(strategy, decision, 'source');
-      mergedRow[columnIndex] = choice === 'source'
-        ? sourceVal
-        : choice === 'custom'
-          ? decision?.customValue ?? ''
-          : targetVal;
+      if (choice === 'source') {
+        copyWorksheetCell(sourceWorksheet, worksheet, sourceRow.rowIndex, columnIndex, outputRowIndex, columnIndex);
+      } else if (choice === 'target') {
+        copyWorksheetCell(targetWorksheet, worksheet, targetRow.rowIndex, columnIndex, outputRowIndex, columnIndex);
+      } else {
+        writeWorksheetCellValue(
+          worksheet,
+          outputRowIndex,
+          columnIndex,
+          decision?.customValue ?? '',
+          getWorksheetCell(targetWorksheet, targetRow.rowIndex, columnIndex) ?? getWorksheetCell(sourceWorksheet, sourceRow.rowIndex, columnIndex)
+        );
+      }
     }
-    rows.push(mergedRow);
+    copyWorksheetRowMeta(sourceWorksheet, targetWorksheet, worksheet, sourceRow.rowIndex, targetRow.rowIndex, outputRowIndex);
+    sourceRowMap.set(sourceRow.rowIndex, outputRowIndex);
+    targetRowMap.set(targetRow.rowIndex, outputRowIndex);
+    outputRowIndex += 1;
   }
 
-  return rows;
+  copyWorksheetProperties(sourceWorksheet, targetWorksheet, worksheet, sourceRowMap, targetRowMap);
+  const lastRow = Math.max(0, outputRowIndex - 1);
+  const lastColumn = Math.max(0, maxColumns - 1, getWorksheetColumnCount(worksheet) - 1);
+  worksheet['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: lastRow, c: lastColumn } });
+  return worksheet;
+}
+
+function planMergedRowOrder(sourceSheet: WorkbookSheetModel, targetSheet: WorkbookSheetModel): string[] {
+  const sourceKeys = sourceSheet.rowKeys;
+  const targetKeys = targetSheet.rowKeys;
+  const sourceKeySet = new Set(sourceKeys);
+  const emitted = new Set<string>();
+  const targetOnlyBeforeSourceKey = new Map<string, string[]>();
+  let pendingTargetOnly: string[] = [];
+
+  for (const targetKey of targetKeys) {
+    if (!sourceKeySet.has(targetKey)) {
+      pendingTargetOnly.push(targetKey);
+      continue;
+    }
+    if (pendingTargetOnly.length > 0) {
+      targetOnlyBeforeSourceKey.set(targetKey, pendingTargetOnly);
+      pendingTargetOnly = [];
+    }
+  }
+
+  const orderedKeys: string[] = [];
+  const pushKey = (key: string) => {
+    if (!emitted.has(key)) {
+      orderedKeys.push(key);
+      emitted.add(key);
+    }
+  };
+
+  for (const sourceKey of sourceKeys) {
+    for (const targetOnlyKey of targetOnlyBeforeSourceKey.get(sourceKey) ?? []) {
+      pushKey(targetOnlyKey);
+    }
+    pushKey(sourceKey);
+  }
+
+  for (const targetKey of targetKeys) {
+    pushKey(targetKey);
+  }
+
+  return orderedKeys;
+}
+
+function copyWorksheetRow(
+  sourceWorksheet: XLSX.WorkSheet,
+  targetWorksheet: XLSX.WorkSheet,
+  sourceRowIndex: number,
+  targetRowIndex: number,
+  maxColumns: number
+): void {
+  for (let columnIndex = 0; columnIndex < maxColumns; columnIndex += 1) {
+    copyWorksheetCell(sourceWorksheet, targetWorksheet, sourceRowIndex, columnIndex, targetRowIndex, columnIndex);
+  }
+}
+
+function copyWorksheetCell(
+  sourceWorksheet: XLSX.WorkSheet,
+  targetWorksheet: XLSX.WorkSheet,
+  sourceRowIndex: number,
+  sourceColumnIndex: number,
+  targetRowIndex: number,
+  targetColumnIndex: number
+): void {
+  const cell = getWorksheetCell(sourceWorksheet, sourceRowIndex, sourceColumnIndex);
+  if (!cell) {
+    return;
+  }
+  const targetAddress = XLSX.utils.encode_cell({ r: targetRowIndex, c: targetColumnIndex });
+  (targetWorksheet as Record<string, unknown>)[targetAddress] = cloneWorkbookValue(cell);
+}
+
+function writeWorksheetRowValues(worksheet: XLSX.WorkSheet, rowIndex: number, values: string[]): void {
+  values.forEach((value, columnIndex) => {
+    writeWorksheetCellValue(worksheet, rowIndex, columnIndex, value);
+  });
+}
+
+function writeWorksheetCellValue(
+  worksheet: XLSX.WorkSheet,
+  rowIndex: number,
+  columnIndex: number,
+  value: string,
+  template?: XLSX.CellObject
+): void {
+  const address = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
+  const cell = template ? cloneWorkbookValue(template) as XLSX.CellObject : {} as XLSX.CellObject;
+  const mutableCell = cell as unknown as Record<string, unknown>;
+  delete mutableCell.f;
+  delete mutableCell.F;
+  delete mutableCell.D;
+  delete mutableCell.w;
+  cell.v = value;
+  cell.t = 's';
+  (worksheet as Record<string, unknown>)[address] = cell;
+}
+
+function getWorksheetCell(worksheet: XLSX.WorkSheet, rowIndex: number, columnIndex: number): XLSX.CellObject | undefined {
+  return (worksheet as Record<string, XLSX.CellObject | undefined>)[XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex })];
+}
+
+function copyWorksheetRowMeta(
+  sourceWorksheet: XLSX.WorkSheet,
+  targetWorksheet: XLSX.WorkSheet,
+  outputWorksheet: XLSX.WorkSheet,
+  sourceRowIndex: number | undefined,
+  targetRowIndex: number | undefined,
+  outputRowIndex: number
+): void {
+  const sourceRows = (sourceWorksheet as { '!rows'?: unknown[] })['!rows'];
+  const targetRows = (targetWorksheet as { '!rows'?: unknown[] })['!rows'];
+  const rowMeta =
+    sourceRowIndex !== undefined ? sourceRows?.[sourceRowIndex] :
+      targetRowIndex !== undefined ? targetRows?.[targetRowIndex] :
+        undefined;
+  if (!rowMeta) {
+    return;
+  }
+  const outputRows = ((outputWorksheet as { '!rows'?: unknown[] })['!rows'] ?? []) as unknown[];
+  outputRows[outputRowIndex] = cloneWorkbookValue(rowMeta);
+  (outputWorksheet as { '!rows'?: unknown[] })['!rows'] = outputRows;
+}
+
+function copyWorksheetProperties(
+  sourceWorksheet: XLSX.WorkSheet,
+  targetWorksheet: XLSX.WorkSheet,
+  outputWorksheet: XLSX.WorkSheet,
+  sourceRowMap: Map<number, number>,
+  targetRowMap: Map<number, number>
+): void {
+  const sourceRecord = sourceWorksheet as Record<string, unknown>;
+  const targetRecord = targetWorksheet as Record<string, unknown>;
+  const outputRecord = outputWorksheet as Record<string, unknown>;
+
+  for (const key of ['!cols', '!margins', '!protect', '!autofilter']) {
+    const value = sourceRecord[key] ?? targetRecord[key];
+    if (value !== undefined) {
+      outputRecord[key] = cloneWorkbookValue(value);
+    }
+  }
+
+  const merges = [
+    ...remapWorksheetMerges(sourceWorksheet, sourceRowMap),
+    ...remapWorksheetMerges(targetWorksheet, targetRowMap),
+  ];
+  if (merges.length > 0) {
+    outputRecord['!merges'] = dedupeWorksheetMerges(merges);
+  }
+}
+
+function remapWorksheetMerges(worksheet: XLSX.WorkSheet, rowMap: Map<number, number>): XLSX.Range[] {
+  const merges = (worksheet as { '!merges'?: XLSX.Range[] })['!merges'] ?? [];
+  const remapped: XLSX.Range[] = [];
+  for (const merge of merges) {
+    const startRow = rowMap.get(merge.s.r);
+    const endRow = rowMap.get(merge.e.r);
+    if (startRow === undefined || endRow === undefined) {
+      continue;
+    }
+
+    let canMap = true;
+    for (let row = merge.s.r; row <= merge.e.r; row += 1) {
+      const mappedRow = rowMap.get(row);
+      if (mappedRow === undefined || mappedRow !== startRow + (row - merge.s.r)) {
+        canMap = false;
+        break;
+      }
+    }
+    if (canMap) {
+      remapped.push({ s: { r: startRow, c: merge.s.c }, e: { r: endRow, c: merge.e.c } });
+    }
+  }
+  return remapped;
+}
+
+function dedupeWorksheetMerges(merges: XLSX.Range[]): XLSX.Range[] {
+  const seen = new Set<string>();
+  const unique: XLSX.Range[] = [];
+  for (const merge of merges) {
+    const key = `${merge.s.r}:${merge.s.c}:${merge.e.r}:${merge.e.c}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(merge);
+    }
+  }
+  return unique;
+}
+
+function getWorksheetColumnCount(worksheet: XLSX.WorkSheet): number {
+  const ref = worksheet['!ref'];
+  if (!ref) {
+    return 0;
+  }
+  return XLSX.utils.decode_range(ref).e.c + 1;
+}
+
+function cloneWorksheet(worksheet: XLSX.WorkSheet): XLSX.WorkSheet {
+  return cloneWorkbookValue(worksheet) as XLSX.WorkSheet;
+}
+
+function cloneWorkbookValue<T>(value: T): T {
+  if (value instanceof Date) {
+    return new Date(value.getTime()) as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneWorkbookValue(item)) as T;
+  }
+  if (value && typeof value === 'object') {
+    const cloned: Record<string, unknown> = {};
+    for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+      cloned[key] = cloneWorkbookValue(nestedValue);
+    }
+    return cloned as T;
+  }
+  return value;
 }
 
 function buildWorkbookSheetModels(workbook: XLSX.WorkBook): Map<string, WorkbookSheetModel> {
@@ -3997,11 +4333,12 @@ function buildWorkbookSheetModels(workbook: XLSX.WorkBook): Map<string, Workbook
     const sheet = workbook.Sheets[sheetName];
     const rows = normalizeWorksheetRows(XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: '', blankrows: false }));
     if (rows.length === 0) {
-      models.set(sheetName, { name: sheetName, rows: [], headers: [], rowByKey: new Map() });
+      models.set(sheetName, { name: sheetName, rows: [], headers: [], rowKeys: [], rowByKey: new Map() });
       continue;
     }
     const headers = rows[0].map((value, index) => value || `Column ${index + 1}`);
     const keyIndex = findKeyColumnIndex(headers);
+    const rowKeys: string[] = [];
     const rowByKey = new Map<string, { rowIndex: number; values: string[] }>();
     rows.slice(1).forEach((row, offset) => {
       if (row.every((value) => value === '')) {
@@ -4009,9 +4346,10 @@ function buildWorkbookSheetModels(workbook: XLSX.WorkBook): Map<string, Workbook
       }
       const rawKey = (row[keyIndex] || row.find((value) => value !== '') || `row-${offset + 2}`).trim();
       const key = makeUniqueRowKey(rowByKey, rawKey || `row-${offset + 2}`);
+      rowKeys.push(key);
       rowByKey.set(key, { rowIndex: offset + 1, values: row });
     });
-    models.set(sheetName, { name: sheetName, rows, headers, rowByKey });
+    models.set(sheetName, { name: sheetName, rows, headers, rowKeys, rowByKey });
   }
   return models;
 }
@@ -4097,8 +4435,7 @@ function rowToDisplay(row: string[]): string {
   return row.filter((value) => value !== '').join(', ');
 }
 
-function appendSheet(workbook: XLSX.WorkBook, sheetName: string, rows: string[][]): void {
-  const worksheet = XLSX.utils.aoa_to_sheet(rows);
+function appendWorksheet(workbook: XLSX.WorkBook, sheetName: string, worksheet: XLSX.WorkSheet): void {
   XLSX.utils.book_append_sheet(workbook, worksheet, sanitizeSheetName(sheetName));
 }
 
