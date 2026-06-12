@@ -1,39 +1,99 @@
 import * as vscode from 'vscode';
-import {exec, execFile} from 'child_process'
 import * as path from 'path';
 import * as fs from 'fs';
-import * as dotenv from 'dotenv';
 import { submitJob, queryJobStatus, getDonauResources } from './services/donauService';
 import { gitService } from './services/gitService';
 import { obsService } from './services/obsService';
-import {
-  buildCommonSyncArtifacts,
-  buildWorkbookDiffItems,
-  areSpreadsheetFilesIdentical,
-  isSpreadsheetFile,
-  mergeWorkbookArtifact,
-} from './services/commonWorkbookSyncService';
-import { DftProject } from './webview/services/projectService';
-import {
-  PipelineRuntimeHistoryRecord,
-  PipelineRuntimeService,
-  isPipelineFlowKey,
-} from './services/pipelineRuntimeService';
+import { isSpreadsheetFile } from './services/commonWorkbookSyncService';
+import { isPipelineFlowKey, isPipelineFlowKey as _isPipelineFlowKey, PipelineRuntimeService } from './services/pipelineRuntimeService';
 import { getWebviewHtml, InitialWebviewCommand } from './webviewHtml';
 
-const VIEW_TYPE = 'dftIde.welcome';
-const GLOBAL_KEY = 'dftIde.hasShownWelcome';
-const LAYOUT_BACKUP_KEY = 'dftIde.layout.previousSettings';
-const LOCAL_STATE_DIR_NAME = '.dft-ide';
-const LOCAL_STATE_SUBDIR = 'local-state';
-const OBS_READONLY_SCHEME = 'dft-obs-readonly';
-const PROJECT_REPOS = ['data', 'hibist', 'sailor', 'verification'] as const;
+// Import constants
+import {
+  VIEW_TYPE,
+  GLOBAL_KEY,
+  OBS_READONLY_SCHEME,
+  PROJECT_REPOS,
+  LOCAL_STATE_DIR_NAME,
+} from './services/constants';
+
+// Import utility execution commands
+import { executeShellCommand } from './services/utils';
+
+// Import layout services
+import {
+  applyDftIdeLayout,
+  restoreVscodeLayout,
+} from './services/layoutService';
+
+// Import workspace services
+import {
+  openProjectFromPicker,
+  openProjectWorkspace,
+  prepareProjectWorkspace,
+  initProjectWorkspace,
+  getLocalConfigInfo,
+  updateLocalConfigPath,
+  resolveProjectRoot,
+  resolveConfigPath,
+  resolveDefaultProjectName,
+  normalizeProjectRepo,
+  normalizeConfigFlow,
+  getProjectRepoRoot,
+} from './services/workspaceService';
+
+// Import config services
+import {
+  listFlowConfigFiles,
+  createFlowConfigFile,
+  duplicateFlowConfigFile,
+  renameFlowConfigFile,
+  deleteFlowConfigFile,
+  generateDefaultFlowConfigs,
+  mergeConfigFile,
+} from './services/configService';
+
+// Import design tree services
+import {
+  readDesignTreeState,
+  saveDesignTreeState,
+} from './services/designTreeService';
+
+// Import sync services
+import {
+  getRepoGitInfoForWebview,
+  submitRepoToCloud,
+  syncCommonArtifactsToRepo,
+  prepareCommonArtifactSyncToRepo,
+  applyCommonArtifactSyncToRepo,
+} from './services/syncService';
+
+// Import diagnostics services
+import {
+  dftDiagnostics,
+} from './services/diagnosticsService';
+
+// Import terminal and execution history services
+import {
+  openExecutionTerminal,
+  saveExecutionHistoryRecord,
+  normalizeHistoryFlow,
+} from './services/terminalService';
+
+// Import vscode demo action services
+import { runVscodeDemo } from './services/demoService';
+
+// Import OBS preview services
+import {
+  obsReadonlyDocuments,
+  openObsReadonlyDocument,
+  cleanupObsReadonlyDocument,
+} from './services/obsPreviewService';
 
 let currentPanel: vscode.WebviewPanel | undefined = undefined;
 let activeCategory: string | undefined = undefined;
 let pendingWebviewCommand: InitialWebviewCommand | undefined;
-const obsReadonlyDocuments = new Map<string, string>();
-const dftDiagnostics = vscode.languages.createDiagnosticCollection('dft-ide');
+
 const pipelineRuntimeService = new PipelineRuntimeService({
   onUpdate: (snapshot) => {
     currentPanel?.webview.postMessage({ command: 'pipelineRuntimeUpdated', snapshot });
@@ -47,20 +107,10 @@ const pipelineRuntimeService = new PipelineRuntimeService({
     void openExecutionTerminal({ title, command });
   },
 });
-/** 优化3：跟踪活跃的任务轮询计时器，以便支持取消 */
+
 const activeJobTimers = new Map<string, ReturnType<typeof setInterval>>();
 
 export function activate(context: vscode.ExtensionContext) {
-  const isDev = context.extensionMode === vscode.ExtensionMode.Development;
-
-  if (isDev) {
-    const envPath = path.join(context.extensionPath, '.env');
-
-    if (fs.existsSync(envPath)) {
-      dotenv.config({ path: envPath });
-    }
-  }
-
   context.subscriptions.push(dftDiagnostics);
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(OBS_READONLY_SCHEME, {
@@ -68,7 +118,7 @@ export function activate(context: vscode.ExtensionContext) {
         obsReadonlyDocuments.get(uri.toString()) ?? 'OBS readonly preview is unavailable.',
     })
   );
-  // 1. 注册左侧扁平化的 Tree View
+
   context.subscriptions.push(
     vscode.workspace.onDidCloseTextDocument((document) => {
       if (document.uri.scheme === OBS_READONLY_SCHEME) {
@@ -76,9 +126,10 @@ export function activate(context: vscode.ExtensionContext) {
       }
     })
   );
+
   vscode.window.registerTreeDataProvider('dftIde.views.flows', new DftFlowProvider());
 
-  // 2. 注册命令：点击左侧一级菜单时触发
+  // Register VS Code Commands
   context.subscriptions.push(
     vscode.commands.registerCommand('dftIde.openFlow', async (category: string) => {
       await openWebviewFlow(context, category);
@@ -143,47 +194,8 @@ export function activate(context: vscode.ExtensionContext) {
   void initializeDftWorkbench(context);
 }
 
-async function executeShellCommand(command: string, workDir?: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const options = workDir ? { cwd: workDir } : {};
-    exec(command, options, (error, stdout, stderr) => {
-      if (error) {
-        vscode.window.showErrorMessage(`Error: ${error.message}`);
-        reject(error);
-        return;
-      }
-      if (stderr && stderr.includes('error')) {
-        vscode.window.showErrorMessage(`stderr: ${stderr}`);
-        reject(new Error(stderr));
-        return;
-      }
-      resolve(stdout);
-    });
-  });
-}
-
-async function executeFileCommand(command: string, args: string[], workDir?: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const options = workDir ? { cwd: workDir } : {};
-    execFile(command, args, options, (error, stdout, stderr) => {
-      if (error) {
-        vscode.window.showErrorMessage(`Error: ${error.message}`);
-        reject(error);
-        return;
-      }
-      if (stderr && stderr.toLowerCase().includes('error')) {
-        vscode.window.showErrorMessage(`stderr: ${stderr}`);
-        reject(new Error(stderr));
-        return;
-      }
-      resolve(stdout);
-    });
-  });
-}
-
 async function initializeDftWorkbench(context: vscode.ExtensionContext): Promise<void> {
   const config = vscode.workspace.getConfiguration('dftIde');
-  // 优化5：默认不再自动应用激进布局，改为用户手动切换"专注模式"
   if (config.get<boolean>('layout.autoApply', false)) {
     await applyDftIdeLayout(context, true);
   }
@@ -203,93 +215,8 @@ async function focusDftView(): Promise<void> {
   }
 }
 
-async function applyDftIdeLayout(context: vscode.ExtensionContext, silent: boolean): Promise<void> {
-  const config = vscode.workspace.getConfiguration('dftIde');
-  const hideMenuBar = config.get<boolean>('layout.hideMenuBar', true);
-  const hideActivityBar = config.get<boolean>('layout.hideActivityBar', true);
-
-  const updates: Array<[string, unknown]> = [
-    ['window.commandCenter', false],
-    ['workbench.layoutControl.enabled', false],
-    ['workbench.startupEditor', 'none'],
-    ['workbench.editor.showTabs', true],
-    ['breadcrumbs.enabled', false],
-  ];
-
-  if (hideMenuBar) {
-    updates.push(['window.menuBarVisibility', 'hidden']);
-  }
-
-  if (hideActivityBar) {
-    updates.push(['workbench.activityBar.visible', false]);
-    updates.push(['workbench.activityBar.location', 'hidden']);
-  }
-
-  await backupLayoutSettings(context, updates.map(([key]) => key));
-  await updateUserSettings(updates);
-
-  if (!silent) {
-    vscode.window.showInformationMessage('DFT IDE 布局已应用。');
-  }
-}
-
-async function restoreVscodeLayout(context: vscode.ExtensionContext): Promise<void> {
-  const backup = context.globalState.get<Array<{ key: string; hasValue: boolean; value: unknown }>>(
-    LAYOUT_BACKUP_KEY,
-    []
-  );
-
-  if (backup.length > 0) {
-    await updateUserSettings(
-      backup.map((item) => [item.key, item.hasValue ? item.value : undefined])
-    );
-    await context.globalState.update(LAYOUT_BACKUP_KEY, undefined);
-  } else {
-    await updateUserSettings([
-      ['window.menuBarVisibility', undefined],
-      ['window.commandCenter', undefined],
-      ['workbench.activityBar.visible', undefined],
-      ['workbench.activityBar.location', undefined],
-      ['workbench.layoutControl.enabled', undefined],
-      ['workbench.startupEditor', undefined],
-      ['workbench.editor.showTabs', undefined],
-      ['breadcrumbs.enabled', undefined],
-    ]);
-  }
-
-  vscode.window.showInformationMessage('已恢复 VS Code 默认布局设置。');
-}
-
-async function backupLayoutSettings(context: vscode.ExtensionContext, keys: string[]): Promise<void> {
-  const existing = context.globalState.get<Array<{ key: string; hasValue: boolean; value: unknown }>>(
-    LAYOUT_BACKUP_KEY
-  );
-  if (existing) {
-    return;
-  }
-
-  const backup = keys.map((key) => {
-    const inspected = vscode.workspace.getConfiguration().inspect(key);
-    return {
-      key,
-      hasValue: inspected?.globalValue !== undefined,
-      value: inspected?.globalValue,
-    };
-  });
-
-  await context.globalState.update(LAYOUT_BACKUP_KEY, backup);
-}
-
-async function updateUserSettings(updates: Array<[string, unknown]>): Promise<void> {
-  await Promise.all(
-    updates.map(([key, value]) =>
-      vscode.workspace.getConfiguration().update(key, value, vscode.ConfigurationTarget.Global)
-    )
-  );
-}
-
 // ============================================================
-// 一级菜单的 Tree View 数据提供者
+// Tree View Data Provider
 // ============================================================
 
 interface FlowMenuConfig {
@@ -402,9 +329,9 @@ class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
 }
 
 // ============================================================
-// Webview 管理与通信逻辑
+// Webview Management and Message Communication Routing
 // ============================================================
-/** 每个 category 对应的 Tab 标题 */
+
 const CATEGORY_TITLES: Record<string, string> = {
   HOME: 'DFT IDE — 主页',
   COMMON: 'DFT IDE — 公共配置',
@@ -423,7 +350,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
 
   if (currentPanel) {
     currentPanel.reveal(vscode.ViewColumn.One);
-    // 更新 Tab 标题
     currentPanel.title = activeCategory ? (CATEGORY_TITLES[activeCategory] ?? `DFT IDE — ${activeCategory}`) : CATEGORY_TITLES.HOME;
     currentPanel.webview.postMessage(pendingWebviewCommand);
     return;
@@ -576,7 +502,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
-      // ── 新增：选择文件/目录路径 ──────────────────────────────
       case 'getDonauResources': {
         const requestId: string = msg.requestId;
         try {
@@ -618,7 +543,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
-      // ── 新增：在 VS Code 编辑器中打开文件或文件夹 ───────────────────
       case 'openFile': {
         const filePath: string | undefined = msg.path;
         if (!filePath) { return; }
@@ -627,7 +551,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           const stat = await vscode.workspace.fs.stat(uri);
 
           if (stat.type === vscode.FileType.Directory) {
-            // 如果是目录，则在系统的文件管理器中打开
             await vscode.commands.executeCommand('revealFileInOS', uri);
           } else if (isSpreadsheetFile(uri.fsPath)) {
             await vscode.commands.executeCommand(
@@ -637,7 +560,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
               vscode.ViewColumn.Active
             );
           } else {
-            // 如果是文件，则在当前编辑器组中新开 tab，保留 DFT IDE tab
             await vscode.window.showTextDocument(uri, {
               viewColumn: vscode.ViewColumn.Active,
               preview: false,
@@ -675,7 +597,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         const jobId = submitJob(payload);
         currentPanel?.webview.postMessage({ command: 'taskSubmitted', jobId });
 
-        // 优化3：基于状态的轮询，不再硬编码 30 次上限
         const timer = setInterval(() => {
           const result = queryJobStatus(jobId);
           currentPanel?.webview.postMessage({
@@ -696,7 +617,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         await runVscodeDemo(msg.action);
         return;
 
-      // ── 优化2：路径有效性验证 ─────────────────────────────────
       case 'validatePath': {
         const requestId: string = msg.requestId;
         const targetPath = typeof msg.path === 'string' ? msg.path.trim() : '';
@@ -725,7 +645,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
-      // ── 优化3：任务取消 ─────────────────────────────────────
       case 'cancelTask': {
         const requestId: string = msg.requestId;
         const jobId = typeof msg.jobId === 'string' ? msg.jobId : '';
@@ -747,7 +666,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
-      // ── 优化4：获取 Git 变更文件列表 ─────────────────────────
       case 'getGitChangedFiles': {
         const requestId: string = msg.requestId;
         try {
@@ -773,13 +691,11 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
-      // ── 优化4：打开 VS Code SCM 视图 ─────────────────────────
       case 'openSourceControl': {
         await gitService.openSourceControl();
         return;
       }
 
-      // ── 优化5：专注模式切换 ──────────────────────────────────
       case 'toggleZenMode': {
         const requestId: string = msg.requestId;
         const enable = Boolean(msg.enable);
@@ -944,7 +860,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
-      // ── 配置保存 ───────────────────────────────────────────────
       case 'submitRepoToCloud': {
         const requestId: string = msg.requestId;
         const repo = normalizeProjectRepo(msg.repo);
@@ -1037,10 +952,22 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             });
             return;
           }
-          await ensureLocalConfigDirectory(path.dirname(filePath));
+          await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.dirname(filePath)));
           const projectRoot = resolveProjectRoot();
           if (projectRoot) {
-            await ensureLocalStateIgnored(projectRoot, path.dirname(filePath));
+            // Setup ignore pattern
+            const gitignoreUri = vscode.Uri.file(path.join(projectRoot, '.gitignore'));
+            let content = '';
+            try {
+              const bytes = await vscode.workspace.fs.readFile(gitignoreUri);
+              content = Buffer.from(bytes).toString('utf-8');
+            } catch {}
+            const lines = new Set(content.split(/\r?\n/).map((line) => line.trim()));
+            if (!lines.has(`${LOCAL_STATE_DIR_NAME}/`)) {
+              const prefix = content && !content.endsWith('\n') ? '\n' : '';
+              const nextContent = `${content}${prefix}\n# DFT IDE local user state\n${LOCAL_STATE_DIR_NAME}/\n`;
+              await vscode.workspace.fs.writeFile(gitignoreUri, Buffer.from(nextContent, 'utf-8'));
+            }
           }
           const merged = await mergeConfigFile(filePath, data);
           const encoded = Buffer.from(JSON.stringify(merged, null, 2));
@@ -1059,7 +986,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
-      // ── 配置读取 ───────────────────────────────────────────────
       case 'readConfig': {
         const requestId: string = msg.requestId;
         const flow = String(msg.flow ?? 'default');
@@ -1078,7 +1004,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
               command: 'readConfigResponse', requestId, data
             });
           } catch {
-            // 文件不存在或解析失败，返回 null（首次使用时正常）
             currentPanel?.webview.postMessage({
               command: 'readConfigResponse', requestId, data: null
             });
@@ -1092,8 +1017,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
-      // ── Git 同步 ────────────────────────────────────────────────
-      case 'readDesignTree': {
+      case 'readDesignTreeState': {
         const requestId: string = msg.requestId;
         const flow = typeof msg.flow === 'string' ? msg.flow : undefined;
         try {
@@ -1536,7 +1460,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
-      // ─── 历史执行记录持久化 ────────────────────────────────
       case 'saveExecutionHistory': {
         const requestId: string = msg.requestId;
         const flow = normalizeHistoryFlow(msg.flow);
@@ -1583,12 +1506,10 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
               );
               try {
                 history.push(JSON.parse(Buffer.from(raw).toString('utf-8')));
-              } catch { /* skip malformed */ }
+              } catch {}
             }
             history.sort((a: any, b: any) => (b.executedAt ?? 0) - (a.executedAt ?? 0));
-          } catch {
-            // The history directory may not exist yet.
-          }
+          } catch {}
 
           currentPanel?.webview.postMessage({
             command: 'getExecutionHistoryResponse', requestId,
@@ -1635,2090 +1556,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
     }
   });
-}
-
-// ============================================================
-// createProject
-// ============================================================
-async function openProjectFromPicker(): Promise<void> {
-  const picked = await vscode.window.showOpenDialog({
-    canSelectMany: false,
-    canSelectFiles: false,
-    canSelectFolders: true,
-    openLabel: '打开项目'
-  });
-
-  if (!picked || picked.length === 0) {
-    return;
-  }
-
-  await openProjectWorkspace(picked[0].fsPath);
-}
-
-async function createProject(): Promise<void> {
-  const picked = await vscode.window.showOpenDialog({
-    canSelectMany: false,
-    canSelectFiles: false,
-    canSelectFolders: true,
-    openLabel: '选择项目根目录'
-  });
-
-  if (!picked || picked.length === 0) {
-    return;
-  }
-
-  const selectedRoot = picked[0];
-  const projectRoot = vscode.Uri.joinPath(selectedRoot, 'dft-ide-workspace');
-
-  const legacyRoot = vscode.Uri.joinPath(projectRoot, 'data');
-  const hibistRoot = vscode.Uri.joinPath(projectRoot, 'hibist');
-  const sailorRoot = vscode.Uri.joinPath(projectRoot, 'sailor');
-  const verificationRoot = vscode.Uri.joinPath(projectRoot, 'verification');
-  const dataRoot = vscode.Uri.joinPath(projectRoot, 'data');
-
-  await vscode.workspace.fs.createDirectory(projectRoot);
-  await vscode.workspace.fs.createDirectory(legacyRoot);
-  await vscode.workspace.fs.createDirectory(hibistRoot);
-  await vscode.workspace.fs.createDirectory(sailorRoot);
-  await vscode.workspace.fs.createDirectory(verificationRoot);
-  await vscode.workspace.fs.createDirectory(dataRoot);
-
-  await vscode.workspace.fs.writeFile(
-    vscode.Uri.joinPath(legacyRoot, 'README.md'),
-    Buffer.from('# DFT IDE Data Workspace\n')
-  );
-
-  await vscode.workspace.fs.writeFile(
-    vscode.Uri.joinPath(hibistRoot, 'hibist.cfg.json'),
-    Buffer.from(JSON.stringify({ tool: 'hibist', stage: '85' }, null, 2))
-  );
-
-  await vscode.workspace.fs.writeFile(
-    vscode.Uri.joinPath(sailorRoot, 'sailor.cfg.json'),
-    Buffer.from(JSON.stringify({ tool: 'sailor', stage: '85' }, null, 2))
-  );
-
-  await vscode.workspace.fs.writeFile(
-    vscode.Uri.joinPath(verificationRoot, 'verification.cfg.json'),
-    Buffer.from(JSON.stringify({ tool: 'sailor', stage: '85' }, null, 2))
-  );
-
-  await vscode.workspace.fs.writeFile(
-    vscode.Uri.joinPath(dataRoot, 'normalized-table.json'),
-    Buffer.from(
-      JSON.stringify(
-        [
-          {
-            pin_name: 'temp_en',
-            pin_attribute: 'dft_ip_tsensor0_ctrl',
-            ctrl_type: 'share_func',
-            default_value: 0,
-            ip_sim: 1
-          }
-        ],
-        null,
-        2
-      )
-    )
-  );
-
-  const workspaceFile = vscode.Uri.joinPath(projectRoot, 'dft-ide.code-workspace');
-  const workspaceContent = {
-    folders: [
-      { name: 'hibist', path: 'hibist' },
-      { name: 'sailor', path: 'sailor' },
-      { name: 'verification', path: 'verification' },
-      { name: 'data', path: 'data' }
-    ],
-    settings: {
-      'workbench.startupEditor': 'none'
-    }
-  };
-
-  await vscode.workspace.fs.writeFile(
-    workspaceFile,
-    Buffer.from(JSON.stringify(workspaceContent, null, 2))
-  );
-
-  const action = await vscode.window.showInformationMessage(
-    'DFT IDE 本地项目已创建，是否立即打开？',
-    '打开'
-  );
-
-  if (action === '打开') {
-    await vscode.commands.executeCommand('vscode.openFolder', workspaceFile, false);
-  }
-}
-
-async function runVscodeDemo(action: unknown): Promise<void> {
-  switch (action) {
-    case 'notification':
-      await vscode.window.showInformationMessage('DFT IDE 通知示例：项目状态已刷新。');
-      return;
-    case 'quickPick': {
-      const picked = await vscode.window.showQuickPick(
-        ['Common 配置', 'Hibist 工作流', 'Sailor 工作流', 'Verification 工作流'],
-        { placeHolder: '选择要进入的 DFT 功能区' }
-      );
-      if (picked) {
-        await vscode.window.showInformationMessage(`已选择：${picked}`);
-      }
-      return;
-    }
-    case 'clipboard':
-      await vscode.env.clipboard.writeText('DFT IDE clipboard demo');
-      await vscode.window.showInformationMessage('示例文本已写入剪贴板。');
-      return;
-    case 'terminal': {
-      const terminal = vscode.window.createTerminal('DFT IDE Demo');
-      terminal.show();
-      terminal.sendText('echo DFT IDE terminal demo');
-      return;
-    }
-    case 'settings':
-      await vscode.commands.executeCommand('workbench.action.openSettings', 'DFT IDE');
-      return;
-    case 'external':
-      await vscode.env.openExternal(vscode.Uri.parse('https://code.visualstudio.com/api'));
-      return;
-    default:
-      await vscode.window.showWarningMessage('未知的 VS Code 能力示例。');
-  }
-}
-
-async function openObsReadonlyDocument(
-  context: vscode.ExtensionContext,
-  obsPath: string
-): Promise<void> {
-  if (!obsPath.startsWith('obs://')) {
-    throw new Error('Invalid OBS path.');
-  }
-
-  const fileName = decodeURIComponent(obsPath.split('/').pop() || 'obs-object.txt');
-  const safeFileName = fileName.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_') || 'obs-object.txt';
-  const cacheDir = vscode.Uri.joinPath(context.globalStorageUri, 'obs-cache');
-  await vscode.workspace.fs.createDirectory(cacheDir);
-
-  const cacheUri = vscode.Uri.joinPath(cacheDir, safeFileName);
-  const content = [
-    `OBS readonly preview`,
-    ``,
-    `Source: ${obsPath}`,
-    `Cached: ${cacheUri.fsPath}`,
-    `Mode: read-only`,
-    ``,
-    `This mock represents an OBS object that was downloaded to a local cache before opening.`,
-    `Direct edits are disabled for OBS files in the current workflow.`,
-    ``,
-  ].join('\n');
-  await vscode.workspace.fs.writeFile(cacheUri, Buffer.from(content, 'utf-8'));
-
-  const readonlyUri = vscode.Uri.from({
-    scheme: OBS_READONLY_SCHEME,
-    path: `/${safeFileName}`,
-    query: `source=${encodeURIComponent(obsPath)}&cache=${encodeURIComponent(cacheUri.fsPath)}`,
-  });
-  obsReadonlyDocuments.set(readonlyUri.toString(), content);
-
-  const document = await vscode.workspace.openTextDocument(readonlyUri);
-  await vscode.window.showTextDocument(document, {
-    viewColumn: vscode.ViewColumn.Active,
-    preview: false,
-  });
-}
-
-async function cleanupObsReadonlyDocument(uri: vscode.Uri): Promise<void> {
-  obsReadonlyDocuments.delete(uri.toString());
-
-  const cachePath = new URLSearchParams(uri.query).get('cache');
-  if (!cachePath) {
-    return;
-  }
-
-  try {
-    await vscode.workspace.fs.delete(vscode.Uri.file(cachePath));
-  } catch {
-    // Cache cleanup is best-effort; the file may have already been removed.
-  }
-}
-
-/**
- * Resolve a page-state file from a stable page key.
- *
- * Page layouts can change freely; the extension only owns the storage root.
- * Each page/flow persists into one JSON file under the configured local
- * state directory.
- */
-function resolveConfigPath(flow: string): string | undefined {
-  const dirPath = resolveLocalConfigDirectory();
-  if (!dirPath) {
-    return undefined;
-  }
-  const segments = flow.split(/[\\/]+/).map(toConfigPathSegment).filter(Boolean);
-  if (segments.length === 0) {
-    return path.join(dirPath, 'default.json');
-  }
-  const fileName = `${segments[segments.length - 1]}.json`;
-  return path.join(dirPath, ...segments.slice(0, -1), fileName);
-}
-
-function toConfigPathSegment(flow: string): string {
-  const normalized = flow.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
-  return normalized || 'default';
-}
-
-function resolveLocalConfigDirectory(): string | undefined {
-  const projectRoot = resolveProjectRoot();
-  if (!projectRoot) {
-    return undefined;
-  }
-
-  return path.join(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR);
-}
-
-function resolveProjectRoot(): string | undefined {
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders || folders.length === 0) {
-    return undefined;
-  }
-
-  const expectedRoots = [...PROJECT_REPOS];
-  const matched = expectedRoots
-    .map((name) => folders.find((folder) => folder.name.toLowerCase() === name))
-    .filter((folder): folder is vscode.WorkspaceFolder => Boolean(folder));
-  const parents = new Set(matched.map((folder) => path.dirname(folder.uri.fsPath)));
-  if (matched.length >= 2 && parents.size === 1) {
-    return [...parents][0];
-  }
-
-  return path.dirname(folders[0].uri.fsPath);
-}
-
-function resolveExecutionCwd(title: string, command: string): string | undefined {
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders || folders.length === 0) {
-    return undefined;
-  }
-
-  const flow = inferDftFlow(title, command);
-  const preferredName = flow === 'verification' ? 'verification' : flow;
-  const preferredFolder = folders.find((folder) => folder.name.toLowerCase() === preferredName);
-  if (preferredFolder) {
-    return preferredFolder.uri.fsPath;
-  }
-
-  return resolveProjectRoot() ?? folders[0].uri.fsPath;
-}
-
-async function openExecutionTerminal(options: {
-  title?: string;
-  command?: string;
-  cwd?: string;
-}): Promise<void> {
-  const title = typeof options.title === 'string' && options.title.trim()
-    ? options.title.trim()
-    : 'DFT IDE Task';
-  const command = typeof options.command === 'string' ? options.command.trim() : '';
-  const requestedCwd = typeof options.cwd === 'string' && options.cwd.trim() ? options.cwd.trim() : undefined;
-  const terminalCwd = requestedCwd ?? resolveExecutionCwd(title, command);
-  const terminal = vscode.window.createTerminal({
-    name: title,
-    cwd: terminalCwd,
-  });
-
-  terminal.show();
-  if (command) {
-    terminal.sendText(command);
-  }
-
-  vscode.window.showInformationMessage(`DFT IDE terminal opened: ${title}`);
-  void runDftLogDiagnosticsDemo(title, command).catch((error) => {
-    vscode.window.showWarningMessage(
-      `DFT IDE log diagnostics demo failed: ${error instanceof Error ? error.message : String(error)}`
-    );
-  });
-}
-
-function normalizeHistoryFlow(flow: unknown): string {
-  const value = typeof flow === 'string' ? flow : 'default';
-  return /^[a-z0-9_-]+$/i.test(value) ? value : 'default';
-}
-
-async function saveExecutionHistoryRecord(
-  flow: unknown,
-  record: Record<string, unknown> | PipelineRuntimeHistoryRecord,
-): Promise<void> {
-  const normalizedFlow = normalizeHistoryFlow(flow);
-  const projectRoot = resolveProjectRoot();
-  if (!projectRoot) {
-    throw new Error('未找到项目根目录');
-  }
-
-  const historyDir = path.join(projectRoot, '.dft-ide', 'local-state', 'history', normalizedFlow);
-  await vscode.workspace.fs.createDirectory(vscode.Uri.file(historyDir));
-  await ensureLocalStateIgnored(projectRoot, path.join(projectRoot, '.dft-ide', 'local-state'));
-
-  const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(historyDir));
-  const jsonFiles = entries
-    .filter(e => e[1] === vscode.FileType.File && e[0].endsWith('.json'))
-    .map(e => e[0])
-    .sort();
-  if (jsonFiles.length >= 500) {
-    const toDelete = jsonFiles.slice(0, jsonFiles.length - 499);
-    for (const name of toDelete) {
-      await vscode.workspace.fs.delete(vscode.Uri.file(path.join(historyDir, name)));
-    }
-  }
-
-  const id = `exec_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-  const fullRecord = { ...record, flow: normalizedFlow, id, executedAt: Date.now() };
-  const filePath = path.join(historyDir, `${id}.json`);
-  await vscode.workspace.fs.writeFile(
-    vscode.Uri.file(filePath),
-    Buffer.from(JSON.stringify(fullRecord, null, 2))
-  );
-}
-
-type DftFlowKind = 'hibist' | 'sailor' | 'verification';
-
-interface DftDiagnosticParseOptions {
-  flow: DftFlowKind;
-  tool: 'hibist' | 'sailor' | 'lander' | 'unknown';
-}
-
-interface DftDiagnosticParseResult {
-  logPath: string;
-  errorCount: number;
-  warningCount: number;
-  infoCount: number;
-  totalCount: number;
-}
-
-interface ParsedDftLogIssue {
-  severity: vscode.DiagnosticSeverity;
-  severityLabel: string;
-  filePath?: string;
-  line?: number;
-  column?: number;
-  message: string;
-  logLine: number;
-}
-
-async function runDftLogDiagnosticsDemo(
-  title: string,
-  command: string
-): Promise<DftDiagnosticParseResult | undefined> {
-  const projectRoot = resolveProjectRoot();
-  if (!projectRoot) {
-    return undefined;
-  }
-
-  const flow = inferDftFlow(title, command);
-  const tool = inferDftTool(title, command, flow);
-  const logPath = await writeDftDiagnosticsDemoFiles(projectRoot, flow, tool);
-  const result = await parseDftExecutionLog(logPath, { flow, tool });
-
-  void vscode.commands.executeCommand('workbench.actions.view.problems');
-  vscode.window.showInformationMessage(
-    `DFT IDE parsed demo ${tool}.log: ${result.errorCount} errors, ${result.warningCount} warnings.`
-  );
-
-  return result;
-}
-
-async function parseDftExecutionLog(
-  logPath: string,
-  options: DftDiagnosticParseOptions
-): Promise<DftDiagnosticParseResult> {
-  const logUri = vscode.Uri.file(logPath);
-  const raw = await vscode.workspace.fs.readFile(logUri);
-  const content = Buffer.from(raw).toString('utf-8');
-  const issues = parseDftLogContent(content);
-  const diagnosticsByFile = new Map<string, { uri: vscode.Uri; diagnostics: vscode.Diagnostic[] }>();
-
-  dftDiagnostics.clear();
-
-  for (const issue of issues) {
-    const targetUri = await resolveDiagnosticTargetUri(issue, logUri);
-    const range = createDiagnosticRange(issue, targetUri.toString() === logUri.toString() ? issue.logLine : undefined);
-    const diagnostic = new vscode.Diagnostic(
-      range,
-      `[${options.tool}/${options.flow}] ${issue.message}`,
-      issue.severity
-    );
-    diagnostic.source = 'DFT IDE';
-    diagnostic.code = options.tool;
-    diagnostic.relatedInformation = [
-      new vscode.DiagnosticRelatedInformation(
-        new vscode.Location(logUri, new vscode.Position(Math.max(issue.logLine - 1, 0), 0)),
-        `Parsed from ${path.basename(logPath)} line ${issue.logLine}`
-      ),
-    ];
-
-    const key = targetUri.toString();
-    const bucket = diagnosticsByFile.get(key) ?? { uri: targetUri, diagnostics: [] };
-    bucket.diagnostics.push(diagnostic);
-    diagnosticsByFile.set(key, bucket);
-  }
-
-  for (const bucket of diagnosticsByFile.values()) {
-    dftDiagnostics.set(bucket.uri, bucket.diagnostics);
-  }
-
-  const errorCount = issues.filter((issue) => issue.severity === vscode.DiagnosticSeverity.Error).length;
-  const warningCount = issues.filter((issue) => issue.severity === vscode.DiagnosticSeverity.Warning).length;
-  const infoCount = issues.filter((issue) => issue.severity === vscode.DiagnosticSeverity.Information).length;
-
-  return {
-    logPath,
-    errorCount,
-    warningCount,
-    infoCount,
-    totalCount: issues.length,
-  };
-}
-
-function parseDftLogContent(content: string): ParsedDftLogIssue[] {
-  const lines = content.split(/\r?\n/);
-  const issues: ParsedDftLogIssue[] = [];
-
-  lines.forEach((line, index) => {
-    const parsed = parseDftLogLine(line, index + 1);
-    if (parsed) {
-      issues.push(parsed);
-    }
-  });
-
-  return issues;
-}
-
-function parseDftLogLine(line: string, logLine: number): ParsedDftLogIssue | undefined {
-  const bracketMatch = line.match(
-    /\b(Error|Warning)-\[[^\]]+\]\s+(?:(.+?):(\d+)(?::(\d+))?\s*[:\-]\s*)?(.+)$/i
-  );
-  if (bracketMatch) {
-    return {
-      severity: toDiagnosticSeverity(bracketMatch[1]),
-      severityLabel: bracketMatch[1].toUpperCase(),
-      filePath: bracketMatch[2]?.trim(),
-      line: bracketMatch[3] ? Number(bracketMatch[3]) : undefined,
-      column: bracketMatch[4] ? Number(bracketMatch[4]) : undefined,
-      message: bracketMatch[5].trim(),
-      logLine,
-    };
-  }
-
-  const genericMatch = line.match(
-    /\b(ERROR|WARNING|WARN)\b[:\s-]*(?:(.+?):(\d+)(?::(\d+))?\s*[:\-]\s*)?(.+)$/i
-  );
-  if (genericMatch) {
-    return {
-      severity: toDiagnosticSeverity(genericMatch[1]),
-      severityLabel: genericMatch[1].toUpperCase(),
-      filePath: genericMatch[2]?.trim(),
-      line: genericMatch[3] ? Number(genericMatch[3]) : undefined,
-      column: genericMatch[4] ? Number(genericMatch[4]) : undefined,
-      message: genericMatch[5].trim(),
-      logLine,
-    };
-  }
-
-  return undefined;
-}
-
-function toDiagnosticSeverity(label: string): vscode.DiagnosticSeverity {
-  const normalized = label.toLowerCase();
-  if (normalized === 'error') {
-    return vscode.DiagnosticSeverity.Error;
-  }
-  if (normalized === 'warning' || normalized === 'warn') {
-    return vscode.DiagnosticSeverity.Warning;
-  }
-  return vscode.DiagnosticSeverity.Information;
-}
-
-async function resolveDiagnosticTargetUri(
-  issue: ParsedDftLogIssue,
-  logUri: vscode.Uri
-): Promise<vscode.Uri> {
-  if (!issue.filePath) {
-    return logUri;
-  }
-
-  const filePath = path.isAbsolute(issue.filePath)
-    ? issue.filePath
-    : path.resolve(path.dirname(logUri.fsPath), issue.filePath);
-  const uri = vscode.Uri.file(filePath);
-
-  try {
-    const stat = await vscode.workspace.fs.stat(uri);
-    return stat.type === vscode.FileType.File ? uri : logUri;
-  } catch {
-    return logUri;
-  }
-}
-
-function createDiagnosticRange(issue: ParsedDftLogIssue, fallbackLine?: number): vscode.Range {
-  const line = Math.max((issue.line ?? fallbackLine ?? 1) - 1, 0);
-  const column = Math.max((issue.column ?? 1) - 1, 0);
-  return new vscode.Range(line, column, line, column + 1);
-}
-
-async function writeDftDiagnosticsDemoFiles(
-  projectRoot: string,
-  flow: DftFlowKind,
-  tool: DftDiagnosticParseOptions['tool']
-): Promise<string> {
-  const demoDir = path.join(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR, 'demo-logs', flow);
-  const sourceDir = path.join(demoDir, 'sources');
-  await vscode.workspace.fs.createDirectory(vscode.Uri.file(sourceDir));
-  await ensureLocalStateIgnored(projectRoot, path.join(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR));
-
-  if (flow === 'hibist') {
-    const rtlPath = path.join(sourceDir, 'top.v');
-    const tclPath = path.join(sourceDir, 'dft_constraints.tcl');
-    await vscode.workspace.fs.writeFile(vscode.Uri.file(rtlPath), Buffer.from(createDemoSource(60, 42, 'assign scan_out = missing_port;'), 'utf-8'));
-    await vscode.workspace.fs.writeFile(vscode.Uri.file(tclPath), Buffer.from(createDemoSource(30, 18, 'set_dft_signal -type ScanEnable scan_en'), 'utf-8'));
-    const logPath = path.join(demoDir, `${tool}.log`);
-    const log = [
-      `[INFO] ${tool} design flow started`,
-      `ERROR: ${rtlPath}:42:20: port missing_port was not found in the current design`,
-      `WARNING: ${tclPath}:18:5: scan enable constraint did not match any port`,
-      'INFO: report summary written to ./reports/dft_summary.rpt',
-      '',
-    ].join('\n');
-    await vscode.workspace.fs.writeFile(vscode.Uri.file(logPath), Buffer.from(log, 'utf-8'));
-    return logPath;
-  }
-
-  const tbPath = path.join(sourceDir, 'scan_tb.sv');
-  const casePath = path.join(sourceDir, 'smoke_test.yaml');
-  await vscode.workspace.fs.writeFile(vscode.Uri.file(tbPath), Buffer.from(createDemoSource(80, 57, 'uvm_error("SCAN", "signature mismatch")'), 'utf-8'));
-  await vscode.workspace.fs.writeFile(vscode.Uri.file(casePath), Buffer.from(createDemoSource(25, 9, 'pattern: stuck_at_demo'), 'utf-8'));
-  const logPath = path.join(demoDir, 'lander.log');
-  const log = [
-    '[INFO] lander verification flow started',
-    `Error-[DFT-1024] ${tbPath}:57:3: scan chain signature mismatched expected value`,
-    `WARNING: ${casePath}:9:1: testcase uses a deprecated pattern option`,
-    'INFO: waveform generated at ./waves/demo.fsdb',
-    '',
-  ].join('\n');
-  await vscode.workspace.fs.writeFile(vscode.Uri.file(logPath), Buffer.from(log, 'utf-8'));
-  return logPath;
-}
-
-function createDemoSource(lineCount: number, specialLine: number, specialText: string): string {
-  const lines: string[] = [];
-  for (let index = 1; index <= lineCount; index++) {
-    lines.push(index === specialLine ? specialText : `// demo source line ${index}`);
-  }
-  return `${lines.join('\n')}\n`;
-}
-
-function inferDftFlow(title: string, command: string): DftFlowKind {
-  const value = `${title} ${command}`.toLowerCase();
-  return value.includes('verification') || value.includes('sim') || value.includes('plan')
-    ? 'verification'
-    : 'hibist';
-}
-
-function inferDftTool(
-  title: string,
-  command: string,
-  flow: DftFlowKind
-): DftDiagnosticParseOptions['tool'] {
-  const value = `${title} ${command}`.toLowerCase();
-  if (value.includes('hibist')) {
-    return 'hibist';
-  }
-  if (value.includes('sailor')) {
-    return 'sailor';
-  }
-  if (value.includes('lander')) {
-    return 'lander';
-  }
-  return flow === 'verification' ? 'lander' : 'sailor';
-}
-
-function resolveDefaultProjectName(): string | undefined {
-  const projectRoot = resolveProjectRoot();
-  if (projectRoot) {
-    return path.basename(projectRoot);
-  }
-
-  const workspaceName = vscode.workspace.name?.trim();
-  return workspaceName || undefined;
-}
-
-function toProjectStateDirectoryName(projectRoot: string): string {
-  const normalizedRoot = path.resolve(projectRoot);
-  const basename = path.basename(normalizedRoot).trim() || 'project';
-  const safeName = basename.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
-  return `${safeName}-${hashString(normalizedRoot.toLowerCase())}`;
-}
-
-function hashString(value: string): string {
-  let hash = 2166136261;
-  for (let i = 0; i < value.length; i++) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-}
-
-async function openProjectWorkspace(rootPath: string): Promise<{ opened: boolean; targetPath: string; alreadyOpen: boolean }> {
-  const targetUri = await resolveProjectWorkspaceUri(rootPath);
-  const targetRoot = targetUri.fsPath.toLowerCase().endsWith('.code-workspace')
-    ? path.dirname(targetUri.fsPath)
-    : targetUri.fsPath;
-
-  if (isProjectCurrentlyOpen(targetRoot)) {
-    await vscode.commands.executeCommand('dftIde.openFlow', 'Common');
-    return {
-      opened: false,
-      targetPath: targetUri.fsPath,
-      alreadyOpen: true,
-    };
-  }
-
-  await vscode.commands.executeCommand('vscode.openFolder', targetUri, false);
-  return {
-    opened: true,
-    targetPath: targetUri.fsPath,
-    alreadyOpen: false,
-  };
-}
-
-async function resolveProjectWorkspaceUri(rootPath: string): Promise<vscode.Uri> {
-  const normalized = path.resolve(rootPath);
-  const uri = vscode.Uri.file(normalized);
-
-  if (normalized.toLowerCase().endsWith('.code-workspace')) {
-    await vscode.workspace.fs.stat(uri);
-    return uri;
-  }
-
-  const stat = await vscode.workspace.fs.stat(uri);
-  if (stat.type !== vscode.FileType.Directory) {
-    throw new Error(`Project path is not a directory: ${rootPath}`);
-  }
-
-  const workspaceUri = vscode.Uri.file(path.join(normalized, 'dft-ide.code-workspace'));
-  try {
-    await vscode.workspace.fs.stat(workspaceUri);
-    return workspaceUri;
-  } catch {
-    return uri;
-  }
-}
-
-function isProjectCurrentlyOpen(projectRoot: string): boolean {
-  const currentRoot = resolveProjectRoot();
-  if (!currentRoot) {
-    return false;
-  }
-
-  return normalizeFsPath(currentRoot) === normalizeFsPath(projectRoot);
-}
-
-function normalizeFsPath(value: string): string {
-  return path.resolve(value).replace(/[\\/]+$/, '').toLowerCase();
-}
-
-async function getLocalConfigInfo(): Promise<{
-  configuredPath: string;
-  effectivePath: string | null;
-  defaultPath: string | null;
-  isDefault: boolean;
-  lastSelectedProject?: string;
-}> {
-  const configuredPath = vscode.workspace.getConfiguration('dftIde').get<string>('localProjectsRoot', '').trim();
-  const projectRoot = resolveProjectRoot();
-  const defaultPath = projectRoot ? path.join(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR) : null;
-  const effectivePath = resolveLocalConfigDirectory() ?? null;
-  const lastSelectedProject = vscode.workspace.getConfiguration('dftIde').get<string>('lastSelectedProject', '').trim();
-
-  if (effectivePath) {
-    await ensureLocalConfigDirectory(effectivePath);
-  }
-  if (projectRoot) {
-    await ensureLocalStateIgnored(projectRoot, effectivePath ?? undefined);
-  }
-
-  return {
-    configuredPath,
-    effectivePath,
-    defaultPath,
-    isDefault: !configuredPath,
-    lastSelectedProject,
-  };
-}
-
-async function updateLocalConfigPath(localPath: string): Promise<void> {
-  await vscode.workspace.getConfiguration('dftIde').update(
-    'localProjectsRoot',
-    localPath || undefined,
-    vscode.ConfigurationTarget.Global
-  );
-
-  const effectivePath = resolveLocalConfigDirectory();
-  if (effectivePath) {
-    await ensureLocalConfigDirectory(effectivePath);
-  }
-
-  const projectRoot = resolveProjectRoot();
-  if (projectRoot) {
-    await ensureLocalStateIgnored(projectRoot, effectivePath ?? undefined);
-  }
-}
-
-async function initProjectWorkspace(project:DftProject): Promise<string> {
-  const projectLocalRoot = project.rootPath.trim();
-  if (!projectLocalRoot) {
-    throw new Error('Please set the project local root before entering a project.');
-  }
-
-  await vscode.workspace.getConfiguration('dftIde').update(
-    'lastSelectedProject',
-    project.id,
-    vscode.ConfigurationTarget.Global
-  );
-
-  const projectName = project.name;
-  const projectDirName = toSafeProjectDirectoryName(project.name);
-  const projectPath = path.join(path.resolve(projectLocalRoot), projectDirName);
-  const projectRoot = vscode.Uri.file(projectPath);
-  await vscode.workspace.fs.createDirectory(projectRoot);
-
-  const repoProjectPrefix = toGitLabProjectPrefix(projectName);
-  const repos: Array<{ key: string; gitlabProjectName: string; localPath: string }> = [];
-  const folders: Array<{ name: string; path: string }> = [];
-  await setGitCredentialHelper();
-  for (const repo of PROJECT_REPOS) {
-    const repoItem = project.repos.find((item) => item.key === repo);
-    if (!repoItem) continue;
-    const repoUri = vscode.Uri.joinPath(projectRoot, repoItem.gitlabProjectName);
-    try {
-      await vscode.workspace.fs.stat(repoUri);
-    } catch (error) {
-      // Use the git CLI directly so cloning stays in the current VS Code window.
-      if (!repoItem.http_url_to_repo) {
-        throw new Error(`Missing clone URL for ${repoItem.gitlabProjectName}.`);
-      }
-      await cloneRepoWithTerminal(repoItem.http_url_to_repo, projectPath);
-    }
-    await writeFileIfMissing(
-      vscode.Uri.joinPath(repoUri, 'README.md'),
-      `# ${repoProjectPrefix}_${repo}\n\nLocal placeholder for the GitLab repository \`${repoProjectPrefix}_${repo}\`.\n`
-    );
-    repos.push({
-      key: repo,
-      gitlabProjectName: repoItem.gitlabProjectName,
-      localPath: repoUri.fsPath,
-    });
-    folders.push({
-      name: repo,
-      path: repoItem.gitlabProjectName,
-    });
-  }
-
-  const localStateUri = vscode.Uri.joinPath(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR);
-  await vscode.workspace.fs.createDirectory(localStateUri);
-  await writeDefaultLocalState(localStateUri, repos);
-
-  await ensureLocalStateIgnored(projectRoot.fsPath, localStateUri.fsPath);
-
-  const workspaceFile = vscode.Uri.joinPath(projectRoot, 'dft-ide.code-workspace');
-  const workspaceContent = {
-    folders: folders,
-    settings: {
-      'workbench.startupEditor': 'none'
-    }
-  };
-  await writeFileIfMissing(workspaceFile, JSON.stringify(workspaceContent, null, 2));
-
-  return projectPath;
-}
-
-async function cloneRepoWithTerminal(repoUrl: string, projectPath: string) {
-  const terminal = vscode.window.createTerminal({
-    name: 'Git Clone',
-    cwd: projectPath
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    terminal.sendText(`git clone ${repoUrl}`);
-    const disposable = vscode.window.onDidEndTerminalShellExecution(data => {
-      disposable.dispose();
-      if (data?.exitCode === 0) {
-        terminal.dispose();
-        resolve();
-      } else {
-        reject(new Error('Failed to clone the Git repository. See terminal logs for specific error details'));
-      }
-    });
-  });
-}
-
-async function setGitCredentialHelper() {
-  if (process.platform !== 'linux') return;
-  try {
-    const stdout = await executeFileCommand('git', ['config', '--global', '--get', 'credential.helper']);
-    if (!stdout.trim()) {
-      throw new Error('No credential helper configured');
-    }
-  } catch {
-    try {
-      await executeFileCommand('git', ['config', '--global', 'credential.helper', 'cache']);
-    } catch (error) {
-      console.error('Failed to set git credential helper:', error);
-    }
-  }
-}
-
-async function writeDefaultLocalState(localStateUri: vscode.Uri, repos: {
-  key: string,
-  gitlabProjectName: string,
-  localPath: string,
-}[]) {
-  for (const repo of repos) {
-    if (repo.key === 'data') continue;
-
-    const stateUri = vscode.Uri.joinPath(localStateUri, repo.key + '.json');
-    let content = '{}';
-    try {
-      const bytes = await vscode.workspace.fs.readFile(stateUri);
-      content = Buffer.from(bytes).toString('utf-8');
-    } catch {
-      content = '{}';
-    }
-    const stateObject = JSON.parse(content);
-
-    if (!stateObject.project) {
-      const cshrcFilePath = path.join(repo.localPath, 'project.cshrc');
-      const isExists = await pathExists(cshrcFilePath);
-      if (isExists) stateObject.project = cshrcFilePath;
-    }
-    if (!stateObject.sailorCfg) {
-      const cfgFilePath = path.join(repo.localPath, 'common.cfg');
-      const isExists = await pathExists(cfgFilePath);
-      if (isExists) stateObject.sailorCfg = cfgFilePath;
-    }
-
-    await writeFileIfMissing(stateUri, JSON.stringify(stateObject, null, 2));
-  }
-}
-
-async function prepareProjectWorkspace(
-  projectName: string,
-  projectKey: string
-): Promise<{ rootPath: string; workspacePath: string; repos: Array<{ key: string; gitlabProjectName: string; localPath: string }> }> {
-  const localProjectsRoot = vscode.workspace.getConfiguration('dftIde').get<string>('localProjectsRoot', '').trim();
-  if (!localProjectsRoot) {
-    throw new Error('Please set the local projects root before preparing a project.');
-  }
-
-  const projectDirName = toSafeProjectDirectoryName(projectKey || projectName);
-  const projectRoot = vscode.Uri.file(path.join(path.resolve(localProjectsRoot), projectDirName));
-  await vscode.workspace.fs.createDirectory(projectRoot);
-
-  const repoProjectPrefix = toGitLabProjectPrefix(projectName);
-  const repos: Array<{ key: string; gitlabProjectName: string; localPath: string }> = [];
-  for (const repo of PROJECT_REPOS) {
-    const repoUri = vscode.Uri.joinPath(projectRoot, repo);
-    await vscode.workspace.fs.createDirectory(repoUri);
-    await writeFileIfMissing(
-      vscode.Uri.joinPath(repoUri, 'README.md'),
-      `# ${repoProjectPrefix}_${repo}\n\nLocal placeholder for the GitLab repository \`${repoProjectPrefix}_${repo}\`.\n`
-    );
-    repos.push({
-      key: repo,
-      gitlabProjectName: `${repoProjectPrefix}_${repo}`,
-      localPath: repoUri.fsPath,
-    });
-  }
-
-  const localStateUri = vscode.Uri.joinPath(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR);
-  await vscode.workspace.fs.createDirectory(localStateUri);
-  await ensureLocalStateIgnored(projectRoot.fsPath, localStateUri.fsPath);
-
-  const workspaceFile = vscode.Uri.joinPath(projectRoot, 'dft-ide.code-workspace');
-  const workspaceContent = {
-    folders: PROJECT_REPOS.map((repo) => ({ name: repo, path: repo })),
-    settings: {
-      'workbench.startupEditor': 'none'
-    }
-  };
-  await vscode.workspace.fs.writeFile(workspaceFile, Buffer.from(JSON.stringify(workspaceContent, null, 2)));
-
-  vscode.window.showInformationMessage(`DFT IDE 项目初始化完成：${projectName}`);
-
-  return {
-    rootPath: projectRoot.fsPath,
-    workspacePath: workspaceFile.fsPath,
-    repos,
-  };
-}
-
-async function writeFileIfMissing(uri: vscode.Uri, content: string): Promise<void> {
-  try {
-    await vscode.workspace.fs.stat(uri);
-  } catch {
-    await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf-8'));
-  }
-}
-
-function toSafeProjectDirectoryName(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'dft-project';
-}
-
-function toGitLabProjectPrefix(value: string): string {
-  return value.trim().replace(/\s+/g, '-').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'dft-project';
-}
-
-async function ensureLocalConfigDirectory(dirPath: string): Promise<void> {
-  await vscode.workspace.fs.createDirectory(vscode.Uri.file(dirPath));
-}
-
-async function ensureLocalStateIgnored(projectRoot: string, effectivePath?: string): Promise<void> {
-  const ignoreEntries = new Set<string>([`${LOCAL_STATE_DIR_NAME}/`]);
-  if (effectivePath) {
-    const relative = path.relative(projectRoot, effectivePath).replace(/\\/g, '/');
-    if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
-      ignoreEntries.add(relative.endsWith('/') ? relative : `${relative}/`);
-    }
-  }
-
-  const gitignoreUri = vscode.Uri.file(path.join(projectRoot, '.gitignore'));
-  let content = '';
-  try {
-    const bytes = await vscode.workspace.fs.readFile(gitignoreUri);
-    content = Buffer.from(bytes).toString('utf-8');
-  } catch {
-    content = '';
-  }
-
-  const lines = new Set(content.split(/\r?\n/).map((line) => line.trim()));
-  const missing = [...ignoreEntries].filter((entry) => !lines.has(entry));
-  if (missing.length === 0) {
-    return;
-  }
-
-  const prefix = content && !content.endsWith('\n') ? '\n' : '';
-  const nextContent = `${content}${prefix}\n# DFT IDE local user state\n${missing.join('\n')}\n`;
-  await vscode.workspace.fs.writeFile(gitignoreUri, Buffer.from(nextContent, 'utf-8'));
-}
-
-/**
- * 读取已存在的配置文件，与新数据深合并后返回合并结果。
- * 这样做可以保证同一文件中来自不同 Step 的字段互不覆盖。
- *
- * 例如：Step1 保存了 { project, commonPath }
- *       Step2 保存了 { step2Task, step2Design }
- *       最终文件中两部分都会保留。
- */
-async function mergeConfigFile(
-  filePath: string,
-  newData: Record<string, unknown>
-): Promise<Record<string, unknown>> {
-  try {
-    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
-    const existing = JSON.parse(Buffer.from(bytes).toString('utf-8')) as Record<string, unknown>;
-    return { ...existing, ...newData };
-  } catch {
-    // 文件不存在（首次保存）或解析失败，直接使用新数据
-    return newData;
-  }
-}
-
-async function readDesignTreeState(flow?: string): Promise<Record<string, unknown> | null> {
-  const commonPath = resolveConfigPath('common');
-  if (!commonPath) {
-    return null;
-  }
-
-  const common = await readJsonFile(commonPath);
-  const syncedDesignTreePath = getSyncedArtifactPath(common, flow, 'designTree');
-  if (syncedDesignTreePath) {
-    const fileData = await readJsonFile(syncedDesignTreePath);
-    if (fileData) {
-      return {
-        ...fileData,
-        sourcePath: syncedDesignTreePath,
-        sourceMode: 'repoDesignTreeFile'
-      };
-    }
-  }
-
-  const designTreeFilePath = resolveDesignTreeFilePath(common);
-  if (designTreeFilePath) {
-    const fileData = await readJsonFile(designTreeFilePath);
-    if (fileData) {
-      return {
-        ...fileData,
-        sourcePath: designTreeFilePath,
-        sourceMode: 'designTreeFile'
-      };
-    }
-  }
-
-  const draft = common?.designTreeDraft;
-  return isRecord(draft) ? { ...draft, sourceMode: 'commonMock' } : null;
-}
-
-async function saveDesignTreeState(
-  flow: string,
-  data: Record<string, unknown>
-): Promise<{ filePath: string; mode: string }> {
-  const commonPath = resolveConfigPath('common');
-  if (!commonPath) {
-    throw new Error('Workspace local-state path is not available.');
-  }
-
-  await ensureLocalConfigDirectory(path.dirname(commonPath));
-  const common = await readJsonFile(commonPath);
-  const syncedDesignTreePath = getSyncedArtifactPath(common, flow, 'designTree');
-  const designTreeFilePath = syncedDesignTreePath ?? resolveDesignTreeFilePath(common);
-  const encoded = Buffer.from(JSON.stringify(data, null, 2), 'utf-8');
-
-  if (designTreeFilePath) {
-    await ensureLocalConfigDirectory(path.dirname(designTreeFilePath));
-    await vscode.workspace.fs.writeFile(vscode.Uri.file(designTreeFilePath), encoded);
-    await updateModuleConfigSkeleton(flow, data);
-    return {
-      filePath: vscode.workspace.asRelativePath(designTreeFilePath),
-      mode: 'designTreeFile'
-    };
-  }
-
-  const mergedCommon = await mergeConfigFile(commonPath, {
-    designTreeDraft: data,
-    designTreeUpdatedAt: new Date().toISOString()
-  });
-  await vscode.workspace.fs.writeFile(
-    vscode.Uri.file(commonPath),
-    Buffer.from(JSON.stringify(mergedCommon, null, 2), 'utf-8')
-  );
-  await updateModuleConfigSkeleton(flow, data);
-  return {
-    filePath: vscode.workspace.asRelativePath(commonPath),
-    mode: 'commonMock'
-  };
-}
-
-async function updateModuleConfigSkeleton(flow: string, treeState: Record<string, unknown>): Promise<void> {
-  const flowPath = resolveConfigPath(flow);
-  if (!flowPath) {
-    return;
-  }
-
-  await ensureLocalConfigDirectory(path.dirname(flowPath));
-  const existing = await readJsonFile(flowPath) ?? {};
-  const { moduleConfigs: _legacyModuleConfigs, ...flowState } = existing;
-  const modules = collectDesignTreeModules(treeState.nodes);
-
-  await vscode.workspace.fs.writeFile(
-    vscode.Uri.file(flowPath),
-    Buffer.from(JSON.stringify({
-      ...flowState,
-      activeModuleKey: typeof existing.activeModuleKey === 'string' ? existing.activeModuleKey : modules[0]?.key,
-      modules: modules.map((module) => ({
-        key: module.key,
-        title: module.title,
-        type: module.type
-      }))
-    }, null, 2), 'utf-8')
-  );
-
-  for (const module of modules) {
-    const modulePath = resolveConfigPath(`${flow}/${module.key}/config`);
-    if (!modulePath) {
-      continue;
-    }
-    await ensureLocalConfigDirectory(path.dirname(modulePath));
-    const previous = await readJsonFile(modulePath) ?? {};
-    const merged = {
-      ...previous,
-      moduleKey: module.key,
-      title: module.title,
-      type: module.type,
-      updatedFromDesignTreeAt: new Date().toISOString()
-    };
-    await vscode.workspace.fs.writeFile(
-      vscode.Uri.file(modulePath),
-      Buffer.from(JSON.stringify(merged, null, 2), 'utf-8')
-    );
-  }
-}
-
-function resolveDesignTreeFilePath(common: Record<string, unknown> | null): string | undefined {
-  const rawPath = typeof common?.designTree === 'string' ? common.designTree.trim() : '';
-  if (!rawPath) {
-    return undefined;
-  }
-
-  const projectRoot = resolveProjectRoot();
-  const resolved = path.isAbsolute(rawPath)
-    ? rawPath
-    : projectRoot ? path.resolve(projectRoot, rawPath) : undefined;
-
-  if (!resolved) {
-    return undefined;
-  }
-
-  return path.extname(resolved) ? resolved : path.join(resolved, 'design_tree.mock.json');
-}
-
-function getSyncedArtifactPath(
-  common: Record<string, unknown> | null,
-  flow: string | undefined,
-  key: 'designTree' | 'normTable'
-): string | undefined {
-  const normalizedFlow = normalizeProjectRepo(flow);
-  if (!normalizedFlow || !common) {
-    return undefined;
-  }
-
-  const syncedArtifacts = common.syncedArtifacts;
-  if (!isRecord(syncedArtifacts)) {
-    return undefined;
-  }
-
-  const flowArtifacts = syncedArtifacts[normalizedFlow];
-  if (!isRecord(flowArtifacts)) {
-    return undefined;
-  }
-
-  const value = flowArtifacts[key];
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function normalizeProjectRepo(value: unknown): 'hibist' | 'sailor' | 'data' | 'verification' |  undefined {
-  return value === 'hibist' || value === 'sailor' || value === 'data' || value === 'verification' ? value : undefined;
-}
-
-function normalizeConfigFlow(value: unknown): 'hibist' | 'sailor' | 'verification' | undefined {
-  return value === 'hibist' || value === 'sailor' || value === 'verification' ? value : undefined;
-}
-
-interface FlowConfigFileInfo {
-  key: string;
-  moduleName: string;
-  fileName: string;
-  filePath: string;
-  updatedAt?: number;
-  size?: number;
-}
-
-function getProjectRepoRoot(repo: 'hibist' | 'sailor' | 'data' | 'verification' ): string {
-  const folders = vscode.workspace.workspaceFolders ?? [];
-  const matchedFolder = folders.find((folder) => isRepoFolderName(folder.name, repo));
-  if (matchedFolder) {
-    return matchedFolder.uri.fsPath;
-  }
-
-  const projectRoot = resolveProjectRoot();
-  if (!projectRoot) {
-    throw new Error('No DFT project workspace is open.');
-  }
-
-  return path.join(projectRoot, repo);
-}
-
-async function getFlowConfigsDirectory(flow: 'hibist' | 'sailor' | 'verification'): Promise<string> {
-  const repoRoot = await resolveProjectRepoRoot(flow);
-  return path.join(repoRoot, 'configs');
-}
-
-async function resolveProjectRepoRoot(repo: 'hibist' | 'sailor' | 'data' | 'verification'): Promise<string> {
-  const folders = vscode.workspace.workspaceFolders ?? [];
-  const matchedFolder = folders.find((folder) => isRepoFolderName(folder.name, repo));
-  if (matchedFolder) {
-    return matchedFolder.uri.fsPath;
-  }
-
-  const projectRoot = resolveProjectRoot();
-  if (projectRoot) {
-    const siblingRepo = await findSiblingRepoDirectory(projectRoot, repo);
-    if (siblingRepo) {
-      return siblingRepo;
-    }
-    const direct = path.join(projectRoot, repo);
-    if (await pathExists(direct)) {
-      return direct;
-    }
-    const bySuffix = await findRepoDirectory(projectRoot, repo);
-    if (bySuffix) {
-      return bySuffix;
-    }
-  }
-
-  const localProjectsRoot = vscode.workspace.getConfiguration('dftIde').get<string>('localProjectsRoot', '').trim();
-  if (localProjectsRoot) {
-    const projectId = vscode.workspace.getConfiguration('dftIde').get<string>('lastSelectedProject', '').trim();
-    const candidates = await findLocalProjectRoots(localProjectsRoot, projectId);
-    for (const candidate of candidates) {
-      const repoDir = await findRepoDirectory(candidate, repo);
-      if (repoDir) {
-        return repoDir;
-      }
-    }
-  }
-
-  if (projectRoot) {
-    return path.join(projectRoot, repo);
-  }
-
-  throw new Error('No DFT project workspace or local project root is available.');
-}
-
-function isRepoFolderName(name: string, repo: 'hibist' | 'sailor' | 'data' | 'verification'): boolean {
-  const normalized = name.toLowerCase();
-  return normalized === repo || normalized.endsWith(`_${repo}`);
-}
-
-async function findSiblingRepoDirectory(currentPath: string, repo: 'hibist' | 'sailor' | 'data' | 'verification'): Promise<string | undefined> {
-  const currentName = path.basename(currentPath).toLowerCase();
-  if (!PROJECT_REPOS.some((item) => isRepoFolderName(currentName, item))) {
-    return undefined;
-  }
-  return findRepoDirectory(path.dirname(currentPath), repo);
-}
-
-async function findLocalProjectRoots(localProjectsRoot: string, projectId: string): Promise<string[]> {
-  const root = path.resolve(localProjectsRoot);
-  const normalizedProjectId = projectId ? toConfigPathSegment(projectId) : '';
-  const roots: string[] = [];
-
-  if (normalizedProjectId) {
-    const direct = path.join(root, normalizedProjectId);
-    if (await pathExists(direct)) {
-      roots.push(direct);
-    }
-  }
-
-  try {
-    const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(root));
-    for (const [name, type] of entries) {
-      if (type !== vscode.FileType.Directory) {
-        continue;
-      }
-      const fullPath = path.join(root, name);
-      if (!normalizedProjectId || toConfigPathSegment(name).includes(normalizedProjectId)) {
-        if (!roots.some((item) => normalizeFsPath(item) === normalizeFsPath(fullPath))) {
-          roots.push(fullPath);
-        }
-      }
-    }
-  } catch {
-    // Keep the direct candidate only.
-  }
-
-  return roots;
-}
-
-async function findRepoDirectory(projectRoot: string, repo: 'hibist' | 'sailor' | 'data' | 'verification'): Promise<string | undefined> {
-  const direct = path.join(projectRoot, repo);
-  if (await pathExists(direct)) {
-    return direct;
-  }
-
-  try {
-    const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(projectRoot));
-    const match = entries.find(([name, type]) =>
-      type === vscode.FileType.Directory && name.toLowerCase().endsWith(`_${repo}`)
-    );
-    return match ? path.join(projectRoot, match[0]) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function listFlowConfigFiles(flow: 'hibist' | 'sailor' | 'verification'): Promise<{
-  configs: FlowConfigFileInfo[];
-  configsDir: string;
-}> {
-  const configsDir = await getFlowConfigsDirectory(flow);
-  await ensureLocalConfigDirectory(configsDir);
-  const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(configsDir));
-  const configs: FlowConfigFileInfo[] = [];
-
-  for (const [name, type] of entries) {
-    if (type !== vscode.FileType.File || path.extname(name).toLowerCase() !== '.cfg') {
-      continue;
-    }
-    const filePath = path.join(configsDir, name);
-    const stat = await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
-    configs.push(toFlowConfigFileInfo(filePath, stat));
-  }
-
-  configs.sort((a, b) => a.moduleName.localeCompare(b.moduleName));
-  return { configs, configsDir };
-}
-
-async function createFlowConfigFile(
-  flow: 'hibist' | 'sailor' | 'verification',
-  moduleName: string
-): Promise<FlowConfigFileInfo> {
-  const configsDir = await getFlowConfigsDirectory(flow);
-  const target = resolveCfgPath(configsDir, moduleName);
-  if (await pathExists(target)) {
-    throw new Error(`Config already exists: ${path.basename(target)}`);
-  }
-  const content = [
-    `# Auto-generated default ${flow} config`,
-    `module = ${moduleName}`,
-    `flow = ${flow}`,
-    ''
-  ].join('\n');
-  await vscode.workspace.fs.writeFile(vscode.Uri.file(target), Buffer.from(content, 'utf-8'));
-  const targetStat = await vscode.workspace.fs.stat(vscode.Uri.file(target));
-  return toFlowConfigFileInfo(target, targetStat);
-}
-
-async function duplicateFlowConfigFile(
-  flow: 'hibist' | 'sailor' | 'verification',
-  moduleName: string
-): Promise<FlowConfigFileInfo> {
-  const configsDir = await getFlowConfigsDirectory(flow);
-  const source = resolveCfgPath(configsDir, moduleName);
-  const stat = await vscode.workspace.fs.stat(vscode.Uri.file(source));
-  if (stat.type !== vscode.FileType.File) {
-    throw new Error(`Config is not a file: ${moduleName}`);
-  }
-
-  const targetModule = await makeUniqueCfgModuleName(configsDir, `${path.basename(moduleName, '.cfg')}_copy`);
-  const target = resolveCfgPath(configsDir, targetModule);
-  const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(source));
-  await vscode.workspace.fs.writeFile(vscode.Uri.file(target), bytes);
-  const targetStat = await vscode.workspace.fs.stat(vscode.Uri.file(target));
-  return toFlowConfigFileInfo(target, targetStat);
-}
-
-async function renameFlowConfigFile(
-  flow: 'hibist' | 'sailor' | 'verification',
-  moduleName: string,
-  nextModuleName: string
-): Promise<FlowConfigFileInfo> {
-  const configsDir = await getFlowConfigsDirectory(flow);
-  const source = resolveCfgPath(configsDir, moduleName);
-  const target = resolveCfgPath(configsDir, nextModuleName);
-  if (normalizeFsPath(source) === normalizeFsPath(target)) {
-    const stat = await vscode.workspace.fs.stat(vscode.Uri.file(source));
-    return toFlowConfigFileInfo(source, stat);
-  }
-  if (await pathExists(target)) {
-    throw new Error(`Config already exists: ${path.basename(target)}`);
-  }
-  await vscode.workspace.fs.rename(vscode.Uri.file(source), vscode.Uri.file(target));
-  const stat = await vscode.workspace.fs.stat(vscode.Uri.file(target));
-  return toFlowConfigFileInfo(target, stat);
-}
-
-async function deleteFlowConfigFile(
-  flow: 'hibist' | 'sailor' | 'verification',
-  moduleName: string
-): Promise<void> {
-  const configsDir = await getFlowConfigsDirectory(flow);
-  await vscode.workspace.fs.delete(vscode.Uri.file(resolveCfgPath(configsDir, moduleName)));
-}
-
-async function generateDefaultFlowConfigs(flow: 'hibist' | 'sailor' | 'verification'): Promise<{
-  configs: FlowConfigFileInfo[];
-  configsDir: string;
-  created: number;
-}> {
-  const configsDir = await getFlowConfigsDirectory(flow);
-  await ensureLocalConfigDirectory(configsDir);
-  const modules = await readModulesFromNormalizedTable(flow);
-  let created = 0;
-
-  for (const moduleName of modules) {
-    const filePath = resolveCfgPath(configsDir, moduleName);
-    if (await pathExists(filePath)) {
-      continue;
-    }
-    const content = [
-      `# Auto-generated default ${flow} config`,
-      `module = ${moduleName}`,
-      `flow = ${flow}`,
-      ''
-    ].join('\n');
-    await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), Buffer.from(content, 'utf-8'));
-    created += 1;
-  }
-
-  const listed = await listFlowConfigFiles(flow);
-  return { ...listed, created };
-}
-
-function resolveCfgPath(configsDir: string, moduleName: string): string {
-  const clean = sanitizeCfgModuleName(moduleName);
-  return path.join(configsDir, `${clean}.cfg`);
-}
-
-function sanitizeCfgModuleName(value: string): string {
-  const clean = path.basename(value.trim().replace(/\.cfg$/i, '')).replace(/[^a-zA-Z0-9_.-]+/g, '_').replace(/^_+|_+$/g, '');
-  if (!clean) {
-    throw new Error('Module name is required.');
-  }
-  return clean;
-}
-
-async function makeUniqueCfgModuleName(configsDir: string, base: string): Promise<string> {
-  const cleanBase = sanitizeCfgModuleName(base);
-  let candidate = cleanBase;
-  let index = 1;
-  while (await pathExists(resolveCfgPath(configsDir, candidate))) {
-    candidate = `${cleanBase}_${index++}`;
-  }
-  return candidate;
-}
-
-function toFlowConfigFileInfo(filePath: string, stat: vscode.FileStat): FlowConfigFileInfo {
-  const fileName = path.basename(filePath);
-  const moduleName = path.basename(fileName, '.cfg');
-  return {
-    key: moduleName,
-    moduleName,
-    fileName,
-    filePath,
-    updatedAt: stat.mtime,
-    size: stat.size
-  };
-}
-
-async function readModulesFromNormalizedTable(flow: 'hibist' | 'sailor' | 'verification'): Promise<string[]> {
-  const normTablePath = await resolveNormalizedTablePath(flow);
-  const modules = new Set<string>();
-
-  if (normTablePath) {
-    try {
-      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(normTablePath));
-      const text = Buffer.from(bytes).toString('utf-8');
-      const parsed = JSON.parse(text);
-      collectModuleNames(parsed, modules);
-    } catch {
-      // The generator stays useful even when the mock table is absent or incomplete.
-    }
-  }
-
-  if (modules.size === 0) {
-    modules.add('top_abc');
-  }
-
-  return [...modules].map(sanitizeCfgModuleName).sort((a, b) => a.localeCompare(b));
-}
-
-async function resolveNormalizedTablePath(flow: 'hibist' | 'sailor' | 'verification'): Promise<string | undefined> {
-  const commonPath = resolveConfigPath('common');
-  const common = commonPath ? await readJsonFile(commonPath) : null;
-  const synced = getSyncedArtifactPath(common, flow, 'normTable');
-  if (synced && await pathExists(synced)) {
-    return synced;
-  }
-
-  const dataForm = isRecord(common?.data) ? common.data : undefined;
-  const configured = [
-    dataForm?.normTable,
-    common?.dataNormTable,
-    common?.normTable
-  ].find((value): value is string => typeof value === 'string' && value.trim().length > 0);
-  if (configured) {
-    const resolved = path.isAbsolute(configured)
-      ? configured
-      : path.resolve(resolveProjectRoot() ?? path.dirname(commonPath ?? ''), configured);
-    if (await pathExists(resolved)) {
-      return resolved;
-    }
-  }
-
-  try {
-    const dataRoot = await resolveProjectRepoRoot('data');
-    const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(dataRoot));
-    const match = entries.find(([name, type]) =>
-      type === vscode.FileType.File && /^normalized-table\.(json|csv|md|txt)$/i.test(name)
-    );
-    return match ? path.join(dataRoot, match[0]) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function collectModuleNames(value: unknown, modules: Set<string>): void {
-  if (Array.isArray(value)) {
-    value.forEach((item) => collectModuleNames(item, modules));
-    return;
-  }
-  if (!isRecord(value)) {
-    return;
-  }
-
-  const moduleKeys = [
-    'moduleName',
-    'module_name',
-    'module',
-    'moduleId',
-    'module_id',
-    'block',
-    'blockName',
-    'block_name',
-    'designModule',
-    'design_module'
-  ];
-  for (const key of moduleKeys) {
-    const candidate = value[key];
-    if (typeof candidate === 'string' && candidate.trim()) {
-      modules.add(candidate.trim());
-    }
-  }
-
-  Object.values(value).forEach((item) => {
-    if (typeof item === 'object' && item !== null) {
-      collectModuleNames(item, modules);
-    }
-  });
-}
-
-async function getRepoGitInfoForWebview(repo: 'hibist' | 'sailor' | 'data' | 'verification'): Promise<{
-  repo: 'hibist' | 'sailor' | 'data' | 'verification';
-  repoRoot?: string;
-  branch?: string;
-  upstream?: string;
-  hasChanges?: boolean;
-  changedCount?: number;
-  changedFiles?: Array<{ path: string; type: string }>;
-  error?: string;
-}> {
-  try {
-    const repoRoot = getProjectRepoRoot(repo);
-    const info = await gitService.getCurrentGitInfo(vscode.Uri.file(repoRoot));
-    return {
-      repo,
-      repoRoot,
-      branch: info?.branch,
-      upstream: info?.upstream,
-      hasChanges: info?.hasChanges,
-      changedCount: info?.changedFiles.length ?? 0,
-      changedFiles: info?.changedFiles.map((file) => ({
-        path: file.path,
-        type: file.type
-      })) ?? []
-    };
-  } catch (error) {
-    return {
-      repo,
-      error: error instanceof Error ? error.message : String(error)
-    };
-  }
-}
-
-type RepoCloudSubmitResult = {
-  success: boolean;
-  state: 'clean' | 'committed' | 'pushed' | 'needsPull' | 'conflict' | 'gitOperationInProgress' | 'noRepo' | 'noRemote' | 'error';
-  repo: 'hibist' | 'sailor' | 'data' | 'verification';
-  repoRoot?: string;
-  branch?: string;
-  upstream?: string;
-  changedCount?: number;
-  conflictFiles?: Array<{ path: string; type: string }>;
-  commitMessage?: string;
-  error?: string;
-};
-
-async function submitRepoToCloud(
-  repo: 'hibist' | 'sailor' | 'data' | 'verification',
-  options: { message?: string; pullBeforePush?: boolean }
-): Promise<RepoCloudSubmitResult> {
-  const repoRoot = getProjectRepoRoot(repo);
-  const resource = vscode.Uri.file(repoRoot);
-  await vscode.workspace.fs.stat(resource);
-
-  let gitInfo = await gitService.getCurrentGitInfo(resource);
-  if (!gitInfo) {
-    return {
-      success: false,
-      state: 'noRepo',
-      repo,
-      repoRoot,
-      error: `${repo} repository is not a Git repository.`
-    };
-  }
-
-  const repository = await gitService.getCurrentRepository(resource);
-  if (isGitOperationInProgress(repository)) {
-    return {
-      success: false,
-      state: 'gitOperationInProgress',
-      repo,
-      repoRoot,
-      branch: gitInfo.branch,
-      upstream: gitInfo.upstream,
-      changedCount: gitInfo.changedFiles.length,
-      error: 'Git is already in the middle of another operation. Please finish it in VS Code Git first.'
-    };
-  }
-
-  const conflictFiles = gitInfo.changedFiles.filter((file) => file.type === 'merge');
-  if (conflictFiles.length > 0) {
-    return {
-      success: false,
-      state: 'conflict',
-      repo,
-      repoRoot,
-      branch: gitInfo.branch,
-      upstream: gitInfo.upstream,
-      changedCount: gitInfo.changedFiles.length,
-      conflictFiles: conflictFiles.map((file) => ({ path: file.path, type: file.type })),
-      error: 'Conflict files must be resolved before submitting to cloud.'
-    };
-  }
-
-  if (!hasRemote(repository, gitInfo)) {
-    return {
-      success: false,
-      state: 'noRemote',
-      repo,
-      repoRoot,
-      branch: gitInfo.branch,
-      upstream: gitInfo.upstream,
-      changedCount: gitInfo.changedFiles.length,
-      error: 'No remote repository is configured for this flow repository.'
-    };
-  }
-
-  if (!gitInfo.hasChanges && !hasOutgoingCommits(repository)) {
-    return {
-      success: true,
-      state: 'clean',
-      repo,
-      repoRoot,
-      branch: gitInfo.branch,
-      upstream: gitInfo.upstream,
-      changedCount: 0
-    };
-  }
-
-  const commitMessage = buildRepoCloudCommitMessage(repo, options.message);
-  let committed = false;
-
-  if (gitInfo.hasChanges) {
-    await gitService.addFiles(gitInfo.changedFiles.map((file) => file.uri), resource);
-    await gitService.commit(commitMessage, resource);
-    committed = true;
-  }
-
-  if (options.pullBeforePush) {
-    try {
-      await gitService.pull(resource);
-    } catch (error) {
-      gitInfo = await gitService.getCurrentGitInfo(resource);
-      const postPullConflicts = gitInfo?.changedFiles.filter((file) => file.type === 'merge') ?? [];
-      if (postPullConflicts.length > 0) {
-        return {
-          success: false,
-          state: 'conflict',
-          repo,
-          repoRoot,
-          branch: gitInfo?.branch,
-          upstream: gitInfo?.upstream,
-          changedCount: gitInfo?.changedFiles.length ?? 0,
-          conflictFiles: postPullConflicts.map((file) => ({ path: file.path, type: file.type })),
-          commitMessage: committed ? commitMessage : undefined,
-          error: 'Remote sync created conflicts. Resolve them and continue submitting.'
-        };
-      }
-      throw error;
-    }
-  }
-
-  try {
-    await gitService.push(resource);
-    return {
-      success: true,
-      state: 'pushed',
-      repo,
-      repoRoot,
-      branch: gitInfo.branch,
-      upstream: gitInfo.upstream,
-      changedCount: gitInfo.changedFiles.length,
-      commitMessage: committed ? commitMessage : undefined
-    };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    if (isRemoteBehindError(errorMessage)) {
-      return {
-        success: false,
-        state: 'needsPull',
-        repo,
-        repoRoot,
-        branch: gitInfo.branch,
-        upstream: gitInfo.upstream,
-        changedCount: gitInfo.changedFiles.length,
-        commitMessage: committed ? commitMessage : undefined,
-        error: 'Remote has newer commits. Sync remote changes and continue.'
-      };
-    }
-    return {
-      success: false,
-      state: 'error',
-      repo,
-      repoRoot,
-      branch: gitInfo.branch,
-      upstream: gitInfo.upstream,
-      changedCount: gitInfo.changedFiles.length,
-      commitMessage: committed ? commitMessage : undefined,
-      error: errorMessage
-    };
-  }
-}
-
-function buildRepoCloudCommitMessage(repo: 'hibist' | 'sailor' | 'data' | 'verification', customMessage?: string): string {
-  const trimmed = customMessage?.trim();
-  if (trimmed) {
-    return trimmed;
-  }
-  const label = repo === 'hibist' ? 'hibist' : repo === 'sailor' ? 'sailor' : repo === 'data' ? 'data' : 'verification';
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  return `chore(dft-ide): submit ${label} flow to cloud [${now}]`;
-}
-
-function hasRemote(repository: any, info: { upstream?: string }): boolean {
-  if (info.upstream) {
-    return true;
-  }
-  const remotes = repository?.state?.remotes;
-  return Array.isArray(remotes) && remotes.length > 0;
-}
-
-function hasOutgoingCommits(repository: any): boolean {
-  const ahead = repository?.state?.HEAD?.ahead;
-  return typeof ahead === 'number' && ahead > 0;
-}
-
-function isGitOperationInProgress(repository: any): boolean {
-  const state = repository?.state;
-  return Boolean(state?.rebaseCommit || state?.sequencerState);
-}
-
-function isRemoteBehindError(message: string): boolean {
-  return /non-fast-forward|fetch first|rejected|remote contains work|Updates were rejected|failed to push/i.test(message);
-}
-
-async function syncCommonArtifactsToRepo(
-  targetRepo: 'hibist' | 'sailor' | 'data' | 'verification',
-  source: { designTree: string; normTable: string },
-  commitMessage: string,
-  push: boolean
-): Promise<{ files: Array<{ label: string; path: string; overwritten: boolean }> }> {
-  const repoRoot = getProjectRepoRoot(targetRepo);
-  // 检查文件夹是否存在，如果不存在则创建
-  try {
-    await vscode.workspace.fs.stat(vscode.Uri.file(repoRoot));
-  } catch (error: any) {
-    if (error.code === 'ENOENT') {
-        await vscode.workspace.fs.createDirectory(vscode.Uri.file(repoRoot));
-    } else {
-        throw error;
-    }
-  }
-
-  const commonPath = resolveConfigPath('common');
-  if (!commonPath) {
-    throw new Error('Common local-state path is not available.');
-  }
-
-  const common = await readJsonFile(commonPath);
-  const copiedFiles: Array<{ label: string; path: string; overwritten: boolean }> = [];
-
-  const designTreeTarget = path.join(repoRoot, 'design_tree.mock.json');
-  const designTreeSource = resolveDesignTreeFilePath({ ...(common ?? {}), designTree: source.designTree });
-  const designTreeCopied = await copyDesignTreeArtifact(designTreeSource, common, designTreeTarget);
-  copiedFiles.push({ label: 'Design tree', path: designTreeTarget, overwritten: designTreeCopied });
-
-  if (source.normTable) {
-    const normTableSource = path.isAbsolute(source.normTable)
-      ? source.normTable
-      : path.resolve(resolveProjectRoot() ?? repoRoot, source.normTable);
-    const ext = path.extname(normTableSource) || '.json';
-    const normTableTarget = path.join(repoRoot, `normalized-table${ext}`);
-    const overwritten = await copyFileArtifact(normTableSource, normTableTarget);
-    copiedFiles.push({ label: 'Normalized table', path: normTableTarget, overwritten });
-  }
-
-  const nextCommon = await mergeConfigFile(commonPath, {
-    syncedArtifacts: {
-      ...(isRecord(common?.syncedArtifacts) ? common?.syncedArtifacts : {}),
-      [targetRepo]: {
-        designTree: designTreeTarget,
-        normTable: copiedFiles.find((file) => file.label === 'Normalized table')?.path,
-        updatedAt: new Date().toISOString()
-      }
-    }
-  });
-  await vscode.workspace.fs.writeFile(
-    vscode.Uri.file(commonPath),
-    Buffer.from(JSON.stringify(nextCommon, null, 2), 'utf-8')
-  );
-
-  const fileUris = copiedFiles.map((file) => vscode.Uri.file(file.path));
-  const filePath = fileUris.map(uri => uri.fsPath)
-
-  const haschangeFiles = await gitService.hasChangedFiles( filePath ,vscode.Uri.file(repoRoot));
-  if (!haschangeFiles){
-    throw new Error("文件没有变更，无需同步")
-  }
-  await gitService.addFiles(fileUris, vscode.Uri.file(repoRoot));
-  await gitService.commit(commitMessage, vscode.Uri.file(repoRoot));
-  if (push) {
-    await gitService.push(vscode.Uri.file(repoRoot));
-  }
-
-  return { files: copiedFiles.map((file) => ({ ...file, path: vscode.workspace.asRelativePath(file.path) })) };
-}
-
-async function copyDesignTreeArtifact(
-  sourcePath: string | undefined,
-  common: Record<string, unknown> | null,
-  targetPath: string
-): Promise<boolean> {
-  if (sourcePath) {
-    return copyFileArtifact(sourcePath, targetPath);
-  }
-
-  const draft = common?.designTreeDraft;
-  if (!isRecord(draft)) {
-    throw new Error('Design tree file is not configured and no Common draft design tree was found.');
-  }
-
-  const overwritten = await pathExists(targetPath);
-  await vscode.workspace.fs.writeFile(
-    vscode.Uri.file(targetPath),
-    Buffer.from(JSON.stringify(draft, null, 2), 'utf-8')
-  );
-  return overwritten;
-}
-
-async function copyFileArtifact(sourcePath: string, targetPath: string): Promise<boolean> {
-  const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(sourcePath));
-  const overwritten = await pathExists(targetPath);
-  await vscode.workspace.fs.writeFile(vscode.Uri.file(targetPath), bytes);
-  return overwritten;
-}
-
-async function pathExists(filePath: string): Promise<boolean> {
-  try {
-    await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function readJsonFile(filePath: string): Promise<Record<string, unknown> | null> {
-  try {
-    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
-    const parsed = JSON.parse(Buffer.from(bytes).toString('utf-8'));
-    return isRecord(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function collectDesignTreeModules(value: unknown): Array<{ key: string; title: string; type: string }> {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const modules: Array<{ key: string; title: string; type: string }> = [];
-  const visit = (items: unknown[]) => {
-    for (const item of items) {
-      if (!isRecord(item)) {
-        continue;
-      }
-      const key = typeof item.key === 'string' ? item.key : '';
-      const title = typeof item.title === 'string' ? item.title : key;
-      const type = typeof item.type === 'string' ? item.type : 'module';
-      if (key) {
-        modules.push({ key, title, type });
-      }
-      if (Array.isArray(item.children)) {
-        visit(item.children);
-      }
-    }
-  };
-
-  visit(value);
-  return modules;
-}
-
-const repoLabels: Record<'hibist' | 'sailor' | 'data' | 'verification', string> = {
-  hibist: 'Hibist 仓库',
-  sailor: 'Sailor 仓库',
-  data: 'Data 公共仓',
-  verification: '验证仓库',
-};
-
-interface SyncPrecheckOptions {
-  targetRepo: 'hibist' | 'sailor' | 'data' | 'verification';
-  sourceDesignTree: string;
-  sourceNormTable: string;
-  targetDesignTree: string;
-  targetNormTable: string;
-  direction: string;
-}
-
-async function prepareCommonArtifactSyncToRepo(options: SyncPrecheckOptions) {
-  const { targetRepo, sourceDesignTree, sourceNormTable, targetDesignTree, targetNormTable, direction } = options;
-  const repoRoot = getProjectRepoRoot(targetRepo);
-  const artifacts = buildCommonSyncArtifacts(repoRoot, [
-    { label: 'Design tree', sourcePath: sourceDesignTree, targetPath: targetDesignTree },
-    { label: 'Normalized table', sourcePath: sourceNormTable, targetPath: targetNormTable },
-  ], resolveProjectRoot());
-
-  if (artifacts.length === 0) {
-    throw new Error('Please choose at least one source XLS/XLSX file.');
-  }
-
-  const sourceLabel = direction === 'dataToTarget' ? 'Data' : 'Target flow';
-  const targetLabel = targetRepo === 'data' ? 'Data' : repoLabels[targetRepo];
-  const design = artifacts.find((item) => item.key === 'designTree');
-  const norm = artifacts.find((item) => item.key === 'normTable');
-  const diffGroups = await Promise.all(
-    artifacts.map(async (artifact) => buildWorkbookDiffItems(artifact))
-  );
-  const diffItems = diffGroups.flat();
-  const designDiffCount = diffItems.filter((item) => item.fileType === 'designTree').length;
-  const normTableDiffCount = diffItems.filter((item) => item.fileType === 'normTable').length;
-
-  return {
-    success: true,
-    precheck: {
-      direction: `${sourceLabel} -> ${targetLabel}`,
-      sourceRepo: direction === 'dataToTarget' ? 'data' : 'target',
-      targetRepo,
-      designTreeSource: design?.source ?? '',
-      designTreeTarget: design?.target ?? '',
-      designTreeHiddenDir: '',
-      designTreeDiffCount: designDiffCount,
-      normTableSource: norm?.source ?? '',
-      normTableTarget: norm?.target ?? '',
-      normTableHiddenDir: '',
-      normTableDiffCount: normTableDiffCount,
-      files: artifacts.map(({ label, source, target, exists }) => ({ label, source, target, overwritten: exists })),
-    },
-    diffSummary: {
-      designTree: designDiffCount,
-      normTable: normTableDiffCount,
-    },
-    diffItems,
-    availableStrategies: ['overwrite', 'autoMerge', 'manualMerge'],
-  };
-}
-
-interface SyncApplyOptions {
-  targetRepo: 'hibist' | 'sailor' | 'data' | 'verification';
-  strategy: string;
-  direction: string;
-  sourceDesignTree: string;
-  sourceNormTable: string;
-  targetDesignTree: string;
-  targetNormTable: string;
-  decisions: Array<{ id: string; choice: 'source' | 'target' | 'custom'; customValue?: string }>;
-  stageAfterApply?: boolean;
-}
-
-async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
-  const {
-    targetRepo,
-    strategy,
-    direction,
-    sourceDesignTree,
-    sourceNormTable,
-    targetDesignTree,
-    targetNormTable,
-    decisions,
-    stageAfterApply
-  } = options;
-
-  const repoRoot = getProjectRepoRoot(targetRepo);
-  const artifacts = buildCommonSyncArtifacts(repoRoot, [
-    { label: 'Design tree', sourcePath: sourceDesignTree, targetPath: targetDesignTree },
-    { label: 'Normalized table', sourcePath: sourceNormTable, targetPath: targetNormTable },
-  ], resolveProjectRoot());
-
-  if (artifacts.length === 0) {
-    throw new Error('Please choose at least one source XLS/XLSX file.');
-  }
-
-  const changedFiles: Array<{ label: string; path: string; overwritten: boolean }> = [];
-
-  if (strategy === 'overwrite') {
-    for (const artifact of artifacts) {
-      if (areSpreadsheetFilesIdentical(artifact.source, artifact.target)) {
-        continue;
-      }
-      await ensureLocalConfigDirectory(path.dirname(artifact.target));
-      await vscode.workspace.fs.copy(vscode.Uri.file(artifact.source), vscode.Uri.file(artifact.target), { overwrite: true });
-      changedFiles.push({
-        label: artifact.label,
-        path: artifact.target,
-        overwritten: artifact.exists,
-      });
-    }
-  } else {
-    for (const artifact of artifacts) {
-      const changed = await mergeWorkbookArtifact(artifact, strategy, decisions);
-      if (!changed) {
-        continue;
-      }
-      changedFiles.push({
-        label: artifact.label,
-        path: artifact.target,
-        overwritten: artifact.exists,
-      });
-    }
-  }
-
-  if (stageAfterApply) {
-    await gitService.addFiles(
-      changedFiles.map((file) => vscode.Uri.file(file.path)),
-      vscode.Uri.file(repoRoot)
-    );
-  }
-
-  const resolvedStrategyText = strategy === 'overwrite' ? '直接覆盖' : strategy === 'autoMerge' ? '自动合并' : '手动合并';
-  const unresolvedCount = strategy === 'manualMerge'
-    ? decisions.length
-    : strategy === 'autoMerge'
-      ? 0
-      : 0;
-
-  const report = {
-    strategy: resolvedStrategyText,
-    direction,
-    backupDir: '',
-    changedXls: changedFiles.map((file) => vscode.workspace.asRelativePath(file.path)),
-    generatedCsv: [],
-    unresolvedCount,
-    result: strategy === 'overwrite'
-      ? '同步完成：已将真实 XLS/XLSX 源文件复制到目标路径。'
-      : '同步完成：已基于真实 Excel 内容完成合并，并直接写入目标 XLS/XLSX 文件。',
-  };
-
-  return {
-    success: true,
-    report,
-    files: changedFiles.map((file) => ({
-        label: file.label,
-        path: vscode.workspace.asRelativePath(file.path),
-        overwritten: file.overwritten,
-      })),
-  };
 }
 
 export function deactivate() {}
