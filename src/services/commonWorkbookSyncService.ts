@@ -118,7 +118,7 @@ const workbookReadOptions: XLSX.ParsingOptions = {
   cellDates: false,
   cellFormula: true,
   cellHTML: false,
-  cellStyles: false,
+  cellStyles: true,
 };
 
 export function areSpreadsheetFilesIdentical(sourcePath: string, targetPath: string): boolean {
@@ -330,7 +330,7 @@ function createMergedWorkbook(sourceBook: XLSX.WorkBook): XLSX.WorkBook {
   const sourceRecord = sourceBook as unknown as Record<string, unknown>;
   const workbookRecord = workbook as unknown as Record<string, unknown>;
 
-  for (const key of ['Props', 'Custprops', 'SSF', 'vbaraw']) {
+  for (const key of ['Props', 'Custprops', 'SSF', 'Styles', 'Themes', 'Workbook', 'vbaraw']) {
     const value = sourceRecord[key];
     if (value !== undefined) {
       workbookRecord[key] = cloneWorkbookValue(value);
@@ -685,7 +685,58 @@ function cloneCell(cell: XLSX.CellObject): XLSX.CellObject {
     }
   }
 
+  if (source.s !== undefined) {
+    cloned.s = cloneCellStyle(source.s);
+  }
+
   return cloned as unknown as XLSX.CellObject;
+}
+
+function cloneCellStyle(style: unknown): unknown {
+  if (!style || typeof style !== 'object') {
+    return style;
+  }
+
+  const source = style as Record<string, unknown>;
+  const cloned: Record<string, unknown> = {};
+  for (const key of ['numFmt', 'font', 'fill', 'border', 'alignment', 'protection', 'quotePrefix', 'pivotButton', 'xfId']) {
+    if (source[key] !== undefined) {
+      cloned[key] = cloneStyleValue(source[key], 0, []);
+    }
+  }
+  return cloned;
+}
+
+function cloneStyleValue(value: unknown, depth: number, ancestors: object[]): unknown {
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  if (value instanceof Date) {
+    return new Date(value.getTime());
+  }
+
+  if (depth >= 8) {
+    return undefined;
+  }
+
+  const source = value as Record<string, unknown> | unknown[];
+  if (ancestors.includes(source)) {
+    return undefined;
+  }
+
+  const cloned: Record<string, unknown> | unknown[] = Array.isArray(value) ? [] : {};
+  const nextAncestors = [...ancestors, source];
+  for (const [key, nestedValue] of Object.entries(source)) {
+    if (typeof nestedValue === 'function' || typeof nestedValue === 'symbol') {
+      continue;
+    }
+    const nextValue = cloneStyleValue(nestedValue, depth + 1, nextAncestors);
+    if (nextValue !== undefined) {
+      (cloned as Record<string, unknown>)[key] = nextValue;
+    }
+  }
+  return cloned;
 }
 
 function cloneWorkbookValue<T>(value: T): T {
