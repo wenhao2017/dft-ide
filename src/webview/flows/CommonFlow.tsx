@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Badge,
@@ -187,7 +187,10 @@ const CommonFlow: React.FC = () => {
   const [showValidationErrors, setShowValidationErrors] = useState<boolean>(false);
   const [precheckInfo, setPrecheckInfo] = useState<any>(null);
   const [syncReport, setSyncReport] = useState<any>(null);
+  const [isPreparingSync, setIsPreparingSync] = useState<boolean>(false);
+  const [prepareWaitModalOpen, setPrepareWaitModalOpen] = useState<boolean>(false);
   const [isApplying, setIsApplying] = useState<boolean>(false);
+  const prepareSyncRunIdRef = useRef(0);
 
   const activeProject = useWizardStore((s) => s.activeProject);
   const { savedData, loading, saving, uploading, syncing, hasUnsaved, handleSave, debouncedSave, markDirty } =
@@ -206,7 +209,7 @@ const CommonFlow: React.FC = () => {
   const primaryButtonText = syncDirection === 'dataToTarget' ? `同步到${targetName}` : '同步到 Data';
   const confirmTitle = syncDirection === 'dataToTarget' ? `确认同步到${repoLabels[selectedRepo]}` : '确认回写到 Data 公共仓';
   const confirmOkText = syncDirection === 'dataToTarget' ? '确认' : '确认';
-  const confirmLoading = syncDirection === 'dataToTarget' ? syncing : uploading;
+  const confirmLoading = isPreparingSync || (syncDirection === 'dataToTarget' ? syncing : uploading);
 
   const collectFormData = () => {
     let formData: Record<string, unknown> = {};
@@ -417,7 +420,31 @@ const CommonFlow: React.FC = () => {
   ];
 
   const openConfirmModal = async () => {
-    await handleSave(collectFormData());
+    if (isPreparingSync) {
+      return;
+    }
+
+    const runId = prepareSyncRunIdRef.current + 1;
+    prepareSyncRunIdRef.current = runId;
+    const isActiveRun = () => prepareSyncRunIdRef.current === runId;
+
+    setIsPreparingSync(true);
+    setPrepareWaitModalOpen(true);
+
+    try {
+      await handleSave(collectFormData());
+      if (!isActiveRun()) {
+        return;
+      }
+    } catch (err: any) {
+      if (isActiveRun()) {
+        message.error(err?.message || '保存配置失败');
+        setIsPreparingSync(false);
+        setPrepareWaitModalOpen(false);
+      }
+      return;
+    }
+
     setCommitMsg('');
     setPushAfterCommit(false);
 
@@ -433,6 +460,8 @@ const CommonFlow: React.FC = () => {
 
     if (incompleteMessage) {
       message.warning(incompleteMessage);
+      setIsPreparingSync(false);
+      setPrepareWaitModalOpen(false);
       return;
     }
 
@@ -446,6 +475,10 @@ const CommonFlow: React.FC = () => {
         direction: syncDirection,
       });
 
+      if (!isActiveRun()) {
+        return;
+      }
+
       if (res.success) {
         setPrecheckInfo(res.precheck);
         const nextDiffItems = Array.isArray(res.diffItems)
@@ -455,13 +488,21 @@ const CommonFlow: React.FC = () => {
         setActiveDiffId(nextDiffItems[0]?.id || null);
       } else {
         message.error(res.error || '预检查失败');
+        setIsPreparingSync(false);
+        setPrepareWaitModalOpen(false);
         return;
       }
     } catch (err: any) {
-      message.error(err?.message || '预检查失败');
+      if (isActiveRun()) {
+        message.error(err?.message || '预检查失败');
+        setIsPreparingSync(false);
+        setPrepareWaitModalOpen(false);
+      }
       return;
     }
 
+    setIsPreparingSync(false);
+    setPrepareWaitModalOpen(false);
     setWizardStep(0);
     setSelectedStrategy('manualMerge');
     setShowValidationErrors(false);
@@ -608,6 +649,12 @@ const CommonFlow: React.FC = () => {
 
   const toggleDirection = () => {
     setSyncDirection((prev) => (prev === 'dataToTarget' ? 'targetToData' : 'dataToTarget'));
+  };
+
+  const cancelPrepareSync = () => {
+    prepareSyncRunIdRef.current += 1;
+    setIsPreparingSync(false);
+    setPrepareWaitModalOpen(false);
   };
 
   const renderStepTitle = (step: number, title: string, description?: string) => (
@@ -1236,6 +1283,7 @@ const CommonFlow: React.FC = () => {
                 type="primary"
                 icon={<SyncOutlined />}
                 loading={confirmLoading}
+                disabled={isPreparingSync}
                 onClick={openConfirmModal}
                 style={{
                   fontWeight: 700,
@@ -1243,13 +1291,33 @@ const CommonFlow: React.FC = () => {
                 }}
               // disabled={syncDirection === 'targetToData' && !canManageMembers }
               >
-                {primaryButtonText}
+                {isPreparingSync ? '正在预检查...' : primaryButtonText}
               </Button>
             </Space>
           </Space>
         </Card>
 
         <ObsViewer open={obsViewerOpen} spaceName={obsSpaceName} onCancel={() => setObsViewerOpen(false)} />
+
+        <Modal
+          title="正在预检查同步差异"
+          open={prepareWaitModalOpen}
+          onCancel={cancelPrepareSync}
+          footer={[
+            <Button key="cancel" onClick={cancelPrepareSync}>
+              取消等待
+            </Button>,
+          ]}
+          width={420}
+          destroyOnClose
+        >
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Spin />
+            <Text style={mutedTextStyle}>
+              正在读取源文件和目标文件并生成差异，文件较大或 Sheet 较多时可能需要更久。
+            </Text>
+          </Space>
+        </Modal>
 
         <Modal
           title={
