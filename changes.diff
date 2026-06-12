@@ -1,28 +1,137 @@
-diff -ruN --strip-trailing-cr '--exclude=.git' '--exclude=node_modules' '--exclude=out' '--exclude=dist' '--exclude=build' '--exclude=.vscode-test' '--exclude=coverage' '--exclude=*.vsix' '--exclude=changes.diff' dft-ide-gitlab/.env.example dft_ide/.env.example
---- dft-ide-gitlab/.env.example	2026-06-11 19:11:04.000000000 +0800
-+++ dft_ide/.env.example	2026-06-11 19:16:32.000000000 +0800
-@@ -1 +1,2 @@
- DFT_IDE_API_BASE = http://localhost:8000
-+GITLAB_HOST = http://7.227.4.70/test11
-\ No newline at end of file
-diff -ruN --strip-trailing-cr '--exclude=.git' '--exclude=node_modules' '--exclude=out' '--exclude=dist' '--exclude=build' '--exclude=.vscode-test' '--exclude=coverage' '--exclude=*.vsix' '--exclude=changes.diff' dft-ide-gitlab/package.json dft_ide/package.json
---- dft-ide-gitlab/package.json	2026-06-11 19:11:04.000000000 +0800
-+++ dft_ide/package.json	2026-06-11 19:16:32.000000000 +0800
-@@ -72,7 +72,7 @@
-       "properties": {
-         "dftIde.apiBase": {
-           "type": "string",
--          "default": "http://pandas.hisi.huawei.com/dft-ide-server",
-+          "default": "",
-           "description": "DFT IDE backend API base URL, for example http://localhost:8080."
-         },
-         "dftIde.localProjectsRoot": {
-@@ -157,7 +157,7 @@
-         },
-         "dftIde.gitlabHost": {
-           "type": "string",
--          "default": "http://code-dg.hisi.huawei.com/DFT_IDE",
-+          "default": "http://7.227.4.70/test11",
-           "description": "gitlab host."
-         }
-       }
+diff -ruN --strip-trailing-cr '--exclude=.git' '--exclude=node_modules' '--exclude=out' '--exclude=dist' '--exclude=build' '--exclude=.vscode-test' '--exclude=coverage' '--exclude=*.vsix' '--exclude=changes.diff' dft-ide-gitlab/src/webview/components/design/Step2_ToolConfig.tsx dft_ide/src/webview/components/design/Step2_ToolConfig.tsx
+--- dft-ide-gitlab/src/webview/components/design/Step2_ToolConfig.tsx	2026-06-12 11:41:03.000000000 +0800
++++ dft_ide/src/webview/components/design/Step2_ToolConfig.tsx	2026-06-12 11:42:58.000000000 +0800
+@@ -22,6 +22,7 @@
+ import ControlledPathInput from '../shared/ControlledPathInput';
+ import CollapsibleSection from '../shared/CollapsibleSection';
+ import DonauResourcePicker from '../shared/DonauResourcePicker';
++import PipelineExecutionOverview from '../shared/PipelineExecutionOverview';
+ 
+ const { Text } = Typography;
+ 
+@@ -30,9 +31,10 @@
+   onPrev: () => void;
+   moduleKey?: string;
+   category: string;
++  moduleKeys: string[];
+ }
+ 
+-const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category }) => {
++const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category, moduleKeys }) => {
+   const flowKey = category.toLowerCase();
+   const [activeTab, setActiveTab] = useState('task');
+   const [taskForm] = Form.useForm();
+@@ -40,6 +42,9 @@
+   const selectedAccount = Form.useWatch('clusterGroup', taskForm);
+   const selectedQueue = Form.useWatch('clusterQueue', taskForm);
+ 
++  const repo = category?.toLowerCase() === 'sailor' ? 'sailor' : 'hibist';
++  const flowLabel = repo === 'sailor' ? 'Sailor' : 'DFTM';
++
+   // ── 配置持久化 Hook ─────────────────────────────────
+   // 注意：Step2 与 Step1 同属 design flow，但字段不同，合并到同一个文件中
+   // 这里使用独立 key 区分：step2_task / step2_design
+@@ -262,7 +267,7 @@
+       </CollapsibleSection>
+     </Form>
+   );
+-
++  
+   return (
+     <Spin spinning={loading} tip="读取配置中...">
+       <div>
+@@ -272,14 +277,25 @@
+           type="card"
+           items={[
+             { key: 'task',   label: '任务配置',  children: renderTaskConfig()   },
+-            { key: 'design', label: '设计配置',  children: renderDesignConfig() },
++            // { key: 'design', label: '设计配置',  children: renderDesignConfig() },
++            // {
++            //   key: 'report',
++            //   label: '报告配置',
++            //   children: (
++            //     <div style={{ padding: 60, textAlign: 'center' }}>
++            //       <Text type="secondary">报告配置开发中...</Text>
++            //     </div>
++            //   ),
++            // },
+             {
+-              key: 'report',
+-              label: '报告配置',
++              key: 'execution',
++              label: '执行配置',
+               children: (
+-                <div style={{ padding: 60, textAlign: 'center' }}>
+-                  <Text type="secondary">报告配置开发中...</Text>
+-                </div>
++                <PipelineExecutionOverview
++                  flowKey={repo}
++                  flowLabel={flowLabel}
++                  moduleKeys={moduleKeys}
++                />
+               ),
+             },
+           ]}
+diff -ruN --strip-trailing-cr '--exclude=.git' '--exclude=node_modules' '--exclude=out' '--exclude=dist' '--exclude=build' '--exclude=.vscode-test' '--exclude=coverage' '--exclude=*.vsix' '--exclude=changes.diff' dft-ide-gitlab/src/webview/components/design/Step3_Execution.tsx dft_ide/src/webview/components/design/Step3_Execution.tsx
+--- dft-ide-gitlab/src/webview/components/design/Step3_Execution.tsx	2026-06-12 11:41:03.000000000 +0800
++++ dft_ide/src/webview/components/design/Step3_Execution.tsx	2026-06-12 11:42:58.000000000 +0800
+@@ -33,9 +33,6 @@
+         <Button onClick={onPrev} icon={<LeftOutlined />}>
+           上一页
+         </Button>
+-        <Button icon={<SaveOutlined />}>
+-          保存
+-        </Button>
+         <Button type="primary" onClick={onNext}>
+           下一页
+           <RightOutlined />
+diff -ruN --strip-trailing-cr '--exclude=.git' '--exclude=node_modules' '--exclude=out' '--exclude=dist' '--exclude=build' '--exclude=.vscode-test' '--exclude=coverage' '--exclude=*.vsix' '--exclude=changes.diff' dft-ide-gitlab/src/webview/flows/DesignFlow.tsx dft_ide/src/webview/flows/DesignFlow.tsx
+--- dft-ide-gitlab/src/webview/flows/DesignFlow.tsx	2026-06-12 11:41:03.000000000 +0800
++++ dft_ide/src/webview/flows/DesignFlow.tsx	2026-06-12 11:42:58.000000000 +0800
+@@ -26,23 +26,11 @@
+       description: '路径与模块',
+       content: <Step1CommonConfig onNext={nextStep} category={category} />,
+     },
+-    // {
+-    //   title: '工具配置',
+-    //   description: '版本与资源',
+-    //   content: (
+-    //     <Step2ToolConfig
+-    //       moduleKey={selectedModule}
+-    //       onNext={nextStep}
+-    //       onPrev={prevStep}
+-    //       category={category}
+-    //     />
+-    //   ),
+-    // },
+     {
+-      title: '执行配置',
+-      description: '脚本与任务',
++      title: '工具配置',
++      description: '版本与资源',
+       content: (
+-        <Step3Execution
++        <Step2ToolConfig
+           moduleKey={selectedModule}
+           onNext={nextStep}
+           onPrev={prevStep}
+@@ -51,6 +39,19 @@
+         />
+       ),
+     },
++    // {
++    //   title: '执行配置',
++    //   description: '脚本与任务',
++    //   content: (
++    //     <Step3Execution
++    //       moduleKey={selectedModule}
++    //       onNext={nextStep}
++    //       onPrev={prevStep}
++    //       category={category}
++    //       moduleKeys={executionModuleKeys}
++    //     />
++    //   ),
++    // },
+     {
+       title: '结果查看',
+       description: '报告与日志',
