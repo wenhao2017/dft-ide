@@ -353,13 +353,21 @@ function mergeSheetWorksheet(
   const worksheet: XLSX.WorkSheet = {};
   const header = sourceSheet.headers.length > 0 ? sourceSheet.headers : targetSheet.headers;
   const rowEntries = planMergedRowOrder(sourceSheet, targetSheet);
-  const maxColumns = Math.max(
+  let maxColumns = Math.max(
     header.length,
     getWorksheetColumnCount(sourceWorksheet),
-    getWorksheetColumnCount(targetWorksheet),
-    ...sourceSheet.rows.map((row) => row.length),
-    ...targetSheet.rows.map((row) => row.length)
+    getWorksheetColumnCount(targetWorksheet)
   );
+  for (const row of sourceSheet.rows) {
+    if (row.length > maxColumns) {
+      maxColumns = row.length;
+    }
+  }
+  for (const row of targetSheet.rows) {
+    if (row.length > maxColumns) {
+      maxColumns = row.length;
+    }
+  }
   const sourceRowMap = new Map<number, number>();
   const targetRowMap = new Map<number, number>();
   let outputRowIndex = 0;
@@ -852,6 +860,23 @@ function extractWorksheetRows(sheet: XLSX.WorkSheet): {
     maxColumn = Math.max(maxColumn, address.c);
   }
 
+  // Find the last row index that actually contains non-empty content
+  let lastContentRow = -1;
+  for (const [r, rowCells] of rowsByIndex.entries()) {
+    let hasContent = false;
+    for (const val of rowCells.values()) {
+      if (val !== undefined && val !== null && val !== '') {
+        hasContent = true;
+        break;
+      }
+    }
+    if (hasContent) {
+      if (r > lastContentRow) {
+        lastContentRow = r;
+      }
+    }
+  }
+
   const keys = Array.from(rowsByIndex.keys());
   let minRow = 0;
   let maxRow = -1;
@@ -868,13 +893,31 @@ function extractWorksheetRows(sheet: XLSX.WorkSheet): {
   }
 
   if (keys.length > 0) {
-    if (maxRow === -1) {
-      minRow = Math.min(...keys);
-      maxRow = Math.max(...keys);
-    } else {
-      minRow = Math.min(minRow, ...keys);
-      maxRow = Math.max(maxRow, ...keys);
+    let minKey = keys[0];
+    let maxKey = keys[0];
+    for (let i = 1; i < keys.length; i++) {
+      if (keys[i] < minKey) {
+        minKey = keys[i];
+      }
+      if (keys[i] > maxKey) {
+        maxKey = keys[i];
+      }
     }
+
+    if (maxRow === -1) {
+      minRow = minKey;
+      maxRow = maxKey;
+    } else {
+      minRow = Math.min(minRow, minKey);
+      maxRow = Math.max(maxRow, maxKey);
+    }
+  }
+
+  // Restrict maxRow to lastContentRow to ignore any trailing blank rows
+  if (lastContentRow !== -1) {
+    maxRow = Math.min(maxRow, lastContentRow);
+  } else {
+    maxRow = -1;
   }
 
   const rowIndexes: number[] = [];
