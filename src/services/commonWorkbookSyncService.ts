@@ -664,15 +664,26 @@ function cloneWorkbookValue<T>(value: T): T {
   }
 
   const root = Array.isArray(value) ? [] : {};
-  const seen = new WeakMap<object, unknown>([[value as object, root]]);
-  const stack: Array<{ source: Record<string, unknown> | unknown[]; target: Record<string, unknown> | unknown[] }> = [
-    { source: value as Record<string, unknown> | unknown[], target: root as Record<string, unknown> | unknown[] },
+  const stack: Array<{
+    source: Record<string, unknown> | unknown[];
+    target: Record<string, unknown> | unknown[];
+    ancestors: object[];
+  }> = [
+    {
+      source: value as Record<string, unknown> | unknown[],
+      target: root as Record<string, unknown> | unknown[],
+      ancestors: [value as object],
+    },
   ];
 
   while (stack.length > 0) {
-    const { source, target } = stack.pop()!;
+    const { source, target, ancestors } = stack.pop()!;
 
     for (const [key, nestedValue] of Object.entries(source)) {
+      if (typeof nestedValue === 'function' || typeof nestedValue === 'symbol') {
+        continue;
+      }
+
       if (!nestedValue || typeof nestedValue !== 'object') {
         (target as Record<string, unknown>)[key] = nestedValue;
         continue;
@@ -684,16 +695,17 @@ function cloneWorkbookValue<T>(value: T): T {
       }
 
       const nestedObject = nestedValue as Record<string, unknown> | unknown[];
-      const existing = seen.get(nestedObject);
-      if (existing) {
-        (target as Record<string, unknown>)[key] = existing;
+      if (ancestors.includes(nestedObject)) {
         continue;
       }
 
       const cloned = Array.isArray(nestedValue) ? [] : {};
-      seen.set(nestedObject, cloned);
       (target as Record<string, unknown>)[key] = cloned;
-      stack.push({ source: nestedObject, target: cloned as Record<string, unknown> | unknown[] });
+      stack.push({
+        source: nestedObject,
+        target: cloned as Record<string, unknown> | unknown[],
+        ancestors: [...ancestors, nestedObject],
+      });
     }
   }
 
