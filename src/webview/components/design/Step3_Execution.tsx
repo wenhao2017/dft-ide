@@ -33,9 +33,6 @@ const Step3Execution: React.FC<Props> = ({ onNext, onPrev, category, moduleKeys 
         <Button onClick={onPrev} icon={<LeftOutlined />}>
           上一页
         </Button>
-        <Button icon={<SaveOutlined />}>
-          保存
-        </Button>
         <Button type="primary" onClick={onNext}>
           下一页
           <RightOutlined />

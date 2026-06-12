@@ -22,6 +22,7 @@ import { useFlowConfig } from '../../hooks/useFlowConfig';
 import ControlledPathInput from '../shared/ControlledPathInput';
 import CollapsibleSection from '../shared/CollapsibleSection';
 import DonauResourcePicker from '../shared/DonauResourcePicker';
+import PipelineExecutionOverview from '../shared/PipelineExecutionOverview';
 
 const { Text } = Typography;
 
@@ -30,15 +31,19 @@ interface Props {
   onPrev: () => void;
   moduleKey?: string;
   category: string;
+  moduleKeys: string[];
 }
 
-const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category }) => {
+const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category, moduleKeys }) => {
   const flowKey = category.toLowerCase();
   const [activeTab, setActiveTab] = useState('task');
   const [taskForm] = Form.useForm();
   const [designForm] = Form.useForm();
   const selectedAccount = Form.useWatch('clusterGroup', taskForm);
   const selectedQueue = Form.useWatch('clusterQueue', taskForm);
+
+  const repo = category?.toLowerCase() === 'sailor' ? 'sailor' : 'hibist';
+  const flowLabel = repo === 'sailor' ? 'Sailor' : 'DFTM';
 
   // ── 配置持久化 Hook ─────────────────────────────────
   // 注意：Step2 与 Step1 同属 design flow，但字段不同，合并到同一个文件中
@@ -262,7 +267,7 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category 
       </CollapsibleSection>
     </Form>
   );
-
+  
   return (
     <Spin spinning={loading} tip="读取配置中...">
       <div>
@@ -272,14 +277,25 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category 
           type="card"
           items={[
             { key: 'task',   label: '任务配置',  children: renderTaskConfig()   },
-            { key: 'design', label: '设计配置',  children: renderDesignConfig() },
+            // { key: 'design', label: '设计配置',  children: renderDesignConfig() },
+            // {
+            //   key: 'report',
+            //   label: '报告配置',
+            //   children: (
+            //     <div style={{ padding: 60, textAlign: 'center' }}>
+            //       <Text type="secondary">报告配置开发中...</Text>
+            //     </div>
+            //   ),
+            // },
             {
-              key: 'report',
-              label: '报告配置',
+              key: 'execution',
+              label: '执行配置',
               children: (
-                <div style={{ padding: 60, textAlign: 'center' }}>
-                  <Text type="secondary">报告配置开发中...</Text>
-                </div>
+                <PipelineExecutionOverview
+                  flowKey={repo}
+                  flowLabel={flowLabel}
+                  moduleKeys={moduleKeys}
+                />
               ),
             },
           ]}

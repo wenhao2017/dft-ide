@@ -26,23 +26,11 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
       description: '路径与模块',
       content: <Step1CommonConfig onNext={nextStep} category={category} />,
     },
-    // {
-    //   title: '工具配置',
-    //   description: '版本与资源',
-    //   content: (
-    //     <Step2ToolConfig
-    //       moduleKey={selectedModule}
-    //       onNext={nextStep}
-    //       onPrev={prevStep}
-    //       category={category}
-    //     />
-    //   ),
-    // },
     {
-      title: '执行配置',
-      description: '脚本与任务',
+      title: '工具配置',
+      description: '版本与资源',
       content: (
-        <Step3Execution
+        <Step2ToolConfig
           moduleKey={selectedModule}
           onNext={nextStep}
           onPrev={prevStep}
@@ -51,6 +39,19 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
         />
       ),
     },
+    // {
+    //   title: '执行配置',
+    //   description: '脚本与任务',
+    //   content: (
+    //     <Step3Execution
+    //       moduleKey={selectedModule}
+    //       onNext={nextStep}
+    //       onPrev={prevStep}
+    //       category={category}
+    //       moduleKeys={executionModuleKeys}
+    //     />
+    //   ),
+    // },
     {
       title: '结果查看',
       description: '报告与日志',
