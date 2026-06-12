@@ -118,7 +118,7 @@ const workbookReadOptions: XLSX.ParsingOptions = {
   cellDates: false,
   cellFormula: true,
   cellHTML: false,
-  cellStyles: true,
+  cellStyles: false,
 };
 
 export function areSpreadsheetFilesIdentical(sourcePath: string, targetPath: string): boolean {
@@ -523,7 +523,7 @@ function copyWorksheetCell(
     return;
   }
   const targetAddress = XLSX.utils.encode_cell({ r: targetRowIndex, c: targetColumnIndex });
-  (targetWorksheet as Record<string, unknown>)[targetAddress] = cloneWorkbookValue(cell);
+  (targetWorksheet as Record<string, unknown>)[targetAddress] = cloneCell(cell);
 }
 
 function writeWorksheetRowValues(worksheet: XLSX.WorkSheet, rowIndex: number, values: string[]): void {
@@ -540,7 +540,7 @@ function writeWorksheetCellValue(
   template?: XLSX.CellObject
 ): void {
   const address = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
-  const cell = template ? cloneWorkbookValue(template) as XLSX.CellObject : {} as XLSX.CellObject;
+  const cell = template ? cloneCell(template) : {} as XLSX.CellObject;
   const mutableCell = cell as unknown as Record<string, unknown>;
   delete mutableCell.f;
   delete mutableCell.F;
@@ -651,7 +651,41 @@ function getWorksheetColumnCount(worksheet: XLSX.WorkSheet): number {
 }
 
 function cloneWorksheet(worksheet: XLSX.WorkSheet): XLSX.WorkSheet {
-  return cloneWorkbookValue(worksheet) as XLSX.WorkSheet;
+  const cloned: XLSX.WorkSheet = {};
+  const sourceRecord = worksheet as Record<string, unknown>;
+  const targetRecord = cloned as Record<string, unknown>;
+
+  for (const [key, value] of Object.entries(sourceRecord)) {
+    if (!key.startsWith('!')) {
+      targetRecord[key] = cloneCell(value as XLSX.CellObject);
+      continue;
+    }
+
+    if (key === '!ref' || key === '!type') {
+      targetRecord[key] = value;
+      continue;
+    }
+
+    if (key === '!merges' || key === '!cols' || key === '!rows' || key === '!margins' || key === '!protect' || key === '!autofilter') {
+      targetRecord[key] = cloneWorkbookValue(value);
+    }
+  }
+
+  return cloned;
+}
+
+function cloneCell(cell: XLSX.CellObject): XLSX.CellObject {
+  const source = cell as unknown as Record<string, unknown>;
+  const cloned: Record<string, unknown> = {};
+
+  for (const key of ['t', 'v', 'w', 'z', 'f', 'F', 'D']) {
+    const value = source[key];
+    if (value !== undefined) {
+      cloned[key] = value instanceof Date ? new Date(value.getTime()) : value;
+    }
+  }
+
+  return cloned as unknown as XLSX.CellObject;
 }
 
 function cloneWorkbookValue<T>(value: T): T {
@@ -713,32 +747,75 @@ function cloneWorkbookValue<T>(value: T): T {
 }
 
 function buildWorkbookSheetModel(sheetName: string, sheet: XLSX.WorkSheet): WorkbookSheetModel {
-  const rows = normalizeWorksheetRows(XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: '', blankrows: true }));
-  if (rows.length === 0) {
+  const extracted = extractWorksheetRows(sheet);
+  if (extracted.rowIndexes.length === 0) {
     return { name: sheetName, rows: [], headers: [], rowKeys: [], rowEntries: [], rowByKey: new Map() };
   }
-  const headers = rows[0].map((value, index) => value || `Column ${index + 1}`);
+  const headerRowIndex = extracted.rowIndexes[0];
+  const headers = getExtractedRowValues(extracted.rowsByIndex, headerRowIndex, extracted.columnCount)
+    .map((value, index) => value || `Column ${index + 1}`);
+  const rows = extracted.rowIndexes.map((rowIndex) => getExtractedRowValues(extracted.rowsByIndex, rowIndex, extracted.columnCount));
   const keyIndex = findKeyColumnIndex(headers);
   const rowKeys: string[] = [];
   const rowEntries: WorkbookRowEntry[] = [];
   const rowByKey = new Map<string, WorkbookRowModel>();
-  rows.slice(1).forEach((row, offset) => {
-    const rowIndex = offset + 1;
+  for (const rowIndex of extracted.rowIndexes.slice(1)) {
+    const row = getExtractedRowValues(extracted.rowsByIndex, rowIndex, extracted.columnCount);
     if (row.every((value) => value === '')) {
       rowEntries.push({ kind: 'blank', rowIndex });
-      return;
+      continue;
     }
     const rawKey = (row[keyIndex] || row.find((value) => value !== '') || `row-${rowIndex + 1}`).trim();
     const key = makeUniqueRowKey(rowByKey, rawKey || `row-${rowIndex + 1}`);
     rowKeys.push(key);
     rowEntries.push({ kind: 'data', key, rowIndex });
     rowByKey.set(key, { rowIndex, values: row, signature: createRowSignature(row) });
-  });
+  }
   return { name: sheetName, rows, headers, rowKeys, rowEntries, rowByKey };
 }
 
-function normalizeWorksheetRows(rows: string[][]): string[][] {
-  return rows.map((row) => row.map((value) => normalizeCellValue(value)));
+function extractWorksheetRows(sheet: XLSX.WorkSheet): {
+  rowsByIndex: Map<number, Map<number, string>>;
+  rowIndexes: number[];
+  columnCount: number;
+} {
+  const rowsByIndex = new Map<number, Map<number, string>>();
+  let maxColumn = -1;
+
+  for (const key of Object.keys(sheet)) {
+    if (key.startsWith('!')) {
+      continue;
+    }
+
+    let address: XLSX.CellAddress;
+    try {
+      address = XLSX.utils.decode_cell(key);
+    } catch {
+      continue;
+    }
+
+    const cell = (sheet as Record<string, XLSX.CellObject | undefined>)[key];
+    const row = rowsByIndex.get(address.r) ?? new Map<number, string>();
+    row.set(address.c, normalizeCellValue(cell?.v));
+    rowsByIndex.set(address.r, row);
+    maxColumn = Math.max(maxColumn, address.c);
+  }
+
+  const rowIndexes = Array.from(rowsByIndex.keys()).sort((a, b) => a - b);
+  return {
+    rowsByIndex,
+    rowIndexes,
+    columnCount: Math.max(maxColumn + 1, getWorksheetColumnCount(sheet)),
+  };
+}
+
+function getExtractedRowValues(rowsByIndex: Map<number, Map<number, string>>, rowIndex: number, columnCount: number): string[] {
+  const row = rowsByIndex.get(rowIndex);
+  const values: string[] = [];
+  for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+    values.push(row?.get(columnIndex) ?? '');
+  }
+  return values;
 }
 
 function normalizeCellValue(value: unknown): string {
