@@ -852,7 +852,38 @@ function extractWorksheetRows(sheet: XLSX.WorkSheet): {
     maxColumn = Math.max(maxColumn, address.c);
   }
 
-  const rowIndexes = Array.from(rowsByIndex.keys()).sort((a, b) => a - b);
+  const keys = Array.from(rowsByIndex.keys());
+  let minRow = 0;
+  let maxRow = -1;
+
+  const ref = sheet['!ref'];
+  if (ref) {
+    try {
+      const range = XLSX.utils.decode_range(ref);
+      minRow = range.s.r;
+      maxRow = range.e.r;
+    } catch {
+      // ignore
+    }
+  }
+
+  if (keys.length > 0) {
+    if (maxRow === -1) {
+      minRow = Math.min(...keys);
+      maxRow = Math.max(...keys);
+    } else {
+      minRow = Math.min(minRow, ...keys);
+      maxRow = Math.max(maxRow, ...keys);
+    }
+  }
+
+  const rowIndexes: number[] = [];
+  if (maxRow !== -1) {
+    for (let r = minRow; r <= maxRow; r += 1) {
+      rowIndexes.push(r);
+    }
+  }
+
   return {
     rowsByIndex,
     rowIndexes,
