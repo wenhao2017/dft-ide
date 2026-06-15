@@ -438,16 +438,47 @@ export async function cloneRepoWithTerminal(repoUrl: string, projectPath: string
   });
 
   await new Promise<void>((resolve, reject) => {
-    terminal.sendText(`git clone ${repoUrl}`);
-    const disposable = vscode.window.onDidEndTerminalShellExecution(data => {
-      disposable.dispose();
-      if (data?.exitCode === 0) {
-        terminal.dispose();
-        resolve();
-      } else {
-        reject(new Error('Failed to clone the Git repository. See terminal logs for specific error details'));
-      }
-    });
+    if ('onDidEndTerminalShellExecution' in vscode.window) {
+      const disposable = vscode.window.onDidEndTerminalShellExecution(e => {
+        if (e.terminal === terminal) {
+          disposable.dispose();
+          if (e.exitCode === 0) {
+            terminal.dispose();
+            resolve();
+          } else {
+            reject(new Error('Failed to clone the Git repository. See terminal logs for specific error details'));
+          }
+        }
+      });
+      terminal.sendText(`git clone ${repoUrl}`);
+    } else {
+      let output = '';
+      const windowWithTerminalData = vscode.window as typeof vscode.window & {
+        onDidWriteTerminalData: (
+          listener: (event: { terminal: vscode.Terminal; data: string }) => unknown
+        ) => vscode.Disposable;
+      };
+      const disposable = windowWithTerminalData.onDidWriteTerminalData(e => {
+        if (e.terminal === terminal) {
+          output += e.data;
+          const lines = output.replace(/(\r\n|\r)/g, '\n').split('\n');
+          const cloneFinishedIndex = lines.indexOf('CLONE_FINISHED');
+          if (cloneFinishedIndex > 0) {
+            disposable.dispose();
+            const result = lines[cloneFinishedIndex - 1].toLowerCase();
+            if (result.includes('receiving objects:') || result.includes('unpacking objects:')) {
+              terminal.dispose();
+              resolve();
+            } else if (result.includes('fatal:')) {
+              reject(new Error(result));
+            } else {
+              reject(new Error('Failed to clone the Git repository. See terminal logs for specific error details'));
+            }
+          }
+        }
+      });
+      terminal.sendText(`git clone ${repoUrl} ; echo "CLONE_FINISHED"`);
+    }
   });
 }
 
@@ -460,7 +491,7 @@ export async function setGitCredentialHelper() {
     }
   } catch {
     try {
-      await executeFileCommand('git', ['config', '--global', 'credential.helper', 'cache']);
+      await executeFileCommand('git', ['config', '--global', 'credential.helper', 'cache --timeout=43200']);
     } catch (error) {
       console.error('Failed to set git credential helper:', error);
     }

@@ -85,6 +85,22 @@ import {
 
 const { Text, Title, Paragraph } = Typography;
 
+const diffTypeOrder: Record<string, number> = {
+  sourceAdded: 10,
+  sheetAdded: 10,
+  targetRedundant: 20,
+  sheetRedundant: 20,
+  fieldAnomaly: 30,
+  fieldDifferent: 40,
+};
+
+const sortDiffItemsForDisplay = (items: CommonDiffItem[]) =>
+  [...items].sort((left, right) => {
+    const leftOrder = diffTypeOrder[left.type] ?? 35;
+    const rightOrder = diffTypeOrder[right.type] ?? 35;
+    return leftOrder - rightOrder;
+  });
+
 const CommonFlow: React.FC = () => {
   const dataDesignTree = useVscodePath();
   const dataNormTable = useVscodePath();
@@ -419,7 +435,7 @@ const CommonFlow: React.FC = () => {
       if (res.success) {
         setPrecheckInfo(res.precheck);
         const nextDiffItems = Array.isArray(res.diffItems)
-          ? (res.diffItems as CommonDiffItem[]).filter(shouldKeepDiffItem)
+          ? sortDiffItemsForDisplay((res.diffItems as CommonDiffItem[]).filter(shouldKeepDiffItem))
           : [];
         setDiffItems(nextDiffItems);
         setActiveDiffId(nextDiffItems[0]?.id || null);
@@ -531,6 +547,11 @@ const CommonFlow: React.FC = () => {
         const matchType = filterDiffType === 'all' || item.type === filterDiffType;
         const matchSheet = filterSheet === 'all' || item.sheetName === filterSheet;
         return matchFile && matchType && matchSheet;
+      })
+      .sort((left, right) => {
+        const leftOrder = diffTypeOrder[left.type] ?? 35;
+        const rightOrder = diffTypeOrder[right.type] ?? 35;
+        return leftOrder - rightOrder;
       });
   }, [diffItems, filterFileType, filterDiffType, filterSheet]);
 
@@ -958,10 +979,10 @@ const CommonFlow: React.FC = () => {
                 </Radio.Group>
                 <Radio.Group size="small" value={filterDiffType} onChange={(event) => setFilterDiffType(event.target.value)}>
                   <Radio.Button value="all">全部</Radio.Button>
-                  <Radio.Button value="fieldDifferent">不同</Radio.Button>
                   <Radio.Button value="fieldAnomaly">异常</Radio.Button>
                   <Radio.Button value="sourceAdded">新增</Radio.Button>
                   <Radio.Button value="targetRedundant">目标独有</Radio.Button>
+                  <Radio.Button value="fieldDifferent">不同</Radio.Button>
                 </Radio.Group>
                 {uniqueSheets.length > 0 && (
                   <Radio.Group size="small" value={filterSheet} onChange={(event) => setFilterSheet(event.target.value)}>
@@ -1025,8 +1046,8 @@ const CommonFlow: React.FC = () => {
           {activeItem ? (
             <Card size="small" title="差异业务对比与决策" style={{ borderRadius: 8, height: '100%' }}>
               <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                <div><Text type="secondary">业务 Key：</Text><code>{activeItem.key}</code></div>
-                {activeItem.fieldName && <div><Text type="secondary">变更字段：</Text><Tag color="orange">{activeItem.fieldName}</Tag></div>}
+                <div><Text type="secondary">design name：</Text><code>{activeItem.key}</code></div>
+                {activeItem.fieldName && <div><Text type="secondary">属性：</Text><Tag color="orange">{activeItem.fieldName}</Tag></div>}
                 <Row gutter={12}>
                   <Col span={12}>
                     <Card size="small" title="来源值" style={{ height: 130, overflowY: 'auto' }}>

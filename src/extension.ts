@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as dotenv from 'dotenv';
 import { submitJob, queryJobStatus, getDonauResources } from './services/donauService';
 import { gitService } from './services/gitService';
 import { obsService } from './services/obsService';
@@ -111,6 +112,16 @@ const pipelineRuntimeService = new PipelineRuntimeService({
 const activeJobTimers = new Map<string, ReturnType<typeof setInterval>>();
 
 export function activate(context: vscode.ExtensionContext) {
+  const isDev = context.extensionMode === vscode.ExtensionMode.Development;
+
+  if (isDev) {
+    const envPath = path.join(context.extensionPath, '.env');
+
+    if (fs.existsSync(envPath)) {
+      dotenv.config({ path: envPath });
+    }
+  }
+
   context.subscriptions.push(dftDiagnostics);
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(OBS_READONLY_SCHEME, {

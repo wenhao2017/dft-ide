@@ -23,6 +23,9 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "enabledApiProposals": [
+    "terminalDataWriteEvent"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -72,7 +75,7 @@
       "properties": {
         "dftIde.apiBase": {
           "type": "string",
-          "default": "",
+          "default": "http://pandas.hisi.huawei.com/dft-ide-server",
           "description": "DFT IDE backend API base URL, for example http://localhost:8080."
         },
         "dftIde.localProjectsRoot": {
@@ -157,7 +160,7 @@
         },
         "dftIde.gitlabHost": {
           "type": "string",
-          "default": "http://7.227.4.70/test11",
+          "default": "http://code-dg.hisi.huawei.com/DFT_IDE_PROJECTS",
           "description": "gitlab host."
         }
       }
