@@ -572,7 +572,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             command: 'selectPathResponse',
             requestId,
             path: null,
-            error: 'Selected path must be inside the current repository.',
+            error: '选择的路径必须位于当前仓库目录内。',
           });
           return;
         }
@@ -674,7 +674,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             currentPanel?.webview.postMessage({
               command: 'validatePathResponse', requestId,
               exists: false, isFile: false, isDirectory: false, withinRoot: false,
-              error: 'Path must be inside the current repository.'
+              error: '路径必须位于当前仓库目录内。'
             });
             return;
           }

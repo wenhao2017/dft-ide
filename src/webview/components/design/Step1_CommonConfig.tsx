@@ -160,14 +160,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
     );
   };
 
-  const configHeader = (
-    <Row align="middle" style={{ marginBottom: 6 }}>
-      <Col span={4} />
-      <Col span={20} style={{ paddingLeft: 4 }}>执行脚本</Col>
-      {/* <Col span={11} style={{ marginLeft: 4 }}>配置json文件</Col> */}
-    </Row>
-  );
-
   const onGenerateDefaults = async () => {
     setGenerating(true);
     try {
@@ -226,11 +218,11 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
 
           <Card size="small" style={{ marginBottom: 14 }} styles={{ body: { padding: 18 } }}>
             <CollapsibleSection title="归一化表格转 cfg">
-              {configHeader}
               {normalizeCfgs.map((normalizeCfg, index) => (
                 <Row key={index} align="middle" style={{ marginBottom: 16 }}>
                   <Col span={4} style={{ textAlign: 'right', paddingRight: 12 }}>
-                    <Space size={4}>
+                    <Space size={6}>
+                      <span>执行脚本</span>
                       <Radio checked={normalizeIndex === index} onChange={handleRadioChange} value={index} />
                     </Space>
                   </Col>
