@@ -1,139 +1,476 @@
-diff --git a/.vscode/launch.json b/.vscode/launch.json
-index ce26f83..1e9eae7 100644
---- a/.vscode/launch.json
-+++ b/.vscode/launch.json
-@@ -7,6 +7,7 @@
-       "request": "launch",
-       "runtimeExecutable": "${execPath}",
-       "args": [
-+        "--enable-proposed-api=w00445630.dft-ide",
-         "--extensionDevelopmentPath=${workspaceFolder}"
-       ],
-       "outFiles": [
-diff --git a/package.json b/package.json
-index 2e2567f..fd5f9a3 100644
---- a/package.json
-+++ b/package.json
-@@ -23,6 +23,9 @@
-   "activationEvents": [
-     "onStartupFinished"
-   ],
-+  "enabledApiProposals": [
-+    "terminalDataWriteEvent"
-+  ],
-   "contributes": {
-     "viewsContainers": {
-       "activitybar": [
-@@ -72,7 +75,7 @@
-       "properties": {
-         "dftIde.apiBase": {
-           "type": "string",
--          "default": "",
-+          "default": "http://pandas.hisi.huawei.com/dft-ide-server",
-           "description": "DFT IDE backend API base URL, for example http://localhost:8080."
-         },
-         "dftIde.localProjectsRoot": {
-@@ -157,7 +160,7 @@
-         },
-         "dftIde.gitlabHost": {
-           "type": "string",
--          "default": "http://7.227.4.70/test11",
-+          "default": "http://code-dg.hisi.huawei.com/DFT_IDE_PROJECTS",
-           "description": "gitlab host."
-         }
-       }
 diff --git a/src/extension.ts b/src/extension.ts
-index 84e070a..a543731 100644
+index 3630e70..deceecf 100644
 --- a/src/extension.ts
 +++ b/src/extension.ts
-@@ -1,6 +1,7 @@
+@@ -1,5 +1,6 @@
  import * as vscode from 'vscode';
  import * as path from 'path';
++import * as os from 'os';
  import * as fs from 'fs';
-+import * as dotenv from 'dotenv';
+ import * as dotenv from 'dotenv';
  import { submitJob, queryJobStatus, getDonauResources } from './services/donauService';
- import { gitService } from './services/gitService';
- import { obsService } from './services/obsService';
-@@ -111,6 +112,16 @@ const pipelineRuntimeService = new PipelineRuntimeService({
- const activeJobTimers = new Map<string, ReturnType<typeof setInterval>>();
+@@ -18,9 +19,6 @@ import {
+   LOCAL_STATE_DIR_NAME,
+ } from './services/constants';
  
- export function activate(context: vscode.ExtensionContext) {
-+  const isDev = context.extensionMode === vscode.ExtensionMode.Development;
-+ 
-+  if (isDev) {
-+    const envPath = path.join(context.extensionPath, '.env');
-+ 
-+    if (fs.existsSync(envPath)) {
-+      dotenv.config({ path: envPath });
-+    }
-+  }
-+
-   context.subscriptions.push(dftDiagnostics);
+-// Import utility execution commands
+-import { executeShellCommand } from './services/utils';
+-
+ // Import layout services
+ import {
+   applyDftIdeLayout,
+@@ -194,11 +192,7 @@ export function activate(context: vscode.ExtensionContext) {
+ 
    context.subscriptions.push(
-     vscode.workspace.registerTextDocumentContentProvider(OBS_READONLY_SCHEME, {
-diff --git a/src/services/workspaceService.ts b/src/services/workspaceService.ts
-index 7e47385..1884ad6 100644
---- a/src/services/workspaceService.ts
-+++ b/src/services/workspaceService.ts
-@@ -438,16 +438,42 @@ export async function cloneRepoWithTerminal(repoUrl: string, projectPath: string
-   });
- 
-   await new Promise<void>((resolve, reject) => {
--    terminal.sendText(`git clone ${repoUrl}`);
--    const disposable = vscode.window.onDidEndTerminalShellExecution(data => {
--      disposable.dispose();
--      if (data?.exitCode === 0) {
--        terminal.dispose();
--        resolve();
--      } else {
--        reject(new Error('Failed to clone the Git repository. See terminal logs for specific error details'));
+     vscode.commands.registerCommand('dftIde.whoami', async function (): Promise<string> {
+-      let username = await executeShellCommand("whoami");
+-      if (username.includes('\\')) {
+-        username = username.split('\\')[1];
 -      }
+-      return username.trim().toLowerCase();
++      return os.userInfo().username.toLowerCase();
+     })
+   );
+ 
+@@ -392,8 +386,13 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+     switch (msg.command) {
+       case 'getGitInfo': {
+         const requestId: string = msg.requestId;
++        const repo = normalizeProjectRepo(msg.repo);
+         try {
+-          const gitInfo = await gitService.getCurrentGitInfo();
++          if (!repo) {
++            throw new Error('Unsupported repository.');
++          }
++          const resource = vscode.Uri.file(getProjectRepoRoot(repo));
++          const gitInfo = await gitService.getCurrentGitInfo(resource);
+           currentPanel?.webview.postMessage({
+             command: 'getGitInfoResponse',
+             requestId,
+@@ -1563,6 +1562,32 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+         return;
+       }
+ 
++      case 'getBranches': {
++        const requestId: string = msg.requestId;
++        const repo = normalizeProjectRepo(msg.repo);
++        try {
++          if (!repo) {
++            throw new Error('Unsupported repository.');
++          }
++          const resource = vscode.Uri.file(getProjectRepoRoot(repo));
++          const branches = await gitService.getBranches(resource);
++          currentPanel?.webview.postMessage({
++            command: 'getBranchesResponse',
++            requestId,
++            success: true,
++            branches
++          });
++        } catch (error) {
++          currentPanel?.webview.postMessage({
++            command: 'getBranchesResponse',
++            requestId,
++            success: false,
++            error: error instanceof Error ? error.message : String(error)
++          });
++        }
++        return;
++      }
++
+       default:
+         return;
+     }
+diff --git a/src/services/gitService.ts b/src/services/gitService.ts
+index dd75221..5a61c23 100644
+--- a/src/services/gitService.ts
++++ b/src/services/gitService.ts
+@@ -449,9 +449,8 @@ export const gitService: DftGitService = {
+       return [];
+     }
+ 
+-    const branches = repo.state?.refUpdates || [];
+-
+-    return branches.filter((b: any) => b.name && b.type === "branch").map((b: any) => b.name);
++    const branches = await repo.getBranches(resource);
++    return branches.filter((b: any) => b.name && b.type === 0);
+   },
+ 
+   /**
+diff --git a/src/services/utils.ts b/src/services/utils.ts
+index f4ceafe..eeebbe7 100644
+--- a/src/services/utils.ts
++++ b/src/services/utils.ts
+@@ -1,36 +1,15 @@
+ import * as vscode from 'vscode';
+ import { exec, execFile } from 'child_process';
+ 
+-export async function executeShellCommand(command: string, workDir?: string): Promise<string> {
+-  return new Promise((resolve, reject) => {
+-    const options = workDir ? { cwd: workDir } : {};
+-    exec(command, options, (error, stdout, stderr) => {
+-      if (error) {
+-        vscode.window.showErrorMessage(`Error: ${error.message}`);
+-        reject(error);
+-        return;
+-      }
+-      if (stderr && stderr.includes('error')) {
+-        vscode.window.showErrorMessage(`stderr: ${stderr}`);
+-        reject(new Error(stderr));
+-        return;
+-      }
+-      resolve(stdout);
 -    });
-+    if ('onDidEndTerminalShellExecution' in vscode.window) {
-+      const disposable = vscode.window.onDidEndTerminalShellExecution(e => {
-+        if (e.terminal === terminal) {
-+          disposable.dispose();
-+          if (e.exitCode === 0) {
-+            terminal.dispose();
-+            resolve();
-+          } else {
-+            reject(new Error('Failed to clone the Git repository. See terminal logs for specific error details'));
+-  });
+-}
+-
+ export async function executeFileCommand(command: string, args: string[], workDir?: string): Promise<string> {
+   return new Promise((resolve, reject) => {
+     const options = workDir ? { cwd: workDir } : {};
+     execFile(command, args, options, (error, stdout, stderr) => {
+       if (error) {
+-        vscode.window.showErrorMessage(`Error: ${error.message}`);
+         reject(error);
+         return;
+       }
+       if (stderr && stderr.toLowerCase().includes('error')) {
+-        vscode.window.showErrorMessage(`stderr: ${stderr}`);
+         reject(new Error(stderr));
+         return;
+       }
+diff --git a/src/webview/components/ProjectMembers.tsx b/src/webview/components/ProjectMembers.tsx
+index b11ca4a..27588da 100644
+--- a/src/webview/components/ProjectMembers.tsx
++++ b/src/webview/components/ProjectMembers.tsx
+@@ -132,14 +132,27 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
+       const user = await fetchSingleUser(firstNotInUsers);
+       if (user) {
+         if (user.locked) {
+-          message.error(`Gitlab 用户 ${firstNotInUsers} 已被锁定`);
++          message.warning(`Gitlab 用户 ${firstNotInUsers} 已被锁定, 请联系管理员进行解锁`);
+         } else if (user.state !== 'active') {
+-          message.error(`Gitlab 用户 ${firstNotInUsers} 的状态为 ${user.state}`);
++          if(user.state === 'deactivated'){
++            message.warning(
++              <span>
++                Gitlab 用户 {firstNotInUsers} 的状态为 {user.state}(已停用), 可能是长时间未登录导致.<br />
++                请登录个人主页{' '}
++                <a href={user.web_url} target="_blank" rel="noopener noreferrer">
++                  {user.web_url}
++                </a>{' '}
++                后重试或联系管理员进行恢复
++              </span>
++            );
++          }else{
++            message.warning(`Gitlab 用户 ${firstNotInUsers} 的状态为 ${user.state}, 请联系管理员进行恢复`);
 +          }
-+        }
-+      });
-+      terminal.sendText(`git clone ${repoUrl}`);
-+    } else {
-+      let output = '';
-+      const disposable = vscode.window.onDidWriteTerminalData(e => {
-+        if (e.terminal === terminal) {
-+          output += e.data;
-+          const lines = output.replace(/(\r\n|\r)/g, '\n').split('\n')
-+          const cloneFinishedIndex = lines.indexOf('CLONE_FINISHED');
-+          if (cloneFinishedIndex > 0) {
-+            disposable.dispose();
-+            const result = lines[cloneFinishedIndex - 1].toLowerCase();
-+            if (result.includes('receiving objects:') || result.includes('unpacking objects:')) {
-+              terminal.dispose();
-+              resolve();
-+            } else if (result.includes('fatal:')) {
-+              reject(new Error(result));
-+            } else {
-+              reject(new Error('Failed to clone the Git repository. See terminal logs for specific error details'));
-+            }
+         } else {
+           setUsers((items) => [...items, user]);
+         }
+       } else {
+-        message.error(`Gitlab 用户 ${firstNotInUsers} 不存在`);
++        message.warning(`Gitlab 用户 ${firstNotInUsers} 不存在`);
+       }
+     }
+   };
+@@ -173,12 +186,20 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
+         message.success('成员已更新');
+       } else {
+         for (const employeeId of value.employeeIds){
++          const isExists = members.some(member => member.employeeId === employeeId.trim());
++          if (isExists) {
++            message.info(`成员 ${employeeId} 已存在`);
++            continue;
 +          }
-+        }
-+      });
-+      terminal.sendText(`git clone ${repoUrl} ; echo "CLONE_FINISHED"`);
-+    }
-   });
++
+           const created = await addProjectMember(project.id, {
+             employeeId: employeeId.trim(),
+             role: value.role,
+             ctmp: value.ctmp,
+           });
++
+           setMembers((items) => [...items, created]);
++          form.setFieldValue('employeeIds', value.employeeIds.filter(id => id !== employeeId));
+         }
+         message.success('成员已添加');
+       }
+diff --git a/src/webview/components/Welcome.tsx b/src/webview/components/Welcome.tsx
+index 6c86a62..99675eb 100644
+--- a/src/webview/components/Welcome.tsx
++++ b/src/webview/components/Welcome.tsx
+@@ -106,6 +106,17 @@ const flows = [
+   },
+ ];
+ 
++const activeRepoCardStyle: React.CSSProperties = {
++  background:
++    'color-mix(in srgb, var(--vscode-editor-background, #fff) 88%, var(--vscode-focusBorder, #1677ff))',
++  color: 'var(--vscode-foreground)',
++};
++
++const inactiveRepoCardStyle: React.CSSProperties = {
++  background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))',
++  color: 'var(--vscode-foreground)',
++};
++
+ function repoTagColor(status: ProjectRepoStatus['status']): string {
+   if (status === 'ready') return 'green';
+   if (status === 'missing') return 'orange';
+@@ -132,6 +143,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+   const [projectModalOpen, setProjectModalOpen] = useState(false);
+   const [projectForm] = Form.useForm<ProjectFormValue>();
+   const [projectSaving, setProjectSaving] = useState(false);
++  const activeProject = useWizardStore((s) => s.activeProject);
+ 
+   const cardBorder = 'var(--vscode-panel-border, rgba(127,127,127,0.18))';
+   const panelBg = isDark
+@@ -561,10 +573,21 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+             <List
+               dataSource={filteredProjects}
+               renderItem={(project) => {
++                const active = activeProject?.id == project.id 
+                 return (
+-                <List.Item
++                <List.Item style={{
++                    flex: '1 1 230px',
++                    minWidth: 220,
++                    textAlign: 'left',
++                    border: `1px solid ${active ? 'var(--vscode-focusBorder)' : 'var(--vscode-panel-border, rgba(127,127,127,0.24))'}`,
++                    borderLeft: active ? '4px solid var(--vscode-focusBorder)' : '4px solid transparent',
++                    borderRadius: 10,
++                    padding: '14px 18px',
++                    ...(active ? activeRepoCardStyle : inactiveRepoCardStyle),
++                    cursor: 'pointer'
++                  }}
+                   actions={[
+-                    <div style={{ minWidth: 300}}>
++                    <div style={{ minWidth: 300 }}>
+                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, paddingBottom: 12 }}>
+                         <Tooltip key="initialize" title={projectInitializeTooltipTitle(project)}>
+                           <span>
+@@ -594,7 +617,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+                         <Tooltip key="enter" title={projectEnterTooltipTitle(project)}>
+                           <span>
+                             <Button
+-                              disabled={isProjectEnterDisable(project)}
++                              disabled={isProjectEnterDisable(project) || active}
+                               loading={workingProjectId === project.id}
+                               onClick={() => enterProject(project)}
+                               style={{ flex: 1 }}
+@@ -617,7 +640,6 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+                       </Form>
+                     </div>
+                     ]}
+-                  style={{ padding: '14px 18px' }}
+                 >
+                   <List.Item.Meta
+                     avatar={<FileProtectOutlined style={{ color: 'var(--vscode-focusBorder, #2563eb)', fontSize: 22 }} />}
+diff --git a/src/webview/components/design/Step1_CommonConfig.tsx b/src/webview/components/design/Step1_CommonConfig.tsx
+index a31ecda..fda2af6 100644
+--- a/src/webview/components/design/Step1_CommonConfig.tsx
++++ b/src/webview/components/design/Step1_CommonConfig.tsx
+@@ -68,7 +68,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+     useFlowConfig(moduleKey ? `${flowKey}/${moduleKey}/config` : flowKey);
+ 
+   useEffect(() => {
+-    getGitInfo()
++    getGitInfo(flowKey)
+       .then((res) => {
+         if (res && res.branch) {
+           const branchName = res.branch as string;
+@@ -79,7 +79,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+         }
+       })
+       .catch(() => setCurrentBranch('Git Error'));
+-  }, [updatePayload]);
++  }, [updatePayload, flowKey]);
+ 
+   useEffect(() => {
+     if (!savedData) return;
+diff --git a/src/webview/components/design/Step2_ToolConfig.tsx b/src/webview/components/design/Step2_ToolConfig.tsx
+index 4746432..bc77957 100644
+--- a/src/webview/components/design/Step2_ToolConfig.tsx
++++ b/src/webview/components/design/Step2_ToolConfig.tsx
+@@ -10,6 +10,7 @@ import {
+   Tabs,
+   Badge,
+   Spin,
++  Select,
+ } from 'antd';
+ import {
+   PlusOutlined,
+@@ -34,6 +35,28 @@ interface Props {
+   moduleKeys: string[];
  }
  
-@@ -460,7 +486,7 @@ export async function setGitCredentialHelper() {
-     }
-   } catch {
-     try {
--      await executeFileCommand('git', ['config', '--global', 'credential.helper', 'cache']);
-+      await executeFileCommand('git', ['config', '--global', 'credential.helper', 'cache --timeout=43200']);
-     } catch (error) {
-       console.error('Failed to set git credential helper:', error);
-     }
++const toolOptions = [
++  {
++    label: 'ELI',
++    value: 'eli'
++  },
++  {
++    label: 'DC',
++    value: 'dc'
++  },
++  {
++    label: 'PT',
++    value: 'pt'
++  },
++  {
++    label: 'VCS',
++    value: 'vcs'
++  },{
++    label: 'fml',
++    value: 'fml'
++  }
++]
++
+ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category, moduleKeys }) => {
+   const flowKey = category.toLowerCase();
+   const [activeTab, setActiveTab] = useState('task');
+@@ -92,24 +115,22 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category,
+   // ── 任务配置 Tab ──────────────────────────────────
+   const renderTaskConfig = () => (
+     <Form form={taskForm} layout="vertical" style={{ padding: '16px 0' }}>
+-      <Form.Item label="执行流程" name="execFlow" initialValue="dcg">
++      {/* <Form.Item label="执行流程" name="execFlow" initialValue="dcg">
+         <Radio.Group>
+           <Radio value="dcg">DCG</Radio>
+           <Radio value="dc">DC</Radio>
+           <Radio value="top-down">TOP-DOWN</Radio>
+         </Radio.Group>
+-      </Form.Item>
++      </Form.Item> */}
+ 
+       <Row gutter={16}>
+         <Col span={14}>
+-          <Form.Item label="常用工具版本" name="toolName" initialValue="sailor">
+-            <Radio.Group>
+-              <Radio value="sailor">Sailor</Radio>
+-              <Radio value="dc">DC</Radio>
+-              <Radio value="pt">PT</Radio>
+-              <Radio value="vcs">VCS</Radio>
+-              <Radio value="fml">fml</Radio>
+-            </Radio.Group>
++          <Form.Item label="常用工具版本" name="toolName">
++            <Select
++              allowClear
++              placeholder="请选择工具"
++              options={toolOptions}
++            />
+           </Form.Item>
+         </Col>
+         <Col span={10}>
+diff --git a/src/webview/flows/CommonFlow.tsx b/src/webview/flows/CommonFlow.tsx
+index 5bad2cd..34cc9d4 100644
+--- a/src/webview/flows/CommonFlow.tsx
++++ b/src/webview/flows/CommonFlow.tsx
+@@ -17,6 +17,7 @@ import {
+   Radio,
+   Row,
+   Col,
++  Select,
+ } from 'antd';
+ import '@ant-design/v5-patch-for-react-19';
+ import type { MenuProps } from 'antd';
+@@ -52,6 +53,8 @@ import {
+   openFileInEditor,
+   prepareCommonArtifactSync,
+   applyCommonArtifactSync,
++  getRepoGitInfo,
++  getBranches,
+ } from '../utils/ipc';
+ import {
+   accentPanelStyle,
+@@ -143,6 +146,7 @@ const CommonFlow: React.FC = () => {
+   const [isPreparingSync, setIsPreparingSync] = useState<boolean>(false);
+   const [prepareWaitModalOpen, setPrepareWaitModalOpen] = useState<boolean>(false);
+   const [isApplying, setIsApplying] = useState<boolean>(false);
++  const [branchOptions, setBranchOptions] = useState<any>(null);
+   const prepareSyncRunIdRef = useRef(0);
+ 
+   const activeProject = useWizardStore((s) => s.activeProject);
+@@ -359,7 +363,11 @@ const CommonFlow: React.FC = () => {
+       key: 'checkout',
+       icon: <PullRequestOutlined />,
+       label: '切换到已有分支',
+-      onClick: () => setBranchModal({ open: true, repo, mode: 'checkout', value: '' }),
++      onClick: async () => {
++        const result = await getBranches(repo);
++        setBranchOptions(result.branches);
++        setBranchModal({ open: true, repo, mode: 'checkout', value: repoInfo[repo].branch || '' })
++      },
+     },
+     {
+       key: 'createBranch',
+@@ -1357,12 +1365,23 @@ const CommonFlow: React.FC = () => {
+         >
+           <Space direction="vertical" size={8} style={{ width: '100%' }}>
+             <Text style={mutedTextStyle}>{repoLabels[branchModal.repo]}</Text>
+-            <Input
+-              autoFocus
+-              value={branchModal.value}
+-              onChange={(event) => setBranchModal((prev) => ({ ...prev, value: event.target.value }))}
+-              placeholder={branchModal.mode === 'checkout' ? '请输入已有分支名' : '请输入新分支名'}
+-            />
++            {branchModal.mode !== 'checkout' ? 
++              <Input
++                autoFocus
++                value={branchModal.value}
++                onChange={(event) => setBranchModal((prev) => ({ ...prev, value: event.target.value }))}
++                placeholder='请输入新分支名'
++              /> :
++              <Select
++                allowClear
++                placeholder="请选择分支"
++                defaultValue={branchModal.value}
++                onChange={(value) => setBranchModal((prev) => ({ ...prev, value }))}
++                fieldNames={{ label: 'name', value: 'name'}}
++                options={branchOptions}
++                style={{ width: '100%' }}
++              />
++            }
+           </Space>
+         </Modal>
+       </div>
+diff --git a/src/webview/flows/DesignFlow.tsx b/src/webview/flows/DesignFlow.tsx
+index fe33c87..ec76be6 100644
+--- a/src/webview/flows/DesignFlow.tsx
++++ b/src/webview/flows/DesignFlow.tsx
+@@ -27,7 +27,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
+       content: <Step1CommonConfig onNext={nextStep} category={category} />,
+     },
+     {
+-      title: '工具配置',
++      title: '执行配置',
+       description: '版本与资源',
+       content: (
+         <Step2ToolConfig
+diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
+index 193bb3e..c8e1774 100644
+--- a/src/webview/utils/ipc.ts
++++ b/src/webview/utils/ipc.ts
+@@ -108,8 +108,8 @@ export async function getDonauResources(): Promise<{
+   };
+ }
+ 
+-export async function getGitInfo(): Promise<Record<string, unknown>> {
+-  return await ipcRequest('getGitInfo');
++export async function getGitInfo(repo: RepoKey): Promise<Record<string, unknown>> {
++  return await ipcRequest('getGitInfo', {repo});
+ }
+ 
+ /**
+@@ -571,6 +571,13 @@ export async function openGitlabHost(
+   return res as { success: boolean; error?: string };
+ }
+ 
++export async function getBranches(
++  repo: RepoKey
++): Promise<{ success: boolean; error?: string, branches?: any }> {
++  const res = await ipcRequest('getBranches', { repo });
++  return res as { success: boolean; error?: string };
++}
++
+ export async function prepareCommonArtifactSync(options: {
+   targetRepo: string;
+   sourceDesignTree: string;
