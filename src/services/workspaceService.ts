@@ -109,6 +109,26 @@ export function isProjectCurrentlyOpen(projectRoot: string): boolean {
   return normalizeFsPath(currentRoot) === normalizeFsPath(projectRoot);
 }
 
+export function getCurrentWorkspaceProjectInfo(): {
+  projectRoot: string | null;
+  projectName: string | null;
+  workspaceName: string | null;
+  folders: Array<{ name: string; path: string }>;
+} {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  const projectRoot = resolveProjectRoot() ?? null;
+
+  return {
+    projectRoot,
+    projectName: projectRoot ? path.basename(projectRoot) : null,
+    workspaceName: vscode.workspace.name ?? null,
+    folders: folders.map((folder) => ({
+      name: folder.name,
+      path: folder.uri.fsPath,
+    })),
+  };
+}
+
 export async function resolveProjectWorkspaceUri(rootPath: string): Promise<vscode.Uri> {
   const normalized = path.resolve(rootPath);
   const uri = vscode.Uri.file(normalized);

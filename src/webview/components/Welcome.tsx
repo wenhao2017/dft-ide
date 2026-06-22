@@ -22,11 +22,13 @@ import {
 import {
   getCurrentUser,
   getLocalConfigInfo,
+  getWorkspaceProjectInfo,
   openProjectWorkspace,
   prepareProjectWorkspace,
   selectPath,
   enterProjectWorkspace,
   LocalConfigInfo,
+  WorkspaceProjectInfo,
 } from '../utils/ipc';
 import useWizardStore from '../store/wizardStore';
 import {
@@ -106,6 +108,57 @@ const flows = [
   },
 ];
 
+const activeRepoCardStyle: React.CSSProperties = {
+  background:
+    'color-mix(in srgb, var(--vscode-editor-background, #fff) 88%, var(--vscode-focusBorder, #1677ff))',
+  color: 'var(--vscode-foreground)',
+};
+
+const inactiveRepoCardStyle: React.CSSProperties = {
+  background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))',
+  color: 'var(--vscode-foreground)',
+};
+
+function toSafeProjectDirectoryName(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'dft-project';
+}
+
+function normalizePathForCompare(value?: string | null): string {
+  return (value ?? '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+function joinPath(left: string, right: string): string {
+  return `${left.replace(/[\\/]+$/, '')}/${right.replace(/^[\\/]+/, '')}`;
+}
+
+function pathBaseName(value?: string | null): string {
+  const normalized = normalizePathForCompare(value);
+  const parts = normalized.split('/').filter(Boolean);
+  return parts[parts.length - 1] ?? '';
+}
+
+function getProjectRootCandidates(project: DftProject): string[] {
+  const rootPath = project.rootPath?.trim();
+  if (!rootPath) return [];
+
+  const projectNameDir = toSafeProjectDirectoryName(project.name);
+  const projectIdDir = toSafeProjectDirectoryName(project.id);
+  const rootBase = pathBaseName(rootPath);
+  const candidates = [joinPath(rootPath, projectNameDir), joinPath(rootPath, projectIdDir)];
+
+  if (rootBase === projectNameDir || rootBase === projectIdDir) {
+    candidates.unshift(rootPath);
+  }
+
+  return [...new Set(candidates.map(normalizePathForCompare))];
+}
+
+function isWorkspaceProject(project: DftProject, workspaceInfo: WorkspaceProjectInfo | null): boolean {
+  const workspaceRoot = normalizePathForCompare(workspaceInfo?.projectRoot);
+  if (!workspaceRoot) return false;
+  return getProjectRootCandidates(project).includes(workspaceRoot);
+}
+
 function repoTagColor(status: ProjectRepoStatus['status']): string {
   if (status === 'ready') return 'green';
   if (status === 'missing') return 'orange';
@@ -123,6 +176,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
   const [projects, setProjects] = useState<DftProject[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [workspaceProjectInfo, setWorkspaceProjectInfo] = useState<WorkspaceProjectInfo | null>(null);
   const [workingProjectId, setWorkingProjectId] = useState<string | null>(null);
   const [initializingProjectId, setInitializingProjectId] = useState<string | null>(null);
   const [initializingProgress, setInitializingProgress] = useState(0);
@@ -140,9 +194,12 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
 
   const currentProject = useMemo(() => {
     if (!dashboard) return null;
-    dashboard.currentProjectId = projectId;
     return dashboard.projects.find((item) => item.id === projectId) ?? null;
   }, [projectId, dashboard]);
+
+  const workspaceProject = useMemo(() => {
+    return projects.find((project) => isWorkspaceProject(project, workspaceProjectInfo)) ?? null;
+  }, [projects, workspaceProjectInfo]);
 
   const filteredProjects = useMemo(() => {
     const keyword = projectKeyword.trim().toLowerCase();
@@ -201,10 +258,36 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
           message.warning(error instanceof Error ? error.message : '本地托管目录读取失败');
         }
       });
+
+    getWorkspaceProjectInfo()
+      .then((info) => {
+        if (disposed) return;
+        setWorkspaceProjectInfo(info);
+      })
+      .catch((error) => {
+        if (!disposed) {
+          message.warning(error instanceof Error ? error.message : '当前工作区信息读取失败');
+        }
+      });
     return () => {
       disposed = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!workspaceProjectInfo) return;
+    if (!workspaceProject) {
+      setActiveProject(null);
+      return;
+    }
+    setActiveProject({
+      id: workspaceProject.id,
+      name: workspaceProject.name,
+      rootPath: workspaceProjectInfo.projectRoot ?? workspaceProject.rootPath,
+      role: workspaceProject.role,
+      canManageMembers: workspaceProject.canManageMembers,
+    });
+  }, [setActiveProject, workspaceProject, workspaceProjectInfo]);
 
   const enterProject = async (project: DftProject, rootPath?: string) => {
     setWorkingProjectId(project.id);
@@ -532,7 +615,12 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
       >
         <Card
           title="我的项目"
-          extra={currentProject ? <Tag color="blue">上次：{currentProject.name}</Tag> : null}
+          extra={
+            <Space size={6} wrap>
+              {workspaceProject && <Tag color="blue">当前加载：{workspaceProject.name}</Tag>}
+              {currentProject && <Tag>上次：{currentProject.name}</Tag>}
+            </Space>
+          }
           style={{ height: '100%', borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
           styles={{body: {padding: 0}}}
         >
@@ -560,11 +648,25 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
           ) : filteredProjects.length ? (
             <List
               dataSource={filteredProjects}
+              split={false}
+              style={{ padding: 12 }}
               renderItem={(project) => {
+                const active = workspaceProject?.id === project.id;
                 return (
-                <List.Item
+                <List.Item style={{
+                    marginBottom: 10,
+                    textAlign: 'left',
+                    border: `1px solid ${active ? 'var(--vscode-focusBorder)' : 'var(--vscode-panel-border, rgba(127,127,127,0.24))'}`,
+                    borderLeft: active ? '4px solid var(--vscode-focusBorder)' : '4px solid transparent',
+                    borderRadius: 8,
+                    padding: '14px 16px',
+                    ...(active ? activeRepoCardStyle : inactiveRepoCardStyle),
+                    boxShadow: active
+                      ? '0 8px 24px color-mix(in srgb, var(--vscode-focusBorder, #1677ff) 18%, transparent)'
+                      : 'none',
+                  }}
                   actions={[
-                    <div style={{ minWidth: 300}}>
+                    <div style={{ minWidth: 330, maxWidth: 380 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, paddingBottom: 12 }}>
                         <Tooltip key="initialize" title={projectInitializeTooltipTitle(project)}>
                           <span>
@@ -591,10 +693,10 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                             </Button>
                           </span>
                         </Tooltip>
-                        <Tooltip key="enter" title={projectEnterTooltipTitle(project)}>
+                        <Tooltip key="enter" title={active ? '当前 VS Code 已加载该项目' : projectEnterTooltipTitle(project)}>
                           <span>
                             <Button
-                              disabled={isProjectEnterDisable(project)}
+                              disabled={isProjectEnterDisable(project) || active}
                               loading={workingProjectId === project.id}
                               onClick={() => enterProject(project)}
                               style={{ flex: 1 }}
@@ -617,16 +719,16 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                       </Form>
                     </div>
                     ]}
-                  style={{ padding: '14px 18px' }}
                 >
                   <List.Item.Meta
                     avatar={<FileProtectOutlined style={{ color: 'var(--vscode-focusBorder, #2563eb)', fontSize: 22 }} />}
                     title={
                       <Space wrap>
                         <Text strong>{project.name}</Text>
+                        {active && <Tag color="blue">当前加载</Tag>}
                         <Tag>{project.ctmp_id ? "CTMP" : "自定义"}</Tag>
                         <Tag>{project.role}</Tag>
-                        {project.id === dashboard?.currentProjectId && <Tag color="green">上次项目</Tag>}
+                        {project.id === projectId && <Tag>上次项目</Tag>}
                       </Space>
                     }
                     description={

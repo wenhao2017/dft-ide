@@ -23,6 +23,7 @@ interface PathInputProps {
   showSelectFolder?: boolean;
   showSelectFile?: boolean;
   pathSources?: PathSource[];
+  localRootPath?: string;
   size?: 'small' | 'middle' | 'large';
   showValidation?: boolean;
 }
@@ -50,6 +51,7 @@ const PathInput: React.FC<PathInputProps> = ({
   showSelectFolder = false,
   showSelectFile = false,
   pathSources = defaultPathSources,
+  localRootPath,
   size = 'middle',
   showValidation = true,
 }) => {
@@ -65,7 +67,7 @@ const PathInput: React.FC<PathInputProps> = ({
       setObsTarget(openTarget);
       return;
     }
-    void state.handleOpen({ targetType: openTarget, sources: enabledSources });
+    void state.handleOpen({ targetType: openTarget, sources: enabledSources, rootPath: localRootPath });
   };
 
   const validationSuffix = showValidation && state.validation
@@ -102,7 +104,7 @@ const PathInput: React.FC<PathInputProps> = ({
     const onlyOneSource = enabledSources.length === 1;
     const selectFromSource = (source: PathSource) => {
       if (source === 'local') {
-        void state.handleSelect(target);
+        void state.handleSelect(target, { rootPath: localRootPath });
       } else {
         setObsTarget(target);
       }
@@ -167,7 +169,7 @@ const PathInput: React.FC<PathInputProps> = ({
           onChange={(event) => state.setValue(event.target.value)}
           onBlur={() => {
             if (state.value.trim() && showValidation) {
-              state.handleValidate();
+              state.handleValidate({ rootPath: localRootPath });
             }
           }}
           placeholder={placeholder}

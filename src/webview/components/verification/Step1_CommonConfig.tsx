@@ -35,7 +35,7 @@ const Step1CommonConfig: React.FC<{ onNext: () => void; moduleKey?: string }> = 
 
   // 获取 Git 分支
   useEffect(() => {
-    getGitInfo()
+    getGitInfo('verification')
       .then((res) => {
         if (res && res.branch) {
           const branchName = res.branch as string;

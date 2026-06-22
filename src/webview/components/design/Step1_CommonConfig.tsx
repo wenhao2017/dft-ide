@@ -12,7 +12,7 @@ import {
 import { useVscodePath } from '../../hooks/useVscodePath';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 import PathInput from '../shared/PathInput';
-import { generateDefaultFlowConfigs, getGitInfo } from '../../utils/ipc';
+import { generateDefaultFlowConfigs, getGitInfo, type RepoKey } from '../../utils/ipc';
 import useWizardStore from '../../store/wizardStore';
 import CollapsibleSection from '../shared/CollapsibleSection';
 import ControlledPathInput from '../shared/ControlledPathInput';
@@ -68,7 +68,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
     useFlowConfig(moduleKey ? `${flowKey}/${moduleKey}/config` : flowKey);
 
   useEffect(() => {
-    getGitInfo()
+    getGitInfo(flowKey as RepoKey)
       .then((res) => {
         if (res && res.branch) {
           const branchName = res.branch as string;
@@ -79,7 +79,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
         }
       })
       .catch(() => setCurrentBranch('Git Error'));
-  }, [updatePayload]);
+  }, [updatePayload, flowKey]);
 
   useEffect(() => {
     if (!savedData) return;
@@ -161,9 +161,9 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
   };
 
   const configHeader = (
-    <Row style={{ marginBottom: 4 }}>
-      <Col span={1} />
-      <Col span={22} style={{ marginLeft: 4 }}>执行脚本</Col>
+    <Row align="middle" style={{ marginBottom: 6 }}>
+      <Col span={4} />
+      <Col span={20} style={{ paddingLeft: 4 }}>执行脚本</Col>
       {/* <Col span={11} style={{ marginLeft: 4 }}>配置json文件</Col> */}
     </Row>
   );
@@ -228,21 +228,32 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
             <CollapsibleSection title="归一化表格转 cfg">
               {configHeader}
               {normalizeCfgs.map((normalizeCfg, index) => (
-                <Row key={index} gutter={8} style={{ marginBottom: 16 }}>
-                  <Col span={1}>
-                    <Space>
+                <Row key={index} align="middle" style={{ marginBottom: 16 }}>
+                  <Col span={4} style={{ textAlign: 'right', paddingRight: 12 }}>
+                    <Space size={4}>
                       <Radio checked={normalizeIndex === index} onChange={handleRadioChange} value={index} />
                     </Space>
                   </Col>
-                  <Col span={22} className="dft-path-input">
-                    <ControlledPathInput
-                      value={normalizeCfg.commandCfg}
-                      onChange={(value) => setNormalCfg(index, value, 1)}
-                      placeholder="请选择执行脚本"
-                      pathSources={['local']}
-                      showSelectFile
-                      showOpen
-                    />
+                  <Col span={20} className="dft-path-input">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                      <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                        <ControlledPathInput
+                          value={normalizeCfg.commandCfg}
+                          onChange={(value) => setNormalCfg(index, value, 1)}
+                          placeholder="请选择执行脚本"
+                          pathSources={['local']}
+                          showSelectFile
+                          showOpen
+                        />
+                      </div>
+                      <Button
+                        type="text"
+                        danger
+                        icon={<MinusCircleOutlined />}
+                        onClick={() => removeNormalizeCfg(index)}
+                        style={{ flex: '0 0 auto' }}
+                      />
+                    </div>
                   </Col>
                   {/* <Col span={11} className="dft-path-input">
                     <ControlledPathInput
@@ -254,14 +265,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
                       showOpen
                     />
                   </Col> */}
-                  <Col span={1}>
-                    <Button
-                      type="text"
-                      danger
-                      icon={<MinusCircleOutlined />}
-                      onClick={() => removeNormalizeCfg(index)}
-                    />
-                  </Col>
                 </Row>
               ))}
               <Button type="dashed" onClick={() => addNormalizeCfg()} block icon={<PlusOutlined />}>

@@ -108,16 +108,22 @@ export async function getDonauResources(): Promise<{
   };
 }
 
-export async function getGitInfo(): Promise<Record<string, unknown>> {
-  return await ipcRequest('getGitInfo');
+export async function getGitInfo(repo: RepoKey): Promise<Record<string, unknown>> {
+  return await ipcRequest('getGitInfo', { repo });
 }
 
 /**
  * 弹出 VS Code 文件/目录 选择器。
  * 返回选中的路径字符串，用户取消则返回 null。
  */
-export async function selectPath(targetType: 'file' | 'folder' = 'file'): Promise<string | null> {
-  const res = await ipcRequest('selectPath', { targetType });
+export async function selectPath(
+  targetType: 'file' | 'folder' = 'file',
+  rootPath?: string
+): Promise<string | null> {
+  const res = await ipcRequest('selectPath', { targetType, rootPath });
+  if (typeof res.error === 'string') {
+    throw new Error(res.error);
+  }
   return typeof res.path === 'string' ? res.path : null;
 }
 
@@ -362,9 +368,23 @@ export interface LocalConfigInfo {
   lastSelectedProject?: string;
 }
 
+export interface WorkspaceProjectInfo {
+  success: boolean;
+  projectRoot: string | null;
+  projectName: string | null;
+  workspaceName: string | null;
+  folders: Array<{ name: string; path: string }>;
+  error?: string;
+}
+
 export async function getLocalConfigInfo(): Promise<LocalConfigInfo> {
   const res = await ipcRequest('getLocalConfigInfo');
   return res as unknown as LocalConfigInfo;
+}
+
+export async function getWorkspaceProjectInfo(): Promise<WorkspaceProjectInfo> {
+  const res = await ipcRequest('getWorkspaceProjectInfo');
+  return res as unknown as WorkspaceProjectInfo;
 }
 
 export async function setLocalConfigPath(
@@ -403,10 +423,11 @@ export async function syncGit(
  * 返回 { exists, isFile, isDirectory } 或 error。
  */
 export async function validatePath(
-  targetPath: string
-): Promise<{ exists: boolean; isFile: boolean; isDirectory: boolean; error?: string }> {
-  const res = await ipcRequest('validatePath', { path: targetPath }, 5_000);
-  return res as { exists: boolean; isFile: boolean; isDirectory: boolean; error?: string };
+  targetPath: string,
+  rootPath?: string
+): Promise<{ exists: boolean; isFile: boolean; isDirectory: boolean; withinRoot?: boolean; error?: string }> {
+  const res = await ipcRequest('validatePath', { path: targetPath, rootPath }, 5_000);
+  return res as { exists: boolean; isFile: boolean; isDirectory: boolean; withinRoot?: boolean; error?: string };
 }
 
 // ─── 优化 3: 任务取消 ──────────────────────────────────────────
@@ -569,6 +590,13 @@ export async function openGitlabHost(
 ): Promise<{ success: boolean; error?: string }> {
   const res = await ipcRequest('openGitlabHost', { repoGitName });
   return res as { success: boolean; error?: string };
+}
+
+export async function getBranches(
+  repo: RepoKey
+): Promise<{ success: boolean; error?: string; branches?: any }> {
+  const res = await ipcRequest('getBranches', { repo });
+  return res as { success: boolean; error?: string; branches?: any };
 }
 
 export async function prepareCommonArtifactSync(options: {

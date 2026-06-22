@@ -449,9 +449,8 @@ export const gitService: DftGitService = {
       return [];
     }
 
-    const branches = repo.state?.refUpdates || [];
-
-    return branches.filter((b: any) => b.name && b.type === "branch").map((b: any) => b.name);
+    const branches = await repo.getBranches(resource);
+    return branches.filter((b: any) => b.name && b.type === 0);
   },
 
   /**

@@ -10,6 +10,7 @@ import {
   Tabs,
   Badge,
   Spin,
+  Select,
 } from 'antd';
 import {
   PlusOutlined,
@@ -33,6 +34,28 @@ interface Props {
   category: string;
   moduleKeys: string[];
 }
+
+const toolOptions = [
+  {
+    label: 'ELI',
+    value: 'eli'
+  },
+  {
+    label: 'DC',
+    value: 'dc'
+  },
+  {
+    label: 'PT',
+    value: 'pt'
+  },
+  {
+    label: 'VCS',
+    value: 'vcs'
+  },{
+    label: 'fml',
+    value: 'fml'
+  }
+]
 
 const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category, moduleKeys }) => {
   const flowKey = category.toLowerCase();
@@ -92,24 +115,22 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category,
   // ── 任务配置 Tab ──────────────────────────────────
   const renderTaskConfig = () => (
     <Form form={taskForm} layout="vertical" style={{ padding: '16px 0' }}>
-      <Form.Item label="执行流程" name="execFlow" initialValue="dcg">
+      {/* <Form.Item label="执行流程" name="execFlow" initialValue="dcg">
         <Radio.Group>
           <Radio value="dcg">DCG</Radio>
           <Radio value="dc">DC</Radio>
           <Radio value="top-down">TOP-DOWN</Radio>
         </Radio.Group>
-      </Form.Item>
+      </Form.Item> */}
 
       <Row gutter={16}>
         <Col span={14}>
-          <Form.Item label="常用工具版本" name="toolName" initialValue="sailor">
-            <Radio.Group>
-              <Radio value="sailor">Sailor</Radio>
-              <Radio value="dc">DC</Radio>
-              <Radio value="pt">PT</Radio>
-              <Radio value="vcs">VCS</Radio>
-              <Radio value="fml">fml</Radio>
-            </Radio.Group>
+          <Form.Item label="常用工具版本" name="toolName">
+            <Select
+              allowClear
+              placeholder="请选择工具"
+              options={toolOptions}
+            />
           </Form.Item>
         </Col>
         <Col span={10}>

@@ -25,10 +25,10 @@ export interface VscodePathState {
   selecting: boolean;
   /** 路径验证状态（优化2） */
   validation: PathValidation;
-  handleSelect: (targetType?: PathSelectTarget) => Promise<void>;
-  handleOpen: (options?: { targetType?: PathSelectTarget; sources?: PathSource[] }) => Promise<void>;
+  handleSelect: (targetType?: PathSelectTarget, options?: { rootPath?: string }) => Promise<void>;
+  handleOpen: (options?: { targetType?: PathSelectTarget; sources?: PathSource[]; rootPath?: string }) => Promise<void>;
   /** 手动触发路径校验 */
-  handleValidate: () => Promise<void>;
+  handleValidate: (options?: { rootPath?: string }) => Promise<void>;
 }
 
 export function useVscodePath(options: UseVscodePathOptions = {}): VscodePathState {
@@ -80,25 +80,34 @@ export function useVscodePath(options: UseVscodePathOptions = {}): VscodePathSta
     });
   }, [autoValidate, scheduleValidation]);
 
-  const handleSelect = useCallback(async (targetType: PathSelectTarget = 'file') => {
+  const handleSelect = useCallback(async (
+    targetType: PathSelectTarget = 'file',
+    options: { rootPath?: string } = {}
+  ) => {
     setSelecting(true);
     setLoading(true);
     try {
-      const path = await selectPath(targetType);
+      const path = await selectPath(targetType, options.rootPath);
       if (path !== null) {
         setValue(path);
         // 系统选择器返回的路径天然有效
         setValidation({ status: 'valid', message: targetType === 'folder' ? '目录已选择' : '文件已选择' });
       }
+    } catch (error) {
+      setValidation({
+        status: 'invalid',
+        message: error instanceof Error ? error.message : '路径选择失败',
+      });
     } finally {
       setSelecting(false);
       setLoading(false);
     }
   }, []);
 
-  const handleOpen = useCallback(async (options: { targetType?: PathSelectTarget; sources?: PathSource[] } = {}) => {
+  const handleOpen = useCallback(async (options: { targetType?: PathSelectTarget; sources?: PathSource[]; rootPath?: string } = {}) => {
     const targetType = options.targetType ?? 'file';
     const sources = options.sources ?? defaultPathSources;
+    const rootPath = options.rootPath;
     const targetPath = value.trim();
     if (targetPath) {
       if (targetPath.startsWith('obs://')) {
@@ -119,6 +128,16 @@ export function useVscodePath(options: UseVscodePathOptions = {}): VscodePathSta
       if (!sources.includes('local')) {
         return;
       }
+      if (rootPath) {
+        const result = await validatePath(targetPath, rootPath);
+        if (!result.exists || result.withinRoot === false) {
+          setValidation({
+            status: 'invalid',
+            message: result.error ?? '路径必须位于当前仓库内',
+          });
+          return;
+        }
+      }
       openFileInEditor(targetPath);
       return;
     }
@@ -129,19 +148,24 @@ export function useVscodePath(options: UseVscodePathOptions = {}): VscodePathSta
     setSelecting(true);
     setLoading(true);
     try {
-      const path = await selectPath(targetType);
+      const path = await selectPath(targetType, rootPath);
       if (path !== null) {
         setValue(path);
         setValidation({ status: 'valid', message: '文件已选择' });
         openFileInEditor(path);
       }
+    } catch (error) {
+      setValidation({
+        status: 'invalid',
+        message: error instanceof Error ? error.message : '路径选择失败',
+      });
     } finally {
       setSelecting(false);
       setLoading(false);
     }
   }, [value]);
 
-  const handleValidate = useCallback(async () => {
+  const handleValidate = useCallback(async (options: { rootPath?: string } = {}) => {
     const trimmed = value.trim();
     if (!trimmed || trimmed.startsWith('obs://')) {
       setValidation({ status: 'idle' });
@@ -149,7 +173,7 @@ export function useVscodePath(options: UseVscodePathOptions = {}): VscodePathSta
     }
     setValidation({ status: 'validating' });
     try {
-      const result = await validatePath(trimmed);
+      const result = await validatePath(trimmed, options.rootPath);
       setValidation({
         status: result.exists ? 'valid' : 'invalid',
         message: result.exists

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as os from 'os';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
 import { submitJob, queryJobStatus, getDonauResources } from './services/donauService';
@@ -17,9 +18,6 @@ import {
   PROJECT_REPOS,
   LOCAL_STATE_DIR_NAME,
 } from './services/constants';
-
-// Import utility execution commands
-import { executeShellCommand } from './services/utils';
 
 // Import layout services
 import {
@@ -41,6 +39,7 @@ import {
   normalizeProjectRepo,
   normalizeConfigFlow,
   getProjectRepoRoot,
+  getCurrentWorkspaceProjectInfo,
 } from './services/workspaceService';
 
 // Import config services
@@ -111,6 +110,16 @@ const pipelineRuntimeService = new PipelineRuntimeService({
 
 const activeJobTimers = new Map<string, ReturnType<typeof setInterval>>();
 
+function normalizePathForScope(value: string): string {
+  return path.resolve(value).replace(/[\\/]+$/, '').toLowerCase();
+}
+
+function isPathInsideRoot(targetPath: string, rootPath: string): boolean {
+  const normalizedTarget = normalizePathForScope(targetPath);
+  const normalizedRoot = normalizePathForScope(rootPath);
+  return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}${path.sep}`);
+}
+
 export function activate(context: vscode.ExtensionContext) {
   const isDev = context.extensionMode === vscode.ExtensionMode.Development;
 
@@ -143,6 +152,10 @@ export function activate(context: vscode.ExtensionContext) {
   // Register VS Code Commands
   context.subscriptions.push(
     vscode.commands.registerCommand('dftIde.openFlow', async (category: string) => {
+      if (category === 'Formal' || category === 'STA') {
+        vscode.window.showInformationMessage('该流程仍在开发中，暂不可打开。');
+        return;
+      }
       await openWebviewFlow(context, category);
     })
   );
@@ -194,11 +207,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('dftIde.whoami', async function (): Promise<string> {
-      let username = await executeShellCommand("whoami");
-      if (username.includes('\\')) {
-        username = username.split('\\')[1];
-      }
-      return username.trim().toLowerCase();
+      return os.userInfo().username.toLowerCase();
     })
   );
 
@@ -237,6 +246,7 @@ interface FlowMenuConfig {
   tooltip: string;
   category: string;
   contextValue: string;
+  disabled?: boolean;
 }
 
 const FLOW_CONFIGS: FlowMenuConfig[] = [
@@ -287,6 +297,7 @@ const FLOW_CONFIGS: FlowMenuConfig[] = [
     tooltip: 'Formal Verification\n─────────────────\n形式化验证工具链（开发中）',
     category: 'Formal',
     contextValue: 'dftFlow.formal',
+    disabled: true,
   },
   {
     label: '静态时序',
@@ -295,6 +306,7 @@ const FLOW_CONFIGS: FlowMenuConfig[] = [
     tooltip: 'Static Timing Analysis\n─────────────────\n静态时序分析配置（开发中）',
     category: 'STA',
     contextValue: 'dftFlow.sta',
+    disabled: true,
   },
 ];
 
@@ -325,16 +337,18 @@ class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
       `**$(${cfg.icon}) ${cfg.label}**\n\n${cfg.tooltip.replace(/\n/g, '\n\n')}`
     );
     item.contextValue = cfg.contextValue;
-    item.command = cfg.category === 'HOME'
-      ? {
-          command: 'dftIde.openWelcome',
-          title: 'Open DFT IDE Home',
-        }
-      : {
-          command: 'dftIde.openFlow',
-          title: `Open ${cfg.label} Flow`,
-          arguments: [cfg.category],
-        };
+    if (!cfg.disabled) {
+      item.command = cfg.category === 'HOME'
+        ? {
+            command: 'dftIde.openWelcome',
+            title: 'Open DFT IDE Home',
+          }
+        : {
+            command: 'dftIde.openFlow',
+            title: `Open ${cfg.label} Flow`,
+            arguments: [cfg.category],
+          };
+    }
     return item;
   }
 }
@@ -392,8 +406,13 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
     switch (msg.command) {
       case 'getGitInfo': {
         const requestId: string = msg.requestId;
+        const repo = normalizeProjectRepo(msg.repo);
         try {
-          const gitInfo = await gitService.getCurrentGitInfo();
+          if (!repo) {
+            throw new Error('Unsupported repository.');
+          }
+          const resource = vscode.Uri.file(getProjectRepoRoot(repo));
+          const gitInfo = await gitService.getCurrentGitInfo(resource);
           currentPanel?.webview.postMessage({
             command: 'getGitInfoResponse',
             requestId,
@@ -539,13 +558,24 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'selectPath': {
         const requestId: string = msg.requestId;
         const targetType = msg.targetType || 'file';
+        const rootPath = typeof msg.rootPath === 'string' ? msg.rootPath.trim() : '';
         const picked = await vscode.window.showOpenDialog({
           canSelectFiles: targetType === 'file',
           canSelectFolders: targetType === 'folder',
           canSelectMany: false,
           openLabel: '选择',
+          defaultUri: rootPath ? vscode.Uri.file(rootPath) : undefined,
         });
         const path = picked?.[0]?.fsPath ?? null;
+        if (path && rootPath && !isPathInsideRoot(path, rootPath)) {
+          currentPanel?.webview.postMessage({
+            command: 'selectPathResponse',
+            requestId,
+            path: null,
+            error: 'Selected path must be inside the current repository.',
+          });
+          return;
+        }
         currentPanel?.webview.postMessage({
           command: 'selectPathResponse',
           requestId,
@@ -631,11 +661,20 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'validatePath': {
         const requestId: string = msg.requestId;
         const targetPath = typeof msg.path === 'string' ? msg.path.trim() : '';
+        const rootPath = typeof msg.rootPath === 'string' ? msg.rootPath.trim() : '';
         try {
           if (!targetPath) {
             currentPanel?.webview.postMessage({
               command: 'validatePathResponse', requestId,
-              exists: false, isFile: false, isDirectory: false
+              exists: false, isFile: false, isDirectory: false, withinRoot: !rootPath
+            });
+            return;
+          }
+          if (rootPath && !isPathInsideRoot(targetPath, rootPath)) {
+            currentPanel?.webview.postMessage({
+              command: 'validatePathResponse', requestId,
+              exists: false, isFile: false, isDirectory: false, withinRoot: false,
+              error: 'Path must be inside the current repository.'
             });
             return;
           }
@@ -646,11 +685,12 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             exists: true,
             isFile: stat.type === vscode.FileType.File,
             isDirectory: stat.type === vscode.FileType.Directory,
+            withinRoot: true,
           });
         } catch {
           currentPanel?.webview.postMessage({
             command: 'validatePathResponse', requestId,
-            exists: false, isFile: false, isDirectory: false
+            exists: false, isFile: false, isDirectory: false, withinRoot: !rootPath
           });
         }
         return;
@@ -1391,6 +1431,30 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
+      case 'getWorkspaceProjectInfo': {
+        const requestId: string = msg.requestId;
+        try {
+          currentPanel?.webview.postMessage({
+            command: 'getWorkspaceProjectInfoResponse',
+            requestId,
+            success: true,
+            ...getCurrentWorkspaceProjectInfo(),
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'getWorkspaceProjectInfoResponse',
+            requestId,
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+            projectRoot: null,
+            projectName: null,
+            workspaceName: null,
+            folders: [],
+          });
+        }
+        return;
+      }
+
       case 'setLocalConfigPath': {
         const requestId: string = msg.requestId;
         const localPath = typeof msg.path === 'string' ? msg.path.trim() : '';
@@ -1558,6 +1622,32 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             requestId,
             success: false,
             error: String(err),
+          });
+        }
+        return;
+      }
+
+      case 'getBranches': {
+        const requestId: string = msg.requestId;
+        const repo = normalizeProjectRepo(msg.repo);
+        try {
+          if (!repo) {
+            throw new Error('Unsupported repository.');
+          }
+          const resource = vscode.Uri.file(getProjectRepoRoot(repo));
+          const branches = await gitService.getBranches(resource);
+          currentPanel?.webview.postMessage({
+            command: 'getBranchesResponse',
+            requestId,
+            success: true,
+            branches
+          });
+        } catch (error) {
+          currentPanel?.webview.postMessage({
+            command: 'getBranchesResponse',
+            requestId,
+            success: false,
+            error: error instanceof Error ? error.message : String(error)
           });
         }
         return;

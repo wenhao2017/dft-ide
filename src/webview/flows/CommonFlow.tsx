@@ -17,6 +17,7 @@ import {
   Radio,
   Row,
   Col,
+  Select,
 } from 'antd';
 import '@ant-design/v5-patch-for-react-19';
 import type { MenuProps } from 'antd';
@@ -52,6 +53,8 @@ import {
   openFileInEditor,
   prepareCommonArtifactSync,
   applyCommonArtifactSync,
+  getRepoGitInfo,
+  getBranches,
 } from '../utils/ipc';
 import {
   accentPanelStyle,
@@ -101,6 +104,17 @@ const sortDiffItemsForDisplay = (items: CommonDiffItem[]) =>
     return leftOrder - rightOrder;
   });
 
+function normalizePathForScope(value: string): string {
+  return value.trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+function isPathInsideRoot(value: string, rootPath?: string): boolean {
+  if (!value.trim() || !rootPath?.trim()) return true;
+  const target = normalizePathForScope(value);
+  const root = normalizePathForScope(rootPath);
+  return target === root || target.startsWith(`${root}/`);
+}
+
 const CommonFlow: React.FC = () => {
   const dataDesignTree = useVscodePath();
   const dataNormTable = useVscodePath();
@@ -143,6 +157,7 @@ const CommonFlow: React.FC = () => {
   const [isPreparingSync, setIsPreparingSync] = useState<boolean>(false);
   const [prepareWaitModalOpen, setPrepareWaitModalOpen] = useState<boolean>(false);
   const [isApplying, setIsApplying] = useState<boolean>(false);
+  const [branchOptions, setBranchOptions] = useState<any>(null);
   const prepareSyncRunIdRef = useRef(0);
 
   const activeProject = useWizardStore((s) => s.activeProject);
@@ -178,6 +193,29 @@ const CommonFlow: React.FC = () => {
       normTable: targetNormTable.value,
     };
     return formData;
+  };
+
+  const validateCommonArtifactPathScopes = () => {
+    const checks = [
+      { label: 'Data Design Tree', value: dataDesignTree.value, root: selectedDataInfo.repoRoot, repo: repoLabels[selectedDataRepo] },
+      { label: 'Data 归一化表格', value: dataNormTable.value, root: selectedDataInfo.repoRoot, repo: repoLabels[selectedDataRepo] },
+      { label: `${targetName} Design Tree`, value: targetDesignTree.value, root: selectedTargetInfo.repoRoot, repo: repoLabels[selectedRepo] },
+      { label: `${targetName} 归一化表格`, value: targetNormTable.value, root: selectedTargetInfo.repoRoot, repo: repoLabels[selectedRepo] },
+    ];
+
+    for (const item of checks) {
+      if (!item.value.trim()) continue;
+      if (!item.root) {
+        message.warning(`未识别到${item.repo}根目录，无法校验 ${item.label} 路径范围`);
+        return false;
+      }
+      if (!isPathInsideRoot(item.value, item.root)) {
+        message.warning(`${item.label} 必须位于${item.repo}仓目录内`);
+        return false;
+      }
+    }
+
+    return true;
   };
 
   const savedFormData = useMemo((): Record<string, unknown> | null => {
@@ -359,7 +397,11 @@ const CommonFlow: React.FC = () => {
       key: 'checkout',
       icon: <PullRequestOutlined />,
       label: '切换到已有分支',
-      onClick: () => setBranchModal({ open: true, repo, mode: 'checkout', value: '' }),
+      onClick: async () => {
+        const result = await getBranches(repo);
+        setBranchOptions(result.branches);
+        setBranchModal({ open: true, repo, mode: 'checkout', value: repoInfo[repo].branch || '' })
+      },
     },
     {
       key: 'createBranch',
@@ -374,6 +416,9 @@ const CommonFlow: React.FC = () => {
 
   const openConfirmModal = async () => {
     if (isPreparingSync) {
+      return;
+    }
+    if (!validateCommonArtifactPathScopes()) {
       return;
     }
 
@@ -715,6 +760,7 @@ const CommonFlow: React.FC = () => {
           <PathInput
             state={dataDesignTree}
             pathSources={['local']}
+            localRootPath={selectedDataInfo.repoRoot}
             placeholder="请输入或选择 Data 仓中的 Design Tree 文件/目录"
             showSelectFile
             showSelectFolder={syncDirection === 'targetToData'}
@@ -725,6 +771,7 @@ const CommonFlow: React.FC = () => {
           <PathInput
             state={dataNormTable}
             pathSources={['local']}
+            localRootPath={selectedDataInfo.repoRoot}
             placeholder="请输入或选择 Data 仓中的归一化表格文件"
             showSelectFile
             showSelectFolder={syncDirection === 'targetToData'}
@@ -762,6 +809,7 @@ const CommonFlow: React.FC = () => {
           <PathInput
             state={targetDesignTree}
             pathSources={['local']}
+            localRootPath={selectedTargetInfo.repoRoot}
             placeholder={`请输入或选择 ${targetName} 中的 Design Tree 文件/目录`}
             showSelectFile
             showSelectFolder={syncDirection === 'dataToTarget'}
@@ -772,6 +820,7 @@ const CommonFlow: React.FC = () => {
           <PathInput
             state={targetNormTable}
             pathSources={['local']}
+            localRootPath={selectedTargetInfo.repoRoot}
             placeholder={`请输入或选择 ${targetName} 中的归一化表格文件`}
             showSelectFile
             showSelectFolder={syncDirection === 'dataToTarget'}
@@ -1357,12 +1406,23 @@ const CommonFlow: React.FC = () => {
         >
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
             <Text style={mutedTextStyle}>{repoLabels[branchModal.repo]}</Text>
-            <Input
-              autoFocus
-              value={branchModal.value}
-              onChange={(event) => setBranchModal((prev) => ({ ...prev, value: event.target.value }))}
-              placeholder={branchModal.mode === 'checkout' ? '请输入已有分支名' : '请输入新分支名'}
-            />
+            {branchModal.mode !== 'checkout' ?
+              <Input
+                autoFocus
+                value={branchModal.value}
+                onChange={(event) => setBranchModal((prev) => ({ ...prev, value: event.target.value }))}
+                placeholder='请输入新分支名'
+              /> :
+              <Select
+                allowClear
+                placeholder="请选择分支"
+                defaultValue={branchModal.value}
+                onChange={(value) => setBranchModal((prev) => ({ ...prev, value }))}
+                fieldNames={{ label: 'name', value: 'name'}}
+                options={branchOptions}
+                style={{ width: '100%' }}
+              />
+            }
           </Space>
         </Modal>
       </div>

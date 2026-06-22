@@ -27,7 +27,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
       content: <Step1CommonConfig onNext={nextStep} category={category} />,
     },
     {
-      title: '工具配置',
+      title: '执行配置',
       description: '版本与资源',
       content: (
         <Step2ToolConfig
