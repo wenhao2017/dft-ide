@@ -177,8 +177,9 @@ function getYamlPath(flowKey: PipelineFlowKey): string | undefined {
 }
 
 function getDefaultYamlContent(flowKey: PipelineFlowKey): string {
-  let content = `# DFT IDE Pipeline Configuration for ${flowKey.toUpperCase()}\n`;
-  content += `# Modify this file to customize the steps and commands of the pipeline.\n\n`;
+  const flowLabel = flowKey === 'verification' ? 'Lander 仿真验证' : flowKey.toUpperCase();
+  let content = `# DFT IDE ${flowLabel} 流水线配置文件\n`;
+  content += `# 修改此文件可以自定义流水线的执行步骤和执行命令\n\n`;
 
   const tasks = DEFAULT_PIPELINE_TASKS[flowKey] || [];
   tasks.forEach((task) => {
