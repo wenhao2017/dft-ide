@@ -1,476 +1,1852 @@
 diff --git a/src/extension.ts b/src/extension.ts
-index 3630e70..deceecf 100644
+index c2e9d35..2b85c9f 100644
 --- a/src/extension.ts
 +++ b/src/extension.ts
-@@ -1,5 +1,6 @@
- import * as vscode from 'vscode';
- import * as path from 'path';
-+import * as os from 'os';
+@@ -3,6 +3,8 @@ import * as path from 'path';
+ import * as os from 'os';
  import * as fs from 'fs';
  import * as dotenv from 'dotenv';
++import { execFile } from 'child_process';
++import { promisify } from 'util';
  import { submitJob, queryJobStatus, getDonauResources } from './services/donauService';
-@@ -18,9 +19,6 @@ import {
-   LOCAL_STATE_DIR_NAME,
- } from './services/constants';
+ import { gitService } from './services/gitService';
+ import { obsService } from './services/obsService';
+@@ -90,6 +92,8 @@ import {
+   cleanupObsReadonlyDocument,
+ } from './services/obsPreviewService';
  
--// Import utility execution commands
--import { executeShellCommand } from './services/utils';
--
- // Import layout services
- import {
-   applyDftIdeLayout,
-@@ -194,11 +192,7 @@ export function activate(context: vscode.ExtensionContext) {
- 
-   context.subscriptions.push(
-     vscode.commands.registerCommand('dftIde.whoami', async function (): Promise<string> {
--      let username = await executeShellCommand("whoami");
--      if (username.includes('\\')) {
--        username = username.split('\\')[1];
--      }
--      return username.trim().toLowerCase();
-+      return os.userInfo().username.toLowerCase();
-     })
-   );
- 
-@@ -392,8 +386,13 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
-     switch (msg.command) {
-       case 'getGitInfo': {
-         const requestId: string = msg.requestId;
-+        const repo = normalizeProjectRepo(msg.repo);
-         try {
--          const gitInfo = await gitService.getCurrentGitInfo();
-+          if (!repo) {
-+            throw new Error('Unsupported repository.');
-+          }
-+          const resource = vscode.Uri.file(getProjectRepoRoot(repo));
-+          const gitInfo = await gitService.getCurrentGitInfo(resource);
-           currentPanel?.webview.postMessage({
-             command: 'getGitInfoResponse',
-             requestId,
-@@ -1563,6 +1562,32 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
++const execFileAsync = promisify(execFile);
++
+ let currentPanel: vscode.WebviewPanel | undefined = undefined;
+ let activeCategory: string | undefined = undefined;
+ let pendingWebviewCommand: InitialWebviewCommand | undefined;
+@@ -1627,6 +1631,68 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
          return;
        }
  
-+      case 'getBranches': {
++      case 'openExternalUrl': {
 +        const requestId: string = msg.requestId;
-+        const repo = normalizeProjectRepo(msg.repo);
-+        try {
-+          if (!repo) {
-+            throw new Error('Unsupported repository.');
++        const openUrl = async (url: string): Promise<boolean> => {
++          const platform = process.platform;
++          const urlToOpen = /^https?:\/\//i.test(url) ? url : `https://${url}`;
++
++          try {
++            switch (platform) {
++              case 'win32':
++                await execFileAsync('cmd', ['/c', 'start', urlToOpen]);
++                return true;
++              case 'darwin':
++                await execFileAsync('open', [urlToOpen]);
++                return true;
++              default:
++                try {
++                  await execFileAsync('xdg-open', [urlToOpen]);
++                  return true;
++                } catch (xdgErr) {
++                  const browsers = [
++                    'chromium',
++                    'chrome',
++                    'google-chrome',
++                    'firefox',
++                    'brave',
++                    'epiphany',
++                    'vivaldi'
++                  ];
++                  for (const browser of browsers) {
++                    try {
++                      await execFileAsync(browser, [urlToOpen]);
++                      return true;
++                    } catch (browserErr) {
++                      continue;
++                    }
++                  }
++                  return false;
++                }
++            }
++          } catch (err) {
++            return false;
 +          }
-+          const resource = vscode.Uri.file(getProjectRepoRoot(repo));
-+          const branches = await gitService.getBranches(resource);
-+          currentPanel?.webview.postMessage({
-+            command: 'getBranchesResponse',
-+            requestId,
-+            success: true,
-+            branches
-+          });
-+        } catch (error) {
-+          currentPanel?.webview.postMessage({
-+            command: 'getBranchesResponse',
-+            requestId,
-+            success: false,
-+            error: error instanceof Error ? error.message : String(error)
-+          });
++        };
++    
++        try {
++            const success = await openUrl(msg.externalUrl);
++            currentPanel?.webview.postMessage({
++                command: 'openExternalUrlResponse',
++                requestId,
++                success,
++            });
++        } catch (err) {
++            currentPanel?.webview.postMessage({
++                command: 'openExternalUrlResponse',
++                requestId,
++                success: false,
++                error: String(err),
++            });
 +        }
 +        return;
 +      }
 +
-       default:
-         return;
-     }
-diff --git a/src/services/gitService.ts b/src/services/gitService.ts
-index dd75221..5a61c23 100644
---- a/src/services/gitService.ts
-+++ b/src/services/gitService.ts
-@@ -449,9 +449,8 @@ export const gitService: DftGitService = {
-       return [];
-     }
- 
--    const branches = repo.state?.refUpdates || [];
--
--    return branches.filter((b: any) => b.name && b.type === "branch").map((b: any) => b.name);
-+    const branches = await repo.getBranches(resource);
-+    return branches.filter((b: any) => b.name && b.type === 0);
-   },
- 
-   /**
-diff --git a/src/services/utils.ts b/src/services/utils.ts
-index f4ceafe..eeebbe7 100644
---- a/src/services/utils.ts
-+++ b/src/services/utils.ts
-@@ -1,36 +1,15 @@
- import * as vscode from 'vscode';
- import { exec, execFile } from 'child_process';
- 
--export async function executeShellCommand(command: string, workDir?: string): Promise<string> {
--  return new Promise((resolve, reject) => {
--    const options = workDir ? { cwd: workDir } : {};
--    exec(command, options, (error, stdout, stderr) => {
--      if (error) {
--        vscode.window.showErrorMessage(`Error: ${error.message}`);
--        reject(error);
--        return;
--      }
--      if (stderr && stderr.includes('error')) {
--        vscode.window.showErrorMessage(`stderr: ${stderr}`);
--        reject(new Error(stderr));
--        return;
--      }
--      resolve(stdout);
--    });
--  });
--}
--
- export async function executeFileCommand(command: string, args: string[], workDir?: string): Promise<string> {
-   return new Promise((resolve, reject) => {
-     const options = workDir ? { cwd: workDir } : {};
-     execFile(command, args, options, (error, stdout, stderr) => {
-       if (error) {
--        vscode.window.showErrorMessage(`Error: ${error.message}`);
-         reject(error);
-         return;
-       }
-       if (stderr && stderr.toLowerCase().includes('error')) {
--        vscode.window.showErrorMessage(`stderr: ${stderr}`);
-         reject(new Error(stderr));
-         return;
-       }
+       case 'getBranches': {
+         const requestId: string = msg.requestId;
+         const repo = normalizeProjectRepo(msg.repo);
+diff --git a/src/webview/App.tsx b/src/webview/App.tsx
+index 4cb5fd3..11f90e7 100644
+--- a/src/webview/App.tsx
++++ b/src/webview/App.tsx
+@@ -475,7 +475,7 @@ const App: React.FC = () => {
+         {/* 主内容区域 */}
+         <Content
+           style={{
+-            maxWidth: 1180,
++            // maxWidth: 1180,
+             margin: '0 auto',
+             width: '100%',
+             padding: '12px',
 diff --git a/src/webview/components/ProjectMembers.tsx b/src/webview/components/ProjectMembers.tsx
-index b11ca4a..27588da 100644
+index 27588da..b28212a 100644
 --- a/src/webview/components/ProjectMembers.tsx
 +++ b/src/webview/components/ProjectMembers.tsx
-@@ -132,14 +132,27 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
-       const user = await fetchSingleUser(firstNotInUsers);
-       if (user) {
-         if (user.locked) {
--          message.error(`Gitlab 用户 ${firstNotInUsers} 已被锁定`);
-+          message.warning(`Gitlab 用户 ${firstNotInUsers} 已被锁定, 请联系管理员进行解锁`);
-         } else if (user.state !== 'active') {
--          message.error(`Gitlab 用户 ${firstNotInUsers} 的状态为 ${user.state}`);
-+          if(user.state === 'deactivated'){
-+            message.warning(
-+              <span>
-+                Gitlab 用户 {firstNotInUsers} 的状态为 {user.state}(已停用), 可能是长时间未登录导致.<br />
-+                请登录个人主页{' '}
-+                <a href={user.web_url} target="_blank" rel="noopener noreferrer">
-+                  {user.web_url}
-+                </a>{' '}
-+                后重试或联系管理员进行恢复
-+              </span>
-+            );
-+          }else{
-+            message.warning(`Gitlab 用户 ${firstNotInUsers} 的状态为 ${user.state}, 请联系管理员进行恢复`);
-+          }
-         } else {
-           setUsers((items) => [...items, user]);
-         }
-       } else {
--        message.error(`Gitlab 用户 ${firstNotInUsers} 不存在`);
-+        message.warning(`Gitlab 用户 ${firstNotInUsers} 不存在`);
-       }
+@@ -14,6 +14,8 @@ import {
+   Tooltip,
+   Typography,
+   message,
++  Dropdown,
++  Avatar,
+ } from 'antd';
+ import {
+   DeleteOutlined,
+@@ -21,6 +23,7 @@ import {
+   PlusOutlined,
+   ReloadOutlined,
+   TeamOutlined,
++  GitlabOutlined,
+ } from '@ant-design/icons';
+ import type { ColumnsType } from 'antd/es/table';
+ import {
+@@ -37,6 +40,7 @@ import {
+   updateProjectMember,
+ } from '../services/projectService';
+ import dayjs from 'dayjs';
++import {openExternalUrl} from '../utils/ipc';
+ 
+ const { Text, Title } = Typography;
+ 
+@@ -221,6 +225,17 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
      }
    };
-@@ -173,12 +186,20 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
-         message.success('成员已更新');
-       } else {
-         for (const employeeId of value.employeeIds){
-+          const isExists = members.some(member => member.employeeId === employeeId.trim());
-+          if (isExists) {
-+            message.info(`成员 ${employeeId} 已存在`);
-+            continue;
-+          }
+ 
++  const openGitlabMemberPage = async (webUrl: string | undefined) => {
++    if (webUrl) {
++      const result = await openExternalUrl(`${webUrl}/-/project_members`);
++      if (!result.success) {
++        message.error(result.error ?? '无法打开浏览器, 请检查系统默认设置');
++      }
++    } else {
++      message.error('Gitlab 成员管理页面地址为空');
++    }
++  }
 +
-           const created = await addProjectMember(project.id, {
-             employeeId: employeeId.trim(),
-             role: value.role,
-             ctmp: value.ctmp,
-           });
-+
-           setMembers((items) => [...items, created]);
-+          form.setFieldValue('employeeIds', value.employeeIds.filter(id => id !== employeeId));
-         }
-         message.success('成员已添加');
+   const columns = useMemo<ColumnsType<ProjectMember>>(() => [
+     {
+       title: '工号',
+@@ -310,6 +325,20 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
        }
-diff --git a/src/webview/components/Welcome.tsx b/src/webview/components/Welcome.tsx
-index 6c86a62..99675eb 100644
---- a/src/webview/components/Welcome.tsx
-+++ b/src/webview/components/Welcome.tsx
-@@ -106,6 +106,17 @@ const flows = [
-   },
- ];
- 
-+const activeRepoCardStyle: React.CSSProperties = {
-+  background:
-+    'color-mix(in srgb, var(--vscode-editor-background, #fff) 88%, var(--vscode-focusBorder, #1677ff))',
-+  color: 'var(--vscode-foreground)',
-+};
-+
-+const inactiveRepoCardStyle: React.CSSProperties = {
-+  background: 'var(--vscode-sideBar-background, var(--vscode-editor-background))',
-+  color: 'var(--vscode-foreground)',
-+};
-+
- function repoTagColor(status: ProjectRepoStatus['status']): string {
-   if (status === 'ready') return 'green';
-   if (status === 'missing') return 'orange';
-@@ -132,6 +143,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
-   const [projectModalOpen, setProjectModalOpen] = useState(false);
-   const [projectForm] = Form.useForm<ProjectFormValue>();
-   const [projectSaving, setProjectSaving] = useState(false);
-+  const activeProject = useWizardStore((s) => s.activeProject);
- 
-   const cardBorder = 'var(--vscode-panel-border, rgba(127,127,127,0.18))';
-   const panelBg = isDark
-@@ -561,10 +573,21 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
-             <List
-               dataSource={filteredProjects}
-               renderItem={(project) => {
-+                const active = activeProject?.id == project.id 
-                 return (
--                <List.Item
-+                <List.Item style={{
-+                    flex: '1 1 230px',
-+                    minWidth: 220,
-+                    textAlign: 'left',
-+                    border: `1px solid ${active ? 'var(--vscode-focusBorder)' : 'var(--vscode-panel-border, rgba(127,127,127,0.24))'}`,
-+                    borderLeft: active ? '4px solid var(--vscode-focusBorder)' : '4px solid transparent',
-+                    borderRadius: 10,
-+                    padding: '14px 18px',
-+                    ...(active ? activeRepoCardStyle : inactiveRepoCardStyle),
-+                    cursor: 'pointer'
-+                  }}
-                   actions={[
--                    <div style={{ minWidth: 300}}>
-+                    <div style={{ minWidth: 300 }}>
-                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, paddingBottom: 12 }}>
-                         <Tooltip key="initialize" title={projectInitializeTooltipTitle(project)}>
-                           <span>
-@@ -594,7 +617,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
-                         <Tooltip key="enter" title={projectEnterTooltipTitle(project)}>
-                           <span>
-                             <Button
--                              disabled={isProjectEnterDisable(project)}
-+                              disabled={isProjectEnterDisable(project) || active}
-                               loading={workingProjectId === project.id}
-                               onClick={() => enterProject(project)}
-                               style={{ flex: 1 }}
-@@ -617,7 +640,6 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
-                       </Form>
-                     </div>
-                     ]}
--                  style={{ padding: '14px 18px' }}
-                 >
-                   <List.Item.Meta
-                     avatar={<FileProtectOutlined style={{ color: 'var(--vscode-focusBorder, #2563eb)', fontSize: 22 }} />}
-diff --git a/src/webview/components/design/Step1_CommonConfig.tsx b/src/webview/components/design/Step1_CommonConfig.tsx
-index a31ecda..fda2af6 100644
---- a/src/webview/components/design/Step1_CommonConfig.tsx
-+++ b/src/webview/components/design/Step1_CommonConfig.tsx
-@@ -68,7 +68,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
-     useFlowConfig(moduleKey ? `${flowKey}/${moduleKey}/config` : flowKey);
- 
-   useEffect(() => {
--    getGitInfo()
-+    getGitInfo(flowKey)
-       .then((res) => {
-         if (res && res.branch) {
-           const branchName = res.branch as string;
-@@ -79,7 +79,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
-         }
-       })
-       .catch(() => setCurrentBranch('Git Error'));
--  }, [updatePayload]);
-+  }, [updatePayload, flowKey]);
- 
-   useEffect(() => {
-     if (!savedData) return;
-diff --git a/src/webview/components/design/Step2_ToolConfig.tsx b/src/webview/components/design/Step2_ToolConfig.tsx
-index 4746432..bc77957 100644
---- a/src/webview/components/design/Step2_ToolConfig.tsx
-+++ b/src/webview/components/design/Step2_ToolConfig.tsx
-@@ -10,6 +10,7 @@ import {
-   Tabs,
-   Badge,
-   Spin,
-+  Select,
- } from 'antd';
+       extra={
+         <Space wrap>
++          <Dropdown
++            menu={{
++              items: project.repos?.map(repo => ({
++                label: repo.key,
++                key: repo.key,
++                onClick: () => openGitlabMemberPage(repo.web_url)
++              })) || []
++            }}
++            disabled={!canManage}
++          >
++            <Tooltip title="打开 Gitlab 成员管理页面">
++              <Button icon={<GitlabOutlined />} />
++            </Tooltip>
++          </Dropdown>
+           <Button icon={<ReloadOutlined />} onClick={loadMembers} loading={loading}>
+             刷新
+           </Button>
+@@ -386,7 +415,25 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
+               mode="tags"
+               disabled={Boolean(editingMember)}
+               placeholder="Search or Input "
+-              options={users.map(user => ({ label: user.username, value: user.username }))}
++              options={users.map(user => ({
++                label: (
++                  <>
++                    <Avatar
++                      size="small"
++                      src={user.avatar_url}
++                      style={{
++                        width: 20,
++                        height: 20,
++                        marginRight: 8
++                      }}
++                    >
++                      {user.name.charAt(0)}
++                    </Avatar>
++                    {user.name}
++                  </>
++                ),
++                value: user.username
++              }))}
+               onChange={handleChange}
+             />
+           </Form.Item>
+diff --git a/src/webview/components/shared/DesignTreePanel.tsx b/src/webview/components/shared/DesignTreePanel.tsx
+index b36cb22..9cf34d4 100644
+--- a/src/webview/components/shared/DesignTreePanel.tsx
++++ b/src/webview/components/shared/DesignTreePanel.tsx
+@@ -27,6 +27,7 @@ import {
+   ReloadOutlined,
+   RightOutlined,
+   SearchOutlined,
++  CaretRightOutlined, // 🛠️ 引入向右实心三角形图标
+ } from '@ant-design/icons';
  import {
-   PlusOutlined,
-@@ -34,6 +35,28 @@ interface Props {
-   moduleKeys: string[];
+   FlowConfigFileInfo,
+@@ -46,9 +47,12 @@ interface DesignTreePanelProps {
+   flow: 'hibist' | 'sailor' | 'verification';
+   flowLabel: string;
+   selectedKey: string;
++  enableRun?: boolean;
+   onSelect: (key: string) => void;
+   executionSelectedKeys?: string[];
+   onExecutionSelectionChange?: (keys: string[]) => void;
++  onRun?: (keys: string[], targetTasks?: string[]) => void;
++  onStop?: (keys: string[]) => void;
  }
  
-+const toolOptions = [
-+  {
-+    label: 'ELI',
-+    value: 'eli'
-+  },
-+  {
-+    label: 'DC',
-+    value: 'dc'
-+  },
-+  {
-+    label: 'PT',
-+    value: 'pt'
-+  },
-+  {
-+    label: 'VCS',
-+    value: 'vcs'
-+  },{
-+    label: 'fml',
-+    value: 'fml'
-+  }
-+]
+ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+@@ -56,9 +60,12 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+   flow,
+   flowLabel,
+   selectedKey,
++  enableRun,
+   onSelect,
+   executionSelectedKeys,
+   onExecutionSelectionChange,
++  onRun,
++  onStop,
+ }) => {
+   const { savedData: flowSavedData } = useFlowConfig(flow);
+   const focusHydratedRef = useRef(false);
+@@ -75,18 +82,24 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+   const [createOpen, setCreateOpen] = useState(false);
+   const [createValue, setCreateValue] = useState('');
+ 
++  // 选择特定任务运行的拦截弹窗状态
++  const [taskModalOpen, setTaskModalOpen] = useState(false);
++  const [runTargetKeys, setRunTargetKeys] = useState<string[]>([]);
++  const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
 +
- const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category, moduleKeys }) => {
-   const flowKey = category.toLowerCase();
-   const [activeTab, setActiveTab] = useState('task');
-@@ -92,24 +115,22 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category,
-   // ── 任务配置 Tab ──────────────────────────────────
-   const renderTaskConfig = () => (
-     <Form form={taskForm} layout="vertical" style={{ padding: '16px 0' }}>
--      <Form.Item label="执行流程" name="execFlow" initialValue="dcg">
-+      {/* <Form.Item label="执行流程" name="execFlow" initialValue="dcg">
-         <Radio.Group>
-           <Radio value="dcg">DCG</Radio>
-           <Radio value="dc">DC</Radio>
-           <Radio value="top-down">TOP-DOWN</Radio>
-         </Radio.Group>
--      </Form.Item>
-+      </Form.Item> */}
+   const selectedConfig = configs.find((item) => item.key === selectedKey) ?? configs[0];
+   const executionKeys = executionSelectedKeys ?? [];
  
-       <Row gutter={16}>
-         <Col span={14}>
--          <Form.Item label="常用工具版本" name="toolName" initialValue="sailor">
--            <Radio.Group>
--              <Radio value="sailor">Sailor</Radio>
--              <Radio value="dc">DC</Radio>
--              <Radio value="pt">PT</Radio>
--              <Radio value="vcs">VCS</Radio>
--              <Radio value="fml">fml</Radio>
--            </Radio.Group>
-+          <Form.Item label="常用工具版本" name="toolName">
-+            <Select
-+              allowClear
-+              placeholder="请选择工具"
-+              options={toolOptions}
-+            />
-           </Form.Item>
-         </Col>
-         <Col span={10}>
-diff --git a/src/webview/flows/CommonFlow.tsx b/src/webview/flows/CommonFlow.tsx
-index 5bad2cd..34cc9d4 100644
---- a/src/webview/flows/CommonFlow.tsx
-+++ b/src/webview/flows/CommonFlow.tsx
-@@ -17,6 +17,7 @@ import {
-   Radio,
-   Row,
-   Col,
-+  Select,
- } from 'antd';
- import '@ant-design/v5-patch-for-react-19';
- import type { MenuProps } from 'antd';
-@@ -52,6 +53,8 @@ import {
-   openFileInEditor,
-   prepareCommonArtifactSync,
-   applyCommonArtifactSync,
-+  getRepoGitInfo,
-+  getBranches,
- } from '../utils/ipc';
- import {
-   accentPanelStyle,
-@@ -143,6 +146,7 @@ const CommonFlow: React.FC = () => {
-   const [isPreparingSync, setIsPreparingSync] = useState<boolean>(false);
-   const [prepareWaitModalOpen, setPrepareWaitModalOpen] = useState<boolean>(false);
-   const [isApplying, setIsApplying] = useState<boolean>(false);
-+  const [branchOptions, setBranchOptions] = useState<any>(null);
-   const prepareSyncRunIdRef = useRef(0);
++  // 固定兜底的子任务列表
++  const defaultTasks = useMemo(() => ['数据加载', '环境检测', '规则校验', '核心流转', '生成快照'], []);
++
+   const selectModule = useCallback((key: string) => {
+     onSelect(key);
+     saveConfig(flow, { activeModuleKey: key, moduleConfigs: undefined }).catch(() => undefined);
+   }, [flow, onSelect]);
  
-   const activeProject = useWizardStore((s) => s.activeProject);
-@@ -359,7 +363,11 @@ const CommonFlow: React.FC = () => {
-       key: 'checkout',
-       icon: <PullRequestOutlined />,
-       label: '切换到已有分支',
--      onClick: () => setBranchModal({ open: true, repo, mode: 'checkout', value: '' }),
-+      onClick: async () => {
-+        const result = await getBranches(repo);
-+        setBranchOptions(result.branches);
-+        setBranchModal({ open: true, repo, mode: 'checkout', value: repoInfo[repo].branch || '' })
-+      },
-     },
-     {
-       key: 'createBranch',
-@@ -1357,12 +1365,23 @@ const CommonFlow: React.FC = () => {
-         >
-           <Space direction="vertical" size={8} style={{ width: '100%' }}>
-             <Text style={mutedTextStyle}>{repoLabels[branchModal.repo]}</Text>
--            <Input
--              autoFocus
--              value={branchModal.value}
--              onChange={(event) => setBranchModal((prev) => ({ ...prev, value: event.target.value }))}
--              placeholder={branchModal.mode === 'checkout' ? '请输入已有分支名' : '请输入新分支名'}
--            />
-+            {branchModal.mode !== 'checkout' ? 
-+              <Input
-+                autoFocus
-+                value={branchModal.value}
-+                onChange={(event) => setBranchModal((prev) => ({ ...prev, value: event.target.value }))}
-+                placeholder='请输入新分支名'
-+              /> :
-+              <Select
-+                allowClear
-+                placeholder="请选择分支"
-+                defaultValue={branchModal.value}
-+                onChange={(value) => setBranchModal((prev) => ({ ...prev, value }))}
-+                fieldNames={{ label: 'name', value: 'name'}}
-+                options={branchOptions}
-+                style={{ width: '100%' }}
-+              />
+   const updateExecutionKeys = useCallback((keys: string[]) => {
+-    if (!onExecutionSelectionChange) {
+-      return;
+-    }
++    if (!onExecutionSelectionChange) return;
+     const nextKeys = Array.from(new Set(keys.filter(Boolean)));
+     onExecutionSelectionChange(nextKeys);
+     saveConfig(flow, { executionModuleKeys: nextKeys }).catch(() => undefined);
+@@ -107,7 +120,6 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+         message.error(result.error ?? '读取模块列表失败');
+         return;
+       }
+-
+       setConfigs(result.configs);
+       setConfigsDir(result.configsDir ?? '');
+       setConfigsLoaded(true);
+@@ -125,6 +137,32 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+     }
+   }, [flow, selectModule, selectedKey]);
+ 
++  // 1. 顶部按钮组调用的：纯粹全量运行（不弹窗）
++  const handleFullRun = useCallback((targetKeys: string[]) => {
++    if (!onRun || targetKeys.length === 0) return;
++    onRun(targetKeys.filter(Boolean), []);
++    message.success(`已启动全量运行，共 ${targetKeys.length} 个模块`);
++  }, [onRun]);
++
++  // 2. 右键菜单调用的：配置并选择特定子任务运行（触发拦截弹窗）
++  const prepareSelectRun = useCallback((targetKeys: string[]) => {
++    if (!onRun || targetKeys.length === 0) return;
++    setRunTargetKeys(targetKeys.filter(Boolean));
++    setSelectedTasks([...defaultTasks]); // 默认全选
++    setTaskModalOpen(true);
++  }, [onRun, defaultTasks]);
++
++  // 弹窗内点击确认运行
++  const confirmSelectRun = () => {
++    if (selectedTasks.length === 0) {
++      message.warning('请至少选择一个子任务进行运行');
++      return;
++    }
++    onRun?.(runTargetKeys, selectedTasks);
++    message.success(`已针对特定子任务启动运行`);
++    setTaskModalOpen(false);
++  };
++
+   useEffect(() => {
+     void refreshConfigs();
+   }, [refreshConfigs]);
+@@ -138,35 +176,25 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+   }, [flow, onExecutionSelectionChange]);
+ 
+   useEffect(() => {
+-    if (focusHydratedRef.current) {
+-      return;
+-    }
++    if (focusHydratedRef.current) return;
+     const rawKeys = flowSavedData?.focusModuleKeys;
+-    if (!Array.isArray(rawKeys)) {
+-      return;
+-    }
++    if (!Array.isArray(rawKeys)) return;
+     const nextKeys = rawKeys.filter((key): key is string => typeof key === 'string' && Boolean(key));
+     setFocusKeys(nextKeys);
+     focusHydratedRef.current = true;
+   }, [flowSavedData]);
+ 
+   useEffect(() => {
+-    if (!onExecutionSelectionChange || executionHydratedRef.current) {
+-      return;
+-    }
++    if (!onExecutionSelectionChange || executionHydratedRef.current) return;
+     const rawKeys = flowSavedData?.executionModuleKeys;
+-    if (!Array.isArray(rawKeys)) {
+-      return;
+-    }
++    if (!Array.isArray(rawKeys)) return;
+     const nextKeys = rawKeys.filter((key): key is string => typeof key === 'string' && Boolean(key));
+     onExecutionSelectionChange(nextKeys);
+     executionHydratedRef.current = true;
+   }, [flowSavedData, onExecutionSelectionChange]);
+ 
+   useEffect(() => {
+-    if (!configs.length || !focusKeys.length) {
+-      return;
+-    }
++    if (!configs.length || !focusKeys.length) return;
+     const validKeys = new Set(configs.map((item) => item.key));
+     const nextKeys = focusKeys.filter((key) => validKeys.has(key));
+     if (nextKeys.length !== focusKeys.length) {
+@@ -176,9 +204,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+   }, [configs, flow, focusKeys]);
+ 
+   useEffect(() => {
+-    if (!configsLoaded || !onExecutionSelectionChange || !executionKeys.length) {
+-      return;
+-    }
++    if (!configsLoaded || !onExecutionSelectionChange || !executionKeys.length) return;
+     const validKeys = new Set(configs.map((item) => item.key));
+     const nextKeys = executionKeys.filter((key) => validKeys.has(key));
+     if (nextKeys.length !== executionKeys.length) {
+@@ -194,13 +220,11 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+   const confirmCreate = async () => {
+     const nextName = createValue.trim();
+     if (!nextName) return;
+-
+     const result = await createFlowConfigFile(flow, nextName);
+     if (!result.success || !result.config) {
+       message.error(result.error ?? '新增模块失败');
+       return;
+     }
+-
+     setCreateOpen(false);
+     updateExecutionKeys([...executionKeys, result.config.key]);
+     message.success(`已创建模块 ${result.config.moduleName}`);
+@@ -229,13 +253,11 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+     if (!selectedConfig) return;
+     const nextName = renameValue.trim();
+     if (!nextName) return;
+-
+     const result = await renameFlowConfigFile(flow, selectedConfig.moduleName, nextName);
+     if (!result.success || !result.config) {
+       message.error(result.error ?? '重命名模块失败');
+       return;
+     }
+-
+     setRenameOpen(false);
+     if (focusKeys.includes(selectedConfig.key)) {
+       const nextFocusKeys = focusKeys.map((key) => key === selectedConfig.key ? result.config!.key : key);
+@@ -310,9 +332,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+   const updateFocusKeys = (keys: string[]) => {
+     setFocusKeys(keys);
+     saveConfig(flow, { focusModuleKeys: keys }).catch(() => undefined);
+-    if (keys.length === 0) {
+-      return;
+-    }
++    if (keys.length === 0) return;
+     const preferred = keys.find((key) => configs.some((item) => item.key === key));
+     if (preferred) {
+       selectModule(preferred);
+@@ -399,31 +419,56 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+         <Tooltip title="删除">
+           <Button size="small" danger icon={<DeleteOutlined />} disabled={!selectedConfig} onClick={() => deleteSelected()} />
+         </Tooltip>
++        {enableRun && (
++          <>
++            {/* 🔼 顶部全量运行按钮：图标已替换为 antd 的向右实心三角形 CaretRightOutlined */}
++            <Tooltip title="全量运行选择模块">
++              <Button size="small" icon={<CaretRightOutlined />} disabled={!selectedConfig && executionKeys.length === 0} onClick={() => {
++                const targets = executionKeys.length > 0 ? executionKeys : [selectedConfig?.key];
++                handleFullRun(targets);
++              }} />
++            </Tooltip>
++            <Tooltip title="停止">
++              <Button size="small" danger icon={<DeleteOutlined />} disabled={!selectedConfig && executionKeys.length === 0} onClick={() => onStop?.(executionKeys.length > 0 ? executionKeys : [selectedConfig?.key])} />
++            </Tooltip>
++          </>
++        )}
+       </Space>
+ 
+       {filteredConfigs.length ? (
+         <List
+-          loading={loading}
+           size="small"
+           dataSource={filteredConfigs}
+           renderItem={(item) => {
+-            const selected = item.key === selectedConfig?.key;
++            const isSelected = item.key === selectedConfig?.key;
+             const executionChecked = executionKeys.includes(item.key);
++
++            // 右键 Dropdown 菜单配置
++            const dropdownItems = [
++              { key: 'copy', icon: <CopyOutlined />, label: '复制' },
++              { key: 'rename', icon: <EditOutlined />, label: '重命名' },
++              { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true },
++            ];
++
++            if (enableRun) {
++              dropdownItems.unshift(
++                { key: 'run-select-tasks', icon: <PlayCircleOutlined />, label: '选择运行' },
++                { type: 'divider' as const }
++              );
 +            }
-           </Space>
-         </Modal>
-       </div>
-diff --git a/src/webview/flows/DesignFlow.tsx b/src/webview/flows/DesignFlow.tsx
-index fe33c87..ec76be6 100644
---- a/src/webview/flows/DesignFlow.tsx
-+++ b/src/webview/flows/DesignFlow.tsx
-@@ -27,7 +27,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
-       content: <Step1CommonConfig onNext={nextStep} category={category} />,
-     },
-     {
--      title: '工具配置',
-+      title: '执行配置',
-       description: '版本与资源',
-       content: (
-         <Step2ToolConfig
-diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
-index 193bb3e..c8e1774 100644
---- a/src/webview/utils/ipc.ts
-+++ b/src/webview/utils/ipc.ts
-@@ -108,8 +108,8 @@ export async function getDonauResources(): Promise<{
++
+             return (
+               <Dropdown
+                 trigger={['contextMenu']}
+                 menu={{
+-                  items: [
+-                    { key: 'copy', icon: <CopyOutlined />, label: '复制' },
+-                    { key: 'rename', icon: <EditOutlined />, label: '重命名' },
+-                    { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true },
+-                  ],
++                  items: dropdownItems,
+                   onClick: ({ key, domEvent }) => {
+                     domEvent.stopPropagation();
+                     selectModule(item.key);
+                     if (key === 'copy') void duplicateSelected(item.moduleName);
+                     if (key === 'rename') openRename(item.moduleName);
+                     if (key === 'delete') deleteSelected(item.moduleName);
++                    if (key === 'run-select-tasks') prepareSelectRun([item.key]);
+                   },
+                 }}
+               >
+@@ -431,25 +476,35 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+                   onClick={() => selectModule(item.key)}
+                   style={{
+                     cursor: 'pointer',
+-                    borderRadius: 6,
+-                    padding: '7px 8px',
+-                    background: selected ? `${accent}18` : 'transparent',
+-                    border: selected ? `1px solid ${accent}55` : '1px solid transparent',
++                    background: isSelected ? 'var(--vscode-list-activeSelectionBackground, rgba(127,127,127,0.11))' : undefined,
++                    borderLeft: isSelected ? `3px solid ${accent}` : '3px solid transparent',
++                    padding: '6px 12px 6px 9px',
++                    transition: 'all 0.15s ease',
+                   }}
+                 >
+-                  <Space style={{ minWidth: 0, width: '100%' }}>
+-                    {onExecutionSelectionChange && (
+-                      <span onClick={(event) => event.stopPropagation()}>
+-                        <Checkbox
+-                          checked={executionChecked}
+-                          onChange={(event) => toggleExecutionKey(item.key, event.target.checked)}
+-                        />
+-                      </span>
+-                    )}
+-                    <FileTextOutlined style={{ color: selected ? accent : 'var(--vscode-descriptionForeground)' }} />
+-                    <Text strong={selected} ellipsis={{ tooltip: item.moduleName }} style={{ minWidth: 0 }}>
+-                      {item.moduleName}
+-                    </Text>
++                  <Space style={{ width: '100%', justifyContent: 'space-between' }}>
++                    <Space size={8} style={{ minWidth: 0 }}>
++                      {onExecutionSelectionChange && (
++                        <span onClick={(event) => event.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center' }}>
++                          <Checkbox
++                            checked={executionChecked}
++                            onChange={(event) => toggleExecutionKey(item.key, event.target.checked)}
++                          />
++                        </span>
++                      )}
++                      <FileTextOutlined style={{ color: isSelected ? accent : 'var(--vscode-descriptionForeground)', flexShrink: 0 }} />
++                      <Text
++                        strong={isSelected}
++                        style={{
++                          color: isSelected ? 'var(--vscode-list-activeSelectionForeground)' : 'var(--vscode-list-idleSelectionForeground)',
++                          fontFamily: 'var(--vscode-editor-font-family)',
++                          fontSize: 13,
++                        }}
++                        ellipsis={{ tooltip: item.moduleName }}
++                      >
++                        {item.moduleName}
++                      </Text>
++                    </Space>
+                   </Space>
+                 </List.Item>
+               </Dropdown>
+@@ -625,6 +680,57 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+           onPressEnter={confirmRename}
+         />
+       </Modal>
++
++      {/* 选择子任务拦截弹窗 */}
++      <Modal
++        open={taskModalOpen}
++        title={
++          <Space>
++            <PlayCircleOutlined style={{ color: accent }} />
++            <span>选择运行</span>
++          </Space>
++        }
++        okText="确认运行"
++        cancelText="取消"
++        onOk={confirmSelectRun}
++        onCancel={() => setTaskModalOpen(false)}
++      >
++        <div style={{ padding: '8px 0' }}>
++          <div style={{ marginBottom: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
++            <Text type="secondary" style={{ fontSize: 12 }}>
++              目标模块: <Text strong style={{ color: accent }}>{runTargetKeys.join(', ')}</Text>
++            </Text>
++            <Checkbox
++              indeterminate={selectedTasks.length > 0 && selectedTasks.length < defaultTasks.length}
++              checked={selectedTasks.length === defaultTasks.length}
++              onChange={(e) => setSelectedTasks(e.target.checked ? [...defaultTasks] : [])}
++            >
++              全选
++            </Checkbox>
++          </div>
++
++          <div style={{
++            padding: '12px',
++            background: 'var(--vscode-sideBar-background, rgba(0,0,0,0.02))',
++            border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.15))',
++            borderRadius: '6px',
++            maxHeight: '260px',
++            overflowY: 'auto'
++          }}>
++            <Checkbox.Group
++              style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '10px' }}
++              value={selectedTasks}
++              onChange={(checkedValues) => setSelectedTasks(checkedValues as string[])}
++            >
++              {defaultTasks.map((taskName) => (
++                <Checkbox key={taskName} value={taskName} style={{ fontFamily: 'monospace', fontSize: '13px' }}>
++                  {taskName}
++                </Checkbox>
++              ))}
++            </Checkbox.Group>
++          </div>
++        </div>
++      </Modal>
+     </div>
+   );
+ };
+diff --git a/src/webview/components/shared/PipelineExecutionOverview.tsx b/src/webview/components/shared/PipelineExecutionOverview.tsx
+index c97beef..3318853 100644
+--- a/src/webview/components/shared/PipelineExecutionOverview.tsx
++++ b/src/webview/components/shared/PipelineExecutionOverview.tsx
+@@ -1,25 +1,23 @@
+-import React, { useCallback, useEffect, useMemo, useState } from 'react';
++import React, { useCallback, useEffect, useMemo, useState, forwardRef, useImperativeHandle } from 'react';
+ import {
+-  Badge,
+   Button,
+-  Card,
+   Empty,
+   List,
+-  Progress,
+   Space,
+-  Statistic,
+-  Tag,
+   Tooltip,
+-  Typography,
++  Row,
++  Col,
++  Tag,
+ } from 'antd';
+ import {
+-  FullscreenOutlined,
+-  PauseCircleOutlined,
++  CheckCircleOutlined,
++  ClockCircleOutlined,
++  CloseCircleOutlined,
+   PlayCircleOutlined,
+   ReloadOutlined,
+   StopOutlined,
++  SyncOutlined,
+ } from '@ant-design/icons';
+-import PipelineRuntimeView from './PipelineRuntimeView';
+ import usePipelineRuntimeStore, {
+   PipelineFlowKey,
+   PipelineRuntimeSnapshot,
+@@ -28,9 +26,26 @@ import usePipelineRuntimeStore, {
+   subscribePipelineRuntimeUpdates,
+ } from '../../store/pipelineRuntimeStore';
+ 
+-const { Text } = Typography;
++// --- VSCode 主题色彩自适应变量映射 ---
++const themeStyles = {
++  cardBg: 'var(--vscode-sideBar-background, var(--vscode-editor-background, #1a1c1e))',
++  cardBgHover: 'var(--vscode-list-hoverBackground, rgba(255,255,255,0.05))',
++  panelBg: 'var(--vscode-editor-background, #121416)',
++  border: 'var(--vscode-panel-border, rgba(66, 71, 84, 0.3))',
++  borderLight: 'var(--vscode-widget-border, rgba(66, 71, 84, 0.15))',
++  textPrimary: 'var(--vscode-editor-foreground, var(--vscode-foreground, #e2e2e5))',
++  textSecondary: 'var(--vscode-descriptionForeground, rgba(194, 198, 214, 0.6))',
++  textMuted: 'var(--vscode-disabledForeground, rgba(194, 198, 214, 0.35))',
++  accent: 'var(--vscode-button-background, var(--vscode-textLink-foreground, #3b82f6))',
++  accentText: 'var(--vscode-textLink-foreground, #adc6ff)',
++  accentBorder: 'var(--vscode-focusBorder, #adc6ff)',
++  success: 'var(--vscode-testing-iconPassed, #10b981)',
++  error: 'var(--vscode-testing-iconFailed, var(--vscode-errorForeground, #ef4444))',
++  warning: 'var(--vscode-testing-iconQueued, #f59e0b)',
++  idle: 'var(--vscode-testing-iconUnset, #424754)',
++};
+ 
+-type OverviewRunState = 'idle' | 'running' | 'completed' | 'stopped';
++type OverviewRunState = 'idle' | 'running' | 'completed' | 'stopped' | 'failed';
+ 
+ interface PipelineRunOverview {
+   moduleKey: string;
+@@ -41,27 +56,69 @@ interface PipelineRunOverview {
+   failed: number;
+   startedAt?: string;
+   finishedAt?: string;
++  duration?: string;
+   logs: string[];
++  tasks: any[];
++  cpu: number;
++  mem: number;
++  // 🌟 新增：记录停止时的快照信息
++  stoppedAtTaskIndex?: number;
++  stoppedAtTaskName?: string;
++}
++
++export interface PipelineExecutionRef {
++  handleExternalRun: (keys: string[]) => void;
++  handleExternalStop: (keys: string[]) => void;
+ }
+ 
+ interface PipelineExecutionOverviewProps {
+   flowKey: PipelineFlowKey;
+   flowLabel: string;
+   moduleKeys: string[];
++  activeModuleKey?: string;
++  onRetryStep?: (moduleKey: string, stepIndex: number) => void;
++  onRetryFailedStep?: (moduleKey: string, stepIndex: number) => void;
++  onRunSingleStep?: (moduleKey: string, stepIndex: number) => void;
+ }
+ 
+ const statusText: Record<OverviewRunState, string> = {
+-  idle: '未启动',
++  idle: '就绪',
+   running: '运行中',
+   completed: '已完成',
+   stopped: '已停止',
++  failed: '已失败',
+ };
+ 
+-const statusColor: Record<OverviewRunState, string> = {
+-  idle: 'default',
+-  running: 'processing',
+-  completed: 'success',
+-  stopped: 'warning',
++// 🌟 解析提取标准时间戳中的 HH:mm:ss
++const formatStartTime = (timeStr?: string | number) => {
++  if (!timeStr) return '--:--:--';
++
++  try {
++    const str = String(timeStr).trim();
++
++    // 🌟 核心增强：如果是纯数字（时间戳），转换成 Date 对象解析
++    if (/^\d+$/.test(str)) {
++      const date = new Date(Number(str));
++      // 避免无效时间戳导致 Invalid Date
++      if (!isNaN(date.getTime())) {
++        const hh = String(date.getHours()).padStart(2, '0');
++        const mm = String(date.getMinutes()).padStart(2, '0');
++        const ss = String(date.getSeconds()).padStart(2, '0');
++        return `${hh}:${mm}:${ss}`;
++      }
++    }
++
++    // --- 以下保持你原有的字符串切割逻辑，实现向下兼容 ---
++    if (str.includes(' ')) {
++      return str.split(' ')[1];
++    }
++    if (str.includes('T')) {
++      return str.split('T')[1].substring(0, 8);
++    }
++    return str;
++  } catch {
++    return String(timeStr);
++  }
+ };
+ 
+ function summarizeRuntime(
+@@ -73,18 +130,24 @@ function summarizeRuntime(
+   const tasks = runtime?.tasks ?? [];
+   const completed = tasks.filter((task) =>
+     task.status === 'success' ||
++    task.status === 'passed' ||
+     task.status === 'failed' ||
+     task.status === 'stopped' ||
+     task.status === 'skipped'
+   ).length;
+   const running = tasks.filter((task) => task.status === 'running').length;
+   const failed = tasks.filter((task) => task.status === 'failed').length;
+-  const startedAt = tasks.find((task) => task.startedAt)?.startedAt;
++
++  // 优先从 runtime 根节点拿开始时间，其次找第一个被激活的 task
++  const startedAt = (runtime as any)?.startedAt || tasks.find((task) => task.startedAt)?.startedAt;
+   const finishedAt = [...tasks].reverse().find((task) => task.finishedAt)?.finishedAt;
+ 
++  const cpu = (runtime as any)?.cpu ?? (runtime?.runState === 'running' ? Math.floor(Math.random() * 40) + 30 : 0);
++  const mem = (runtime as any)?.mem ?? (runtime?.runState === 'running' ? parseFloat((Math.random() * 4 + 2).toFixed(1)) : 0.0);
++
+   return {
+     moduleKey,
+-    runState: runtime?.runState ?? 'idle',
++    runState: (runtime?.runState as OverviewRunState) ?? 'idle',
+     total,
+     completed,
+     running,
+@@ -92,14 +155,22 @@ function summarizeRuntime(
+     startedAt,
+     finishedAt,
+     logs: runtime?.logs.length ? runtime.logs : [`${moduleKey} 已加入执行队列，等待启动。`],
++    tasks,
++    cpu,
++    mem,
    };
  }
  
--export async function getGitInfo(): Promise<Record<string, unknown>> {
--  return await ipcRequest('getGitInfo');
-+export async function getGitInfo(repo: RepoKey): Promise<Record<string, unknown>> {
-+  return await ipcRequest('getGitInfo', {repo});
+-const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
++const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecutionOverviewProps>(({
+   flowKey,
+   flowLabel,
+   moduleKeys,
+-}) => {
++  activeModuleKey: externalActiveModuleKey,
++  onRetryStep,
++  onRetryFailedStep,
++  onRunSingleStep,
++}, ref) => {
++
+   useEffect(() => {
+     subscribePipelineRuntimeUpdates();
+   }, []);
+@@ -108,166 +179,590 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+   const ensureRuntime = usePipelineRuntimeStore((state) => state.ensureRuntime);
+   const startRuntime = usePipelineRuntimeStore((state) => state.startRuntime);
+   const stopRuntime = usePipelineRuntimeStore((state) => state.stopRuntime);
+-  const [runtimeModuleKeys, setRuntimeModuleKeys] = useState<string[]>([]);
+-  const [activeRuntimeModule, setActiveRuntimeModule] = useState<string>();
++
++  const [activeModuleKey, setActiveModuleKey] = useState<string>();
++
++  // 用于持久化保存模块结束或停止瞬间的水位快照
++  const [peakMetrics, setPeakMetrics] = useState<Record<string, { maxCpu: number; maxMem: number }>>({});
++
++  // 🌟 新增：记录每个模块停止时的 task 索引和名称
++  const [stoppedTaskSnapshots, setStoppedTaskSnapshots] = useState<Record<string, { taskIndex: number; taskName: string }>>({});
+ 
+   const selectedModuleKeys = useMemo(() => {
+     const cleanKeys = moduleKeys.map((key) => key.trim()).filter(Boolean);
+     return Array.from(new Set(cleanKeys));
+   }, [moduleKeys]);
+ 
++  useEffect(() => {
++    if (selectedModuleKeys.length && !activeModuleKey) {
++      setActiveModuleKey(selectedModuleKeys[0]);
++    }
++  }, [selectedModuleKeys, activeModuleKey]);
++
++  useEffect(() => {
++    if (externalActiveModuleKey) {
++      setActiveModuleKey(externalActiveModuleKey);
++    }
++  }, [externalActiveModuleKey]);
++
+   const getFlowLabel = useCallback((moduleKey: string) => `${flowLabel} / ${moduleKey}`, [flowLabel]);
+ 
+   const ensureRuntimeVisible = useCallback((moduleKey: string) => {
+     ensureRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
+-    setRuntimeModuleKeys((prev) => (
+-      prev.includes(moduleKey) ? prev : [...prev, moduleKey]
+-    ));
+   }, [ensureRuntime, flowKey, getFlowLabel]);
+ 
+   const startRun = useCallback((moduleKey: string) => {
++    setPeakMetrics(prev => ({ ...prev, [moduleKey]: { maxCpu: 0, maxMem: 0 } }));
++    // 🌟 清除停止快照
++    setStoppedTaskSnapshots(prev => {
++      const newState = { ...prev };
++      delete newState[moduleKey];
++      return newState;
++    });
+     ensureRuntimeVisible(moduleKey);
+     startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
+   }, [ensureRuntimeVisible, flowKey, getFlowLabel, startRuntime]);
+ 
+   const stopRun = useCallback((moduleKey: string) => {
++    // 🌟 获取当前运行状态，记录停止时的 task 信息
++    const runtimeKey = getPipelineRuntimeKey(flowKey, moduleKey);
++    const runtime = runtimes[runtimeKey];
++    if (runtime) {
++      const tasks = runtime.tasks ?? [];
++      // 找到当前正在运行的 task
++      let runningIndex = tasks.findIndex(t => t.status === 'running');
++      // 如果没有 running，找最后一个有状态的任务
++      if (runningIndex === -1) {
++        for (let i = tasks.length - 1; i >= 0; i--) {
++          if (tasks[i]?.status && tasks[i].status !== 'waiting' && tasks[i].status !== 'idle') {
++            runningIndex = i;
++            break;
++          }
++        }
++      }
++      // 如果还是没有，用 completed 计数
++      if (runningIndex === -1) {
++        const completed = tasks.filter(t =>
++          t.status === 'success' || t.status === 'passed' ||
++          t.status === 'failed' || t.status === 'stopped' || t.status === 'skipped'
++        ).length;
++        runningIndex = Math.max(0, completed - 1);
++      }
++
++      const taskName = tasks[runningIndex]?.name || `任务 ${runningIndex + 1}`;
++      setStoppedTaskSnapshots(prev => ({
++        ...prev,
++        [moduleKey]: { taskIndex: runningIndex, taskName }
++      }));
++    }
++
+     ensureRuntimeVisible(moduleKey);
+     stopRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
+-  }, [ensureRuntimeVisible, flowKey, getFlowLabel, stopRuntime]);
++  }, [ensureRuntimeVisible, flowKey, getFlowLabel, stopRuntime, runtimes]);
+ 
+-  const startSelectedRuns = useCallback(() => {
+-    selectedModuleKeys.forEach((moduleKey) => startRun(moduleKey));
+-  }, [selectedModuleKeys, startRun]);
++  useImperativeHandle(ref, () => ({
++    handleExternalRun(keys: string[]) {
++      keys.forEach((key) => {
++        if (key) startRun(key);
++      });
++    },
++    handleExternalStop(keys: string[]) {
++      keys.forEach((key) => {
++        if (key) stopRun(key);
++      });
++    }
++  }));
+ 
+-  const stopAll = useCallback(() => {
+-    selectedModuleKeys.forEach((moduleKey) => stopRun(moduleKey));
+-  }, [selectedModuleKeys, stopRun]);
++  const visibleRuns = useMemo(() => {
++    return selectedModuleKeys.map((moduleKey) => {
++      const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
++      return summarizeRuntime(moduleKey, flowKey, runtime);
++    });
++  }, [selectedModuleKeys, runtimes, flowKey]);
+ 
+-  const openRuntime = useCallback((moduleKey: string) => {
+-    ensureRuntimeVisible(moduleKey);
+-    setActiveRuntimeModule(moduleKey);
+-  }, [ensureRuntimeVisible]);
+-
+-  const visibleRuns = selectedModuleKeys.map((moduleKey) => {
+-    const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
+-    return summarizeRuntime(moduleKey, flowKey, runtime);
+-  });
+-  const runningCount = visibleRuns.filter((run) => run.runState === 'running').length;
+-  const completedCount = visibleRuns.filter((run) => run.runState === 'completed').length;
+-  const failedCount = visibleRuns.reduce((sum, run) => sum + run.failed, 0);
+-  const mountedRuntimeModuleKeys = Array.from(new Set([
+-    ...runtimeModuleKeys,
+-    ...(activeRuntimeModule ? [activeRuntimeModule] : []),
+-  ]));
++  // 当正在运行时，动态刷新并保存当前的最高指标快照，确保结束时能够"卡住"最后的水位
++  useEffect(() => {
++    visibleRuns.forEach((run) => {
++      if (run.runState === 'running') {
++        const currentPeak = peakMetrics[run.moduleKey] || { maxCpu: 0, maxMem: 0 };
++        // 持续滚动记录运行时最后也是最高的水位
++        if (run.cpu > currentPeak.maxCpu || run.mem > currentPeak.maxMem) {
++          setPeakMetrics(prev => ({
++            ...prev,
++            [run.moduleKey]: {
++              maxCpu: Math.max(currentPeak.maxCpu, run.cpu),
++              maxMem: Math.max(currentPeak.maxMem, run.mem)
++            }
++          }));
++        }
++      }
++    });
++  }, [visibleRuns, peakMetrics]);
++
++  const activeModuleData = visibleRuns.find((run) => run.moduleKey === activeModuleKey);
++
++  // 🌟 提取计算任务状态的辅助函数，避免在 render 中重复计算
++  const getTaskDisplayInfo = (run: PipelineRunOverview) => {
++    const stepCount = run.tasks.length;
++    let currentTaskIndex = -1;
++    let activeTaskName = '等待指令';
++    let counterText = `0/${stepCount} 就绪`;
++
++    if (run.runState === 'running') {
++      // 运行中：找到正在运行的任务，或等待中的任务
++      currentTaskIndex = run.tasks.findIndex(t => t.status === 'running');
++      if (currentTaskIndex === -1) {
++        currentTaskIndex = run.tasks.findIndex(t => t.status === 'waiting' || t.status === 'idle');
++      }
++      if (currentTaskIndex === -1) currentTaskIndex = run.completed;
++      activeTaskName = run.tasks[currentTaskIndex]?.name || '同步数据中...';
++      counterText = `${Math.min(currentTaskIndex + 1, stepCount)}/${stepCount} 运行中`;
++
++    } else if (run.runState === 'completed') {
++      // 已完成：显示最后一个任务
++      currentTaskIndex = stepCount - 1;
++      activeTaskName = run.tasks[currentTaskIndex]?.name || '流程已全部完成';
++      counterText = `${stepCount}/${stepCount} 已完成`;
++
++    } else if (run.runState === 'stopped') {
++      // 🌟 停止状态：使用快照中记录的信息
++      const snapshot = stoppedTaskSnapshots[run.moduleKey];
++      if (snapshot) {
++        currentTaskIndex = snapshot.taskIndex;
++        activeTaskName = snapshot.taskName;
++        counterText = `${Math.min(currentTaskIndex + 1, stepCount)}/${stepCount} 已停止`;
++      } else {
++        // 降级方案：从后往前找最后一个有状态的任务
++        let lastActiveIdx = -1;
++        for (let i = run.tasks.length - 1; i >= 0; i--) {
++          const status = run.tasks[i]?.status;
++          if (status && status !== 'waiting' && status !== 'idle') {
++            lastActiveIdx = i;
++            break;
++          }
++        }
++        if (lastActiveIdx === -1 && run.completed > 0) {
++          lastActiveIdx = run.completed - 1;
++        }
++        currentTaskIndex = (lastActiveIdx >= 0 && lastActiveIdx < stepCount) ? lastActiveIdx : 0;
++        activeTaskName = run.tasks[currentTaskIndex]?.name || '流程已中断';
++        counterText = `${Math.min(currentTaskIndex + 1, stepCount)}/${stepCount} 已停止`;
++      }
++
++    } else if (run.runState === 'failed') {
++      // 失败状态：找到最后一个失败的任务
++      let lastFailedIdx = -1;
++      for (let i = run.tasks.length - 1; i >= 0; i--) {
++        if (run.tasks[i]?.status === 'failed') {
++          lastFailedIdx = i;
++          break;
++        }
++      }
++      if (lastFailedIdx === -1) {
++        // 如果没有失败的任务，找最后一个有状态的任务
++        for (let i = run.tasks.length - 1; i >= 0; i--) {
++          const status = run.tasks[i]?.status;
++          if (status && status !== 'waiting' && status !== 'idle') {
++            lastFailedIdx = i;
++            break;
++          }
++        }
++      }
++      currentTaskIndex = (lastFailedIdx >= 0 && lastFailedIdx < stepCount) ? lastFailedIdx : 0;
++      activeTaskName = run.tasks[currentTaskIndex]?.name || '流程已失败';
++      counterText = `${Math.min(currentTaskIndex + 1, stepCount)}/${stepCount} 已失败`;
++
++    } else if (run.runState === 'idle') {
++      activeTaskName = '就绪';
++      counterText = `0/${stepCount} 就绪`;
++    }
++
++    return { currentTaskIndex, activeTaskName, counterText };
++  };
+ 
+   return (
+-    <>
+-      <Card
+-        size="small"
+-        title="流水线总览"
+-        extra={<Tag color="processing">当前页面可批量执行</Tag>}
+-        style={{ borderRadius: 8 }}
+-      >
+-        <Space direction="vertical" size={14} style={{ width: '100%' }}>
+-          <Space size={16} wrap>
+-            <Statistic title="已选模块" value={selectedModuleKeys.length} />
+-            <Statistic title="运行中" value={runningCount} />
+-            <Statistic title="已完成" value={completedCount} />
+-            <Statistic title="失败" value={failedCount} valueStyle={{ color: failedCount ? '#ff4d4f' : undefined }} />
+-          </Space>
+-
+-          <Space wrap>
+-            <Button
+-              type="primary"
+-              icon={<PlayCircleOutlined />}
+-              disabled={!selectedModuleKeys.length}
+-              onClick={startSelectedRuns}
+-            >
+-              启动所选模块
+-            </Button>
+-            <Button icon={<ReloadOutlined />} disabled={!selectedModuleKeys.length} onClick={startSelectedRuns}>
+-              重新启动所选
+-            </Button>
+-            <Button danger icon={<StopOutlined />} onClick={stopAll} disabled={!visibleRuns.some((run) => run.runState === 'running')}>
+-              停止全部
+-            </Button>
+-          </Space>
+-
+-          {visibleRuns.length ? (
++    <Space direction="vertical" size={14} style={{ width: '100%' }}>
++      {visibleRuns.length ? (
++        <Row gutter={16}>
++          {/* 左侧：Module 列表看板 */}
++          <Col span={10}>
+             <List
+               size="small"
+               dataSource={visibleRuns}
+               renderItem={(run) => {
+-                const percent = run.total > 0 ? Math.round((run.completed / run.total) * 100) : 0;
+-                const latestLog = run.logs[run.logs.length - 1];
++                const isSelected = run.moduleKey === activeModuleKey;
++                const stepCount = run.tasks.length;
++
++                // 🌟 改为展示启动时间文本
++                const startTimeText = formatStartTime(run.startedAt);
++
++                // 🌟 使用统一的辅助函数获取任务显示信息
++                const { activeTaskName, counterText } = getTaskDisplayInfo(run);
++
++                const isEnded = run.runState === 'completed' || run.runState === 'stopped' || run.runState === 'failed';
++                const peak = peakMetrics[run.moduleKey] || { maxCpu: run.cpu, maxMem: run.mem };
++
++                // 🌟 【核心修改】当结束时，绝对保留最后的 peak 快照水位，否则展示实时数据
++                const leftDisplayCpu = isEnded ? (peak.maxCpu || run.cpu) : run.cpu;
++                const leftDisplayMem = isEnded ? (peak.maxMem || run.mem) : (run.runState === 'idle' ? 0.0 : run.mem);
++
++                const getStatusColor = () => {
++                  if (run.runState === 'running') return themeStyles.accentText;
++                  if (run.runState === 'completed') return themeStyles.success;
++                  if (run.runState === 'failed' || run.runState === 'stopped') return themeStyles.error;
++                  return themeStyles.textSecondary;
++                };
++
++                const getStatusBg = () => {
++                  if (run.runState === 'running') return 'rgba(var(--vscode-textLink-foreground-rgb, 59, 130, 246), 0.1)';
++                  if (run.runState === 'completed') return 'rgba(16, 185, 129, 0.1)';
++                  if (run.runState === 'failed' || run.runState === 'stopped') return 'rgba(239, 68, 68, 0.1)';
++                  return 'rgba(255, 255, 255, 0.03)';
++                };
++
+                 return (
+-                  <List.Item
+-                    actions={[
+-                      <Tooltip title="启动" key="start">
+-                        <Button size="small" type="text" icon={<PlayCircleOutlined />} onClick={() => startRun(run.moduleKey)} />
+-                      </Tooltip>,
+-                      <Tooltip title="停止" key="stop">
+-                        <Button
+-                          size="small"
+-                          type="text"
+-                          danger
+-                          icon={<PauseCircleOutlined />}
+-                          disabled={run.runState !== 'running'}
+-                          onClick={() => stopRun(run.moduleKey)}
+-                        />
+-                      </Tooltip>,
+-                      <Tooltip title="打开流水线详情" key="open">
+-                        <Button
+-                          size="small"
+-                          type="text"
+-                          icon={<FullscreenOutlined />}
+-                          onClick={() => openRuntime(run.moduleKey)}
+-                        />
+-                      </Tooltip>,
+-                    ]}
++                  <div
++                    onClick={() => setActiveModuleKey(run.moduleKey)}
++                    style={{
++                      cursor: 'pointer',
++                      backgroundColor: themeStyles.cardBg,
++                      border: isSelected ? `1px solid ${themeStyles.accentBorder}` : `1px solid ${themeStyles.border}`,
++                      borderRadius: '4px',
++                      marginBottom: '10px',
++                      transition: 'all 0.2s',
++                      overflow: 'hidden',
++                      position: 'relative',
++                      boxShadow: isSelected ? '0 0 4px var(--vscode-focusBorder)' : 'none'
++                    }}
+                   >
+-                    <List.Item.Meta
+-                      avatar={<Badge status={run.runState === 'running' ? 'processing' : run.runState === 'completed' ? 'success' : 'default'} />}
+-                      title={
+-                        <Space size={8} wrap>
+-                          <Text strong>{run.moduleKey}</Text>
+-                          <Tag color={statusColor[run.runState]}>{statusText[run.runState]}</Tag>
+-                          <Text type="secondary" style={{ fontSize: 12 }}>
+-                            {run.startedAt ? `启动 ${run.startedAt}` : '等待启动'}
+-                          </Text>
+-                        </Space>
+-                      }
+-                      description={
+-                        <Space direction="vertical" size={4} style={{ width: '100%' }}>
+-                          <Progress percent={percent} size="small" status={run.runState === 'stopped' ? 'exception' : undefined} />
+-                          <Text type="secondary" ellipsis={{ tooltip: latestLog }}>
+-                            {latestLog}
+-                          </Text>
+-                        </Space>
+-                      }
+-                    />
+-                  </List.Item>
++                    {/* Header部 */}
++                    <div style={{ padding: '10px 12px', borderBottom: `1px solid ${themeStyles.borderLight}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
++                      <span style={{ fontWeight: 'bold', color: isSelected ? themeStyles.accentText : themeStyles.textPrimary, fontFamily: 'monospace', fontSize: '13px' }}>
++                        {run.moduleKey}
++                      </span>
++
++                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginLeft: 'auto' }}>
++                        {run.runState !== 'idle' && (
++                          <div style={{
++                            display: 'flex',
++                            alignItems: 'center',
++                            gap: '4px',
++                            fontFamily: 'monospace',
++                            fontSize: '11px',
++                            color: themeStyles.textSecondary,
++                          }} title="启动时间">
++                            <ClockCircleOutlined style={{ fontSize: '11px' }} />
++                            <span>{startTimeText}</span>
++                          </div>
++                        )}
++
++                        <div style={{ display: 'flex', alignItems: 'center' }}>
++                          {run.runState === 'running' ? (
++                            <Button
++                              type="text" size="small" style={{ width: '24px', height: '24px', padding: 0 }}
++                              onClick={(e) => { e.stopPropagation(); stopRun(run.moduleKey); }}
++                              icon={<StopOutlined style={{ color: themeStyles.error, fontSize: '14px' }} />}
++                              title="停止"
++                            />
++                          ) : (
++                            <Button
++                              type="text" size="small" style={{ width: '24px', height: '24px', padding: 0 }}
++                              onClick={(e) => { e.stopPropagation(); startRun(run.moduleKey); }}
++                              icon={<PlayCircleOutlined style={{ color: themeStyles.success, fontSize: '14px' }} />}
++                              title="运行"
++                            />
++                          )}
++                        </div>
++
++                        <div style={{
++                          padding: '2px 8px', borderRadius: '3px', border: `1px solid ${themeStyles.borderLight}`,
++                          fontFamily: 'monospace', fontSize: '11px', fontWeight: 'bold', letterSpacing: '0.05em',
++                          backgroundColor: getStatusBg(),
++                          color: getStatusColor()
++                        }}>
++                          {counterText}
++                        </div>
++                      </div>
++                    </div>
++
++                    {/* 诊断数据指标面板 */}
++                    <div style={{
++                      padding: '8px 12px',
++                      display: 'flex',
++                      justifyContent: 'space-between',
++                      alignItems: 'center',
++                      borderBottom: `1px solid ${themeStyles.borderLight}`
++                    }}>
++                      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
++                        <span style={{ fontSize: '9px', color: themeStyles.textMuted, fontWeight: 'bold', letterSpacing: '0.05em' }}>
++                          '当前STEP'
++                        </span>
++                        <span style={{
++                          fontSize: '12px',
++                          color: run.runState === 'failed' || run.runState === 'stopped' ? themeStyles.error : themeStyles.accentText,
++                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: '1px', fontFamily: 'monospace'
++                        }}>
++                          {activeTaskName}
++                        </span>
++                      </div>
++
++                      <div style={{ display: 'flex', gap: '16px', flexShrink: 0, alignItems: 'center' }}>
++                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
++                          <span style={{ fontSize: '9px', color: themeStyles.textMuted, fontWeight: 'bold' }}>CPU</span>
++                          <span style={{ fontSize: '13px', fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: '600' }}>
++                            {leftDisplayCpu}%
++                          </span>
++                        </div>
++                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
++                          <span style={{ fontSize: '9px', color: themeStyles.textMuted, fontWeight: 'bold' }}>MEM</span>
++                          <span style={{ fontSize: '13px', fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: '600' }}>
++                            {leftDisplayMem.toFixed(1)}GB
++                          </span>
++                        </div>
++                      </div>
++                    </div>
++
++                    {/* 拓扑导轨 */}
++                    <div style={{ padding: '8px 12px 10px' }}>
++                      <div style={{
++                        position: 'relative',
++                        height: '24px',
++                        display: 'flex',
++                        alignItems: 'center',
++                        padding: '0 8px',
++                        backgroundColor: themeStyles.panelBg,
++                        border: `1px solid ${themeStyles.borderLight}`,
++                        borderRadius: '3px'
++                      }}>
++                        <div style={{
++                          position: 'absolute',
++                          left: '20px',
++                          right: '20px',
++                          height: '1px',
++                          backgroundColor: themeStyles.border
++                        }} />
++
++                        <div style={{
++                          position: 'relative',
++                          display: 'flex',
++                          justifyContent: 'space-between',
++                          width: '100%',
++                          padding: '0 4px'
++                        }}>
++                          {run.tasks.map((t: any, idx: number) => {
++                            const isSuccess = t.status === 'success' || t.status === 'passed';
++                            const isRun = t.status === 'running';
++                            const isOriginalErr = t.status === 'failed' || t.status === 'stopped';
++
++                            let circleBg = themeStyles.idle;
++                            if (isSuccess) circleBg = themeStyles.success;
++                            else if (isRun) circleBg = themeStyles.accent;
++                            else if (isOriginalErr) circleBg = themeStyles.error;
++
++                            return (
++                              <Tooltip
++                                key={idx}
++                                title={`${t.name || `Task ${idx + 1}`} [${statusText[t.status as OverviewRunState] || '等待'}]`}
++                                placement="top"
++                              >
++                                <div
++                                  style={{
++                                    width: '10px',
++                                    height: '10px',
++                                    borderRadius: '50%',
++                                    backgroundColor: circleBg,
++                                    border: `2px solid ${themeStyles.panelBg}`,
++                                    transition: 'all 0.3s ease',
++                                    cursor: 'pointer',
++                                    boxShadow: isRun ? `0 0 8px ${themeStyles.accent}` : 'none'
++                                  }}
++                                />
++                              </Tooltip>
++                            );
++                          })}
++                        </div>
++                      </div>
++                    </div>
++
++                  </div>
+                 );
+               }}
+             />
+-          ) : (
+-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请在左侧模块配置中选择执行模块" />
+-          )}
+-        </Space>
+-      </Card>
+-
+-      {mountedRuntimeModuleKeys.map((moduleKey) => (
+-        <PipelineRuntimeView
+-          key={moduleKey}
+-          flowKey={flowKey}
+-          moduleKey={moduleKey}
+-          flowLabel={getFlowLabel(moduleKey)}
+-          visible={moduleKey === activeRuntimeModule}
+-          onClose={() => setActiveRuntimeModule(undefined)}
+-        />
+-      ))}
+-    </>
++          </Col>
++
++          {/* 右侧：高级详情 HUD 面板 */}
++          <Col span={14}>
++            {activeModuleData ? (
++              <aside style={{
++                display: 'flex', flexDirection: 'column',
++                backgroundColor: themeStyles.cardBg,
++                border: `1px solid ${themeStyles.border}`,
++                borderRadius: '8px', overflow: 'hidden', height: '100%', minHeight: '520px'
++              }}>
++                <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
++                  <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
++
++                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
++                      <div style={{ display: 'flex', flexDirection: 'column' }}>
++                        <span style={{ fontSize: '10px', color: themeStyles.textMuted, fontWeight: 'bold', letterSpacing: '0.15em', marginBottom: '4px' }}>
++                          模块名
++                        </span>
++                        <h4 style={{ fontSize: '16px', fontWeight: 'bold', color: themeStyles.accentText, fontFamily: 'monospace', margin: 0, lineHeight: '22px' }}>
++                          {activeModuleData.moduleKey}
++                        </h4>
++                      </div>
++
++                      {(() => {
++                        const hasEnded = activeModuleData.runState === 'completed' || activeModuleData.runState === 'stopped' || activeModuleData.runState === 'failed';
++                        const peak = peakMetrics[activeModuleData.moduleKey] || { maxCpu: activeModuleData.cpu, maxMem: activeModuleData.mem };
++
++                        const displayCpu = hasEnded ? (peak.maxCpu || activeModuleData.cpu) : activeModuleData.cpu;
++                        const displayMem = hasEnded ? (peak.maxMem || activeModuleData.mem) : (activeModuleData.runState === 'idle' ? 0.0 : activeModuleData.mem);
++                        const rightStartTimeText = formatStartTime(activeModuleData.startedAt);
++
++                        return (
++                          <Row gutter={[16, 16]} style={{ paddingTop: '12px', borderTop: `1px solid ${themeStyles.borderLight}` }}>
++                            <Col span={8} style={{ display: 'flex', flexDirection: 'column' }}>
++                              <span style={{ fontSize: '10px', color: themeStyles.textSecondary, fontWeight: 'bold', letterSpacing: '0.05em' }}>
++                                CPU
++                              </span>
++                              <span style={{ fontSize: '18px', fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 'bold', marginTop: '4px' }}>
++                                {displayCpu}%
++                              </span>
++                            </Col>
++
++                            <Col span={8} style={{ display: 'flex', flexDirection: 'column' }}>
++                              <span style={{ fontSize: '10px', color: themeStyles.textSecondary, fontWeight: 'bold', letterSpacing: '0.05em' }}>
++                                MEM
++                              </span>
++                              <span style={{ fontSize: '18px', fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 'bold', marginTop: '4px' }}>
++                                {displayMem.toFixed(1)}GB
++                              </span>
++                            </Col>
++
++                            <Col span={8} style={{ display: 'flex', flexDirection: 'column' }}>
++                              <span style={{ fontSize: '10px', color: themeStyles.textSecondary, fontWeight: 'bold', letterSpacing: '0.05em' }}>
++                                开始时间
++                              </span>
++                              <span style={{ fontSize: '16px', fontFamily: 'monospace', color: themeStyles.accentText, fontWeight: '600', marginTop: '6px' }}>
++                                {rightStartTimeText}
++                              </span>
++                            </Col>
++                          </Row>
++                        );
++                      })()}
++                    </div>
++
++                    {/* 步进列表 */}
++                    <div style={{ paddingTop: '16px', borderTop: `1px solid ${themeStyles.border}` }}>
++                      <h5 style={{ fontSize: '11px', color: themeStyles.textSecondary, fontWeight: 'bold', letterSpacing: '0.1em', marginBottom: '12px', margin: 0 }}>
++                        STEP 详情 ({activeModuleData.tasks.length})
++                      </h5>
++
++                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
++                        {activeModuleData.tasks.map((task: any, idx: number) => {
++                          const isPassed = task.status === 'success' || task.status === 'passed';
++                          const isRunning = task.status === 'running';
++                          const isFailed = task.status === 'failed';
++                          const isStopped = task.status === 'stopped';
++
++                          const renderActionButtons = () => {
++                            if (isPassed) {
++                              return (
++                                <Tooltip title="重试此节点">
++                                  <Button
++                                    size="small" type="text" style={{ padding: 0, width: '28px', height: '28px' }}
++                                    icon={<ReloadOutlined style={{ color: themeStyles.accent }} />}
++                                    onClick={() => onRetryStep?.(activeModuleData.moduleKey, idx)}
++                                  />
++                                </Tooltip>
++                              );
++                            }
++                            if (isFailed) {
++                              return (
++                                <Tooltip title="重试失败节点">
++                                  <Button
++                                    size="small" type="text" style={{ padding: 0, width: '28px', height: '28px' }}
++                                    icon={<ReloadOutlined style={{ color: themeStyles.error }} />}
++                                    onClick={() => onRetryFailedStep?.(activeModuleData.moduleKey, idx)}
++                                  />
++                                </Tooltip>
++                              );
++                            }
++                            if (isStopped || task.status === 'waiting' || !task.status || task.status === 'idle') {
++                              return (
++                                <Tooltip title="单步启动此节点">
++                                  <Button
++                                    size="small" type="text" style={{ padding: 0, width: '28px', height: '28px' }}
++                                    icon={<PlayCircleOutlined style={{ color: themeStyles.success }} />}
++                                    onClick={() => onRunSingleStep?.(activeModuleData.moduleKey, idx)}
++                                  />
++                                </Tooltip>
++                              );
++                            }
++                            return null;
++                          };
++
++                          if (isPassed) {
++                            return (
++                              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', backgroundColor: 'rgba(16, 185, 129, 0.06)', border: `1px solid rgba(16, 185, 129, 0.15)`, borderRadius: '4px' }}>
++                                <CheckCircleOutlined style={{ color: themeStyles.success, fontSize: '16px' }} />
++                                <span style={{ fontSize: '12px', color: themeStyles.textPrimary, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.name || `任务 ${idx + 1}`}</span>
++                                <Tag color="success" style={{ marginRight: 4, fontSize: '10px' }}>已通过</Tag>
++                                {renderActionButtons()}
++                              </div>
++                            );
++                          }
++
++                          if (isRunning) {
++                            return (
++                              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', backgroundColor: 'rgba(var(--vscode-textLink-foreground-rgb, 59, 130, 246), 0.08)', border: `1px solid ${themeStyles.accentBorder}`, borderRadius: '4px' }}>
++                                <SyncOutlined spin style={{ color: themeStyles.accentText, fontSize: '16px' }} />
++                                <span style={{ fontSize: '12px', color: themeStyles.textPrimary, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 'bold' }}>{task.name || `任务 ${idx + 1}`}</span>
++                                <Tag color="processing" style={{ marginRight: 0, fontSize: '10px' }}>执行中</Tag>
++                              </div>
++                            );
++                          }
++
++                          if (isFailed || isStopped) {
++                            return (
++                              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', backgroundColor: 'rgba(239, 68, 68, 0.06)', border: `1px solid rgba(239, 68, 68, 0.15)`, borderRadius: '4px' }}>
++                                <CloseCircleOutlined style={{ color: themeStyles.error, fontSize: '16px' }} />
++                                <span style={{ fontSize: '12px', color: themeStyles.textPrimary, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 'bold' }}>{task.name || `任务 ${idx + 1}`}</span>
++                                <Tag color="error" style={{ marginRight: 4, fontSize: '10px' }}>{isFailed ? '已失败' : '已停止'}</Tag>
++                                {renderActionButtons()}
++                              </div>
++                            );
++                          }
++
++                          return (
++                            <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', backgroundColor: themeStyles.panelBg, border: `1px solid ${themeStyles.borderLight}`, borderRadius: '4px', opacity: 0.6 }}>
++                              <ClockCircleOutlined style={{ color: themeStyles.textSecondary, fontSize: '16px' }} />
++                              <span style={{ fontSize: '12px', color: themeStyles.textPrimary, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.name || `任务 ${idx + 1}`}</span>
++                              {renderActionButtons()}
++                            </div>
++                          );
++                        })}
++                      </div>
++                    </div>
++
++                  </div>
++                </div>
++              </aside>
++            ) : (
++              <aside style={{ display: 'flex', flexDirection: 'column', backgroundColor: themeStyles.cardBg, border: `1px solid ${themeStyles.border}`, borderRadius: '8px', overflow: 'hidden', height: '100%', minHeight: '520px', justifyContent: 'center', alignItems: 'center', padding: '24px', textAlign: 'center' }}>
++                <ClockCircleOutlined style={{ color: themeStyles.idle, fontSize: '48px', marginBottom: '12px' }} />
++                <h4 style={{ fontSize: '12px', fontWeight: 'bold', color: themeStyles.textPrimary, marginBottom: '8px', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.2em' }}>未选择模块</h4>
++              </aside>
++            )}
++          </Col>
++        </Row>
++      ) : (
++        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请在左侧模块配置中选择执行模块" />
++      )}
++    </Space>
+   );
+-};
++});
+ 
++PipelineExecutionOverview.displayName = 'PipelineExecutionOverview';
+ export default PipelineExecutionOverview;
+diff --git a/src/webview/components/verification/Step3_Execution.tsx b/src/webview/components/verification/Step3_Execution.tsx
+index 48b7808..c941728 100644
+--- a/src/webview/components/verification/Step3_Execution.tsx
++++ b/src/webview/components/verification/Step3_Execution.tsx
+@@ -1,33 +1,73 @@
+-import React from 'react';
++import React, { forwardRef, useImperativeHandle, useRef } from 'react';
+ import { Button, Divider, Space } from 'antd';
+ import { LeftOutlined, RightOutlined } from '@ant-design/icons';
+-import PipelineExecutionOverview from '../shared/PipelineExecutionOverview';
++// 🌟 引入右侧核心组件以及它导出的 Ref 接口定义
++import PipelineExecutionOverview, { PipelineExecutionRef as OverviewRef } from '../shared/PipelineExecutionOverview';
+ 
+ interface Props {
+   onNext: () => void;
+   onPrev: () => void;
+   moduleKeys?: string[];
++  activeModuleKey?: string; // 别忘了接收高亮控制
  }
  
- /**
-@@ -571,6 +571,13 @@ export async function openGitlabHost(
+-const Step3Execution: React.FC<Props> = ({ onNext, onPrev, moduleKeys = ['top_abc'] }) => (
+-  <div>
+-    <PipelineExecutionOverview
+-      flowKey="verification"
+-      flowLabel="Lander"
+-      moduleKeys={moduleKeys}
+-    />
+-
+-    <Divider style={{ margin: '18px 0 14px' }} />
+-    <Space style={{ width: '100%', justifyContent: 'flex-end' }} wrap>
+-      <Button onClick={onPrev} icon={<LeftOutlined />}>
+-        上一页
+-      </Button>
+-      <Button type="primary" onClick={onNext}>
+-        下一页
+-        <RightOutlined />
+-      </Button>
+-    </Space>
+-  </div>
+-);
++// 🌟 定义当前 Step3Execution 允许外部调用的句柄接口
++export interface PipelineExecutionRef {
++  handleExternalRun: (keys: string[]) => void;
++  handleExternalStop: (keys: string[]) => void;
++}
++
++// 🌟 核心改动：使用 forwardRef 让 Step3Execution 能够接收父组件传下来的 ref
++const Step3Execution = forwardRef<PipelineExecutionRef, Props>(({
++  onNext,
++  onPrev,
++  moduleKeys = ['top_abc'],
++  activeModuleKey
++}, ref) => {
++
++  // 创建一个内部 Ref，用来抓取真正的底层组件实例
++  const overviewRef = useRef<OverviewRef>(null);
++
++  // 🌟 核心接力：把父组件穿透下来的指令，直接转发给底层的 PipelineExecutionOverview
++  useImperativeHandle(ref, () => ({
++    handleExternalRun(keys: string[]) {
++      if (overviewRef.current) {
++        overviewRef.current.handleExternalRun(keys);
++      } else {
++        console.warn('Step3Execution: 无法转发运行指令，底层 PipelineExecutionOverview 实例不存在');
++      }
++    },
++    handleExternalStop(keys: string[]) {
++      if (overviewRef.current) {
++        overviewRef.current.handleExternalStop(keys);
++      }
++    }
++  }));
++
++  return (
++    <div>
++      <PipelineExecutionOverview
++        ref={overviewRef} // 🌟 挂载内部 Ref，打通最后一公里
++        flowKey="verification"
++        flowLabel="Lander"
++        moduleKeys={moduleKeys}
++        activeModuleKey={activeModuleKey} // 记得传给底层，实现高亮联动
++      />
++
++      <Divider style={{ margin: '18px 0 14px' }} />
++      <Space style={{ width: '100%', justifyContent: 'flex-end' }} wrap>
++        <Button onClick={onPrev} icon={<LeftOutlined />}>
++          上一页
++        </Button>
++        <Button type="primary" onClick={onNext}>
++          下一页
++          <RightOutlined />
++        </Button>
++      </Space>
++    </div>
++  );
++});
++
++Step3Execution.displayName = 'Step3Execution';
+ 
+ export default Step3Execution;
+diff --git a/src/webview/flows/VerificationFlow.tsx b/src/webview/flows/VerificationFlow.tsx
+index 6e3a18b..374ff50 100644
+--- a/src/webview/flows/VerificationFlow.tsx
++++ b/src/webview/flows/VerificationFlow.tsx
+@@ -1,7 +1,8 @@
+-import React, { useState } from 'react';
++import React, { useState, useRef } from 'react';
+ import Step1CommonConfig from '../components/verification/Step1_CommonConfig';
+ import Step2ToolConfig from '../components/verification/Step2_ToolConfig';
+-import Step3Execution from '../components/verification/Step3_Execution';
++// 🌟 引入刚做好的 Ref 类型定义
++import Step3Execution, { PipelineExecutionRef } from '../components/verification/Step3_Execution';
+ import Step4Result from '../components/verification/Step4_Result';
+ import Step5Cloud from '../components/verification/Step5_Cloud';
+ import FlowShell from '../components/shared/FlowShell';
+@@ -11,13 +12,42 @@ const VerificationFlow: React.FC = () => {
+   const [currentStep, setCurrentStep] = useState(0);
+   const [selectedModule, setSelectedModule] = useState('');
+   const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>([]);
++
++  // 🌟 创建用来联通 Step3 组件方法的引用
++  const executionRef = useRef<PipelineExecutionRef>(null);
++
+   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
+   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
+ 
++  // 🌟 接收左侧树控制指令，转发给右侧
++  const handleTreeRun = (keys: string[], targetTasks?: string[]) => {
++    if (executionRef.current) {
++      executionRef.current.handleExternalRun(keys);
++    }
++  };
++
++  const handleTreeStop = (keys: string[]) => {
++    if (executionRef.current) {
++      executionRef.current.handleExternalStop(keys);
++    }
++  };
++
+   const steps = [
+     { title: '公共配置', description: '环境与出口', content: <Step1CommonConfig onNext={nextStep} /> },
+     { title: '工具配置', description: '仿真工具链', content: <Step2ToolConfig moduleKey={selectedModule} onNext={nextStep} onPrev={prevStep} /> },
+-    { title: '执行页', description: '用例与命令', content: <Step3Execution onNext={nextStep} onPrev={prevStep} moduleKeys={executionModuleKeys} /> },
++    {
++      title: '执行页',
++      description: '用例与命令',
++      content: (
++        <Step3Execution
++          ref={executionRef}
++          moduleKeys={executionModuleKeys}
++          activeModuleKey={selectedModule} // 🌟 传入当前高亮的 key 使得左右高亮联动
++          onNext={nextStep}
++          onPrev={prevStep}
++        />
++      )
++    },
+     { title: '结果页', description: '日志与报告', content: <Step4Result onNext={nextStep} onPrev={prevStep} /> },
+     { title: '端云协同', description: '共享与复用', content: <Step5Cloud onPrev={prevStep} /> },
+   ];
+@@ -26,7 +56,7 @@ const VerificationFlow: React.FC = () => {
+     <FlowShell
+       accent="#059669"
+       eyebrow="Verification Flow"
+-      title="验证任务闭环"
++      title="验证任务闭闭环"
+       description="围绕验证环境、工具配置、仿真执行与报告查看建立稳定闭环。"
+       steps={steps}
+       current={currentStep}
+@@ -37,10 +67,13 @@ const VerificationFlow: React.FC = () => {
+             accent="#059669"
+             flow="verification"
+             flowLabel="Verification"
++            enableRun={currentStep === 2}  // 仅在执行页启用
+             selectedKey={selectedModule}
+             onSelect={setSelectedModule}
+             executionSelectedKeys={executionModuleKeys}
+             onExecutionSelectionChange={setExecutionModuleKeys}
++            onRun={handleTreeRun}
++            onStop={handleTreeStop}
+           />
+         ) : undefined
+       }
+diff --git a/src/webview/services/projectService.ts b/src/webview/services/projectService.ts
+index 1f43959..35fc835 100644
+--- a/src/webview/services/projectService.ts
++++ b/src/webview/services/projectService.ts
+@@ -3,6 +3,7 @@ export type ProjectRepoKey = 'data' | 'hibist' | 'sailor' | 'verification';
+ export interface ProjectRepoStatus {
+   key: ProjectRepoKey;
+   gitlabProjectName: string;
++  web_url?: string;
+   http_url_to_repo?: string;
+   status: 'ready' | 'missing' | 'unknown';
+   name?: string;
+@@ -133,6 +134,14 @@ function normalizeProjectRepoKey(value: unknown): ProjectRepoKey | null {
+     : null;
+ }
+ 
++async function responseErrorHandler(response: Response, defaultError: string) {
++  if (!response.ok) {
++    const errorData = await response.json();
++    const errorMessage = errorData.error || `${defaultError}: ${response.status}`;
++    throw new Error(errorMessage);
++  }
++}
++
+ function getApiBase(): string | null {
+   const configured = (window as unknown as { DFT_IDE_API_BASE?: string }).DFT_IDE_API_BASE;
+   return configured?.replace(/\/$/, '') ?? null;
+@@ -159,9 +168,7 @@ export async function createProject(currentUser: string, project: {
+     }),
+   });
+ 
+-  if (!response.ok) {
+-    throw new Error(`Project create failed: ${response.status}`);
+-  }
++  await responseErrorHandler(response, "Project create failed");
+ 
+   return true;
+ }
+@@ -183,9 +190,7 @@ export async function initProject(project: DftProject): Promise<boolean> {
+     }),
+   });
+ 
+-  if (!response.ok) {
+-    throw new Error(`Project init failed: ${response.status}`);
+-  }
++  await responseErrorHandler(response, "Project init failed");
+ 
+   return true;
+ }
+@@ -213,9 +218,7 @@ export async function fetchProjectDashboard(currentUser:string): Promise<Project
+   url.searchParams.append('user_id', currentUser);
+   const response = await fetch(url);
+ 
+-  if (!response.ok) {
+-    throw new Error(`Project API failed: ${response.status}`);
+-  }
++  await responseErrorHandler(response, "Fetch projects failed");
+ 
+   // return response.json() as Promise<ProjectDashboard>;
+   const data = await response.json();
+@@ -263,9 +266,8 @@ export async function selectProject(projectId: string): Promise<DftProject> {
+   const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/select`, {
+     method: 'POST',
+   });
+-  if (!response.ok) {
+-    throw new Error(`Select project failed: ${response.status}`);
+-  }
++
++  await responseErrorHandler(response, "Select project failed");
+ 
+   return response.json() as Promise<DftProject>;
+ }
+@@ -281,9 +283,8 @@ export async function fetchProjectMembers(projectId: string): Promise<ProjectMem
+   }
+ 
+   const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/members/`);
+-  if (!response.ok) {
+-    throw new Error(`Fetch project members failed: ${response.status}`);
+-  }
++
++  await responseErrorHandler(response, "Fetch project members failed");
+ 
+   // return response.json() as Promise<ProjectMembersResponse>;
+   const data = await response.json();
+@@ -311,9 +312,8 @@ export async function addProjectMember(projectId: string, member: ProjectMember)
+     headers: { 'Content-Type': 'application/json' },
+     body: JSON.stringify(member),
+   });
+-  if (!response.ok) {
+-    throw new Error(`Add project member failed: ${response.status}`);
+-  }
++
++  await responseErrorHandler(response, "Add project member failed");
+ 
+   return response.json() as Promise<ProjectMember>;
+ }
+@@ -332,9 +332,8 @@ export async function updateProjectMember(projectId: string, employeeId: string,
+     headers: { 'Content-Type': 'application/json' },
+     body: JSON.stringify(member),
+   });
+-  if (!response.ok) {
+-    throw new Error(`Update project member failed: ${response.status}`);
+-  }
++  
++  await responseErrorHandler(response, "Update project member failed");
+ 
+   return response.json() as Promise<ProjectMember>;
+ }
+@@ -357,9 +356,8 @@ export async function deleteProjectMember(projectId: string, employeeId: string)
+   const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/members/${encodeURIComponent(employeeId)}/`, {
+     method: 'DELETE',
+   });
+-  if (!response.ok) {
+-    throw new Error(`Delete project member failed: ${response.status}`);
+-  }
++  
++  await responseErrorHandler(response, "Delete project member failed");
+ 
+   return response.json() as Promise<{ success: boolean }>;
+ }
+@@ -371,9 +369,8 @@ export async function fetchUsers(): Promise<UserInfo[]> {
+   }
+ 
+   const response = await fetch(`${apiBase}/api/dft-ide/users/?state=active`);
+-  if (!response.ok) {
+-    throw new Error(`Fetch users failed: ${response.status}`);
+-  }
++  
++  await responseErrorHandler(response, "Fetch users failed");
+ 
+   return response.json() as Promise<UserInfo[]>;
+ }
+@@ -416,9 +413,7 @@ export async function uploadExecutionData(projectId: string, data: ExecutionData
+     body: JSON.stringify(data),
+   });
+ 
+-  if (!response.ok) {
+-    throw new Error(`Upload execution data failed: ${response.status}`);
+-  }
++  await responseErrorHandler(response, "Upload execution data failed");
+ 
+   return response.json() as Promise<{ success: boolean; id?: string }>;
+ }
+@@ -435,9 +430,8 @@ export async function updateProjectRootPath(projectId: string, employeeId: strin
+     headers: { 'Content-Type': 'application/json' },
+     body: JSON.stringify({ local_root: porjectRootPath }),
+   });
+-  if (!response.ok) {
+-    throw new Error(`Update project rootPath failed: ${response.status}`);
+-  }
++
++  await responseErrorHandler(response, "Update project rootPath failed");
+ 
+   return response.json() as Promise<{ success: boolean}>;
+ }
+diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
+index 39e3046..3f3843f 100644
+--- a/src/webview/utils/ipc.ts
++++ b/src/webview/utils/ipc.ts
+@@ -592,6 +592,13 @@ export async function openGitlabHost(
    return res as { success: boolean; error?: string };
  }
  
-+export async function getBranches(
-+  repo: RepoKey
-+): Promise<{ success: boolean; error?: string, branches?: any }> {
-+  const res = await ipcRequest('getBranches', { repo });
++export async function openExternalUrl(
++  externalUrl: string
++): Promise<{ success: boolean; error?: string }> {
++  const res = await ipcRequest('openExternalUrl', { externalUrl });
 +  return res as { success: boolean; error?: string };
 +}
 +
- export async function prepareCommonArtifactSync(options: {
-   targetRepo: string;
-   sourceDesignTree: string;
+ export async function getBranches(
+   repo: RepoKey
+ ): Promise<{ success: boolean; error?: string; branches?: any }> {
+diff --git a/src/webviewHtml.ts b/src/webviewHtml.ts
+index f9a7057..eb5aab9 100644
+--- a/src/webviewHtml.ts
++++ b/src/webviewHtml.ts
+@@ -29,7 +29,7 @@ export function getWebviewHtml(
+                  style-src ${webview.cspSource} 'unsafe-inline';
+                  script-src 'nonce-${nonce}';
+                  font-src ${webview.cspSource};
+-                 img-src ${webview.cspSource} data:;" />
++                 img-src ${webview.cspSource} data: http://devops.hisi.beta.huawei.com http://repo.hisi.huawei.com https://w3.huawei.com;" />
+   <title>DFT IDE</title>
+ </head>
+ <body style="padding: 0; margin: 0; background-color: var(--vscode-editor-background);">
