@@ -1,3 +1,6 @@
+import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import {
   PipelineLink,
   PipelineTask,
@@ -53,6 +56,195 @@ export function isPipelineFlowKey(value: unknown): value is PipelineFlowKey {
   return value === 'hibist' || value === 'sailor' || value === 'verification';
 }
 
+function getProjectRootPath(): string | undefined {
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+// Lightweight YAML parser
+function parseYamlTasks(content: string): PipelineTask[] {
+  const lines = content.split(/\r?\n/);
+  const tasks: PipelineTask[] = [];
+  let currentTask: Partial<PipelineTask> | null = null;
+
+  for (let line of lines) {
+    const hashIndex = line.indexOf('#');
+    if (hashIndex !== -1) {
+      line = line.substring(0, hashIndex);
+    }
+    line = line.trimEnd();
+    if (!line.trim()) continue;
+
+    // Check for "- id: ..."
+    const listItemMatch = line.match(/^(\s*)-\s+(.*)$/);
+    if (listItemMatch) {
+      if (currentTask && currentTask.id) {
+        tasks.push({
+          id: currentTask.id,
+          name: currentTask.name || currentTask.id,
+          command: currentTask.command || '',
+          status: 'pending',
+          attempts: 1,
+          description: currentTask.description || '',
+          logs: [],
+        });
+      }
+      currentTask = {};
+      const rest = listItemMatch[2].trim();
+      const colonIndex = rest.indexOf(':');
+      if (colonIndex !== -1) {
+        const key = rest.substring(0, colonIndex).trim();
+        let val = rest.substring(colonIndex + 1).trim();
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.substring(1, val.length - 1);
+        }
+        currentTask[key as keyof PipelineTask] = val as any;
+      }
+    } else {
+      const kvMatch = line.match(/^(\s*)([a-zA-Z0-9_-]+)\s*:\s*(.*)$/);
+      if (kvMatch && currentTask) {
+        const key = kvMatch[2].trim();
+        let val = kvMatch[3].trim();
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.substring(1, val.length - 1);
+        }
+        currentTask[key as keyof PipelineTask] = val as any;
+      }
+    }
+  }
+
+  if (currentTask && currentTask.id) {
+    tasks.push({
+      id: currentTask.id,
+      name: currentTask.name || currentTask.id,
+      command: currentTask.command || '',
+      status: 'pending',
+      attempts: 1,
+      description: currentTask.description || '',
+      logs: [],
+    });
+  }
+
+  return tasks;
+}
+
+function getYamlFileName(flowKey: PipelineFlowKey): string {
+  if (flowKey === 'verification') return 'lander.yaml';
+  return `${flowKey}.yaml`;
+}
+
+function getYamlPath(flowKey: PipelineFlowKey): string | undefined {
+  const root = getProjectRootPath();
+  if (!root) return undefined;
+  return path.join(root, 'pipelines', getYamlFileName(flowKey));
+}
+
+function getDefaultYamlContent(flowKey: PipelineFlowKey): string {
+  const config = pipelineFlowConfigs[flowKey];
+  if (!config) return '';
+  
+  let content = `# DFT IDE Pipeline Configuration for ${flowKey.toUpperCase()}\n`;
+  content += `# Modify this file to customize the steps and commands of the pipeline.\n\n`;
+  
+  const makeDummyTask = (id: string, name: string, command: string, description: string) => {
+    return { id, name, command, description };
+  };
+  const tasks = config.getInitialTasks((id, name, command, description) => makeDummyTask(id, name, command, description) as any);
+  
+  tasks.forEach((task) => {
+    content += `- id: ${task.id}\n`;
+    content += `  name: ${task.name}\n`;
+    content += `  command: "${task.command}"\n`;
+    content += `  description: ${task.description}\n\n`;
+  });
+  
+  return content;
+}
+
+function loadPipelineConfig(flowKey: PipelineFlowKey): { tasks: PipelineTask[]; links: PipelineLink[] } {
+  const yamlPath = getYamlPath(flowKey);
+  
+  // Default values
+  const defaultTasks = pipelineFlowConfigs[flowKey].getInitialTasks((id, name, command, description) => makeTask(id, name, command, description));
+  const defaultLinks = pipelineFlowConfigs[flowKey].getInitialLinks();
+
+  if (!yamlPath) {
+    return { tasks: defaultTasks, links: defaultLinks };
+  }
+
+  try {
+    const dir = path.dirname(yamlPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    
+    if (!fs.existsSync(yamlPath)) {
+      const defaultContent = getDefaultYamlContent(flowKey);
+      fs.writeFileSync(yamlPath, defaultContent, 'utf-8');
+      return { tasks: defaultTasks, links: defaultLinks };
+    }
+
+    const content = fs.readFileSync(yamlPath, 'utf-8');
+    const parsedTasks = parseYamlTasks(content);
+    
+    if (parsedTasks.length === 0) {
+      return { tasks: defaultTasks, links: defaultLinks };
+    }
+
+    // Auto-generate sequential links
+    const links: PipelineLink[] = [];
+    for (let i = 0; i < parsedTasks.length - 1; i++) {
+      links.push({ source: parsedTasks[i].id, target: parsedTasks[i + 1].id });
+    }
+
+    return { tasks: parsedTasks, links };
+  } catch (error) {
+    console.error(`Error loading pipeline config for ${flowKey}:`, error);
+    return { tasks: defaultTasks, links: defaultLinks };
+  }
+}
+
+function runSequentialSimulation(
+  key: string,
+  tasks: PipelineTask[],
+  logPrefix: string,
+  patchTask: (id: string, patch: Partial<PipelineTask> | ((task: PipelineTask) => Partial<PipelineTask>)) => void,
+  appendLog: (msg: string) => void,
+  setRunState: (state: PipelineRunState) => void,
+) {
+  let delay = 500;
+  tasks.forEach((task, index) => {
+    // 1. Schedule Task Start
+    scheduleRuntime(key, delay, () => {
+      patchTask(task.id, {
+        status: 'running',
+        startedAt: nowText(),
+      });
+      appendLog(`${logPrefix} ${task.name} 运行启动。`);
+    });
+
+    delay += 1500;
+
+    // 2. Schedule Task End
+    scheduleRuntime(key, delay, () => {
+      patchTask(task.id, {
+        status: 'success',
+        finishedAt: nowText(),
+        duration: '1.2s',
+        logs: [`[${nowText()}] ${logPrefix} ${task.name} 执行完成。`],
+      });
+      appendLog(`${logPrefix} ${task.name} 执行成功。`);
+      
+      // If it's the last task, complete the run
+      if (index === tasks.length - 1) {
+        setRunState('completed');
+        appendLog(`${logPrefix} 流水线执行成功。`);
+      }
+    });
+
+    delay += 500;
+  });
+}
+
 function makeTask(
   id: string,
   name: string,
@@ -67,7 +259,6 @@ function makeTask(
     status,
     attempts: 1,
     description,
-    startedAt: status === 'running' ? nowText() : undefined,
     logs: [],
   };
 }
@@ -78,12 +269,13 @@ function createIdleRuntime(
   flowLabel: string,
 ): PipelineRuntimeSnapshot {
   const config = pipelineFlowConfigs[flowKey];
+  const { tasks, links } = loadPipelineConfig(flowKey);
   return {
     flowKey,
     moduleKey,
     flowLabel,
-    tasks: [],
-    links: [],
+    tasks: tasks.map((t) => ({ ...t, status: 'pending' })),
+    links,
     logs: [`流水线运行态已就绪，点击“启动流水线”开始接收 ${config.title} 事件流。`],
     runState: 'idle',
     updatedAt: nowStamp(),
@@ -133,11 +325,14 @@ export class PipelineRuntimeService {
 
     this.options.openTerminal(config.terminalTitle, config.terminalCommand);
 
-    const initialTasks = config.getInitialTasks((id, name, command, description, status) => ({
-      ...makeTask(id, name, command, description, status),
-      logs: [`[${nowText()}] ${config.logPrefix} ${name} 已创建，初始状态：${status ?? 'pending'}。`],
+    const { tasks: parsedTasks, links: parsedLinks } = loadPipelineConfig(flowKey);
+
+    const initialTasks = parsedTasks.map((t, idx) => ({
+      ...t,
+      status: idx === 0 ? 'running' as TaskStatus : 'pending' as TaskStatus,
+      startedAt: idx === 0 ? nowText() : undefined,
+      logs: [`[${nowText()}] ${config.logPrefix} ${t.name} 已创建，初始状态：${idx === 0 ? 'running' : 'pending'}。`],
     }));
-    const initialLinks = config.getInitialLinks();
 
     const runtime: PipelineRuntimeSnapshot = {
       runId,
@@ -145,7 +340,7 @@ export class PipelineRuntimeService {
       moduleKey,
       flowLabel,
       tasks: initialTasks,
-      links: initialLinks,
+      links: parsedLinks,
       logs: [`[${nowText()}] ${config.logPrefix} 流水线已启动。`],
       selectedTaskId: initialTasks[0]?.id,
       runState: 'running',
@@ -155,29 +350,50 @@ export class PipelineRuntimeService {
     this.runtimes.set(key, runtime);
     this.notify(key);
 
-    config.timeline.forEach((event) => {
-      scheduleRuntime(key, event.delay, () => {
-        event.action({
-          appendLog: (msg) => this.appendLog(key, config.logPrefix, msg),
-          addTasks: (newTasks, newLinks) => {
-            this.updateRuntime(key, (current) => ({
-              ...current,
-              tasks: [...current.tasks, ...newTasks],
-              links: [...current.links, ...newLinks],
-            }));
-          },
-          patchTask: (id, patch) => this.patchTask(key, id, patch),
-          setRunState: (runState) => {
-            this.updateRuntime(key, (current) => ({
-              ...current,
-              runState,
-              finishedAt: runState === 'completed' || runState === 'stopped' ? nowStamp() : current.finishedAt,
-            }));
-          },
-          getNow: nowText,
+    // Decide if we run default simulation or custom sequential simulation
+    const defaultTasks = config.getInitialTasks((id) => ({ id } as any));
+    const isDefault = defaultTasks.length === parsedTasks.length && defaultTasks.every((t, i) => t.id === parsedTasks[i].id);
+
+    if (isDefault) {
+      config.timeline.forEach((event) => {
+        scheduleRuntime(key, event.delay, () => {
+          event.action({
+            appendLog: (msg) => this.appendLog(key, config.logPrefix, msg),
+            addTasks: (newTasks, newLinks) => {
+              this.updateRuntime(key, (current) => ({
+                ...current,
+                tasks: [...current.tasks, ...newTasks],
+                links: [...current.links, ...newLinks],
+              }));
+            },
+            patchTask: (id, patch) => this.patchTask(key, id, patch),
+            setRunState: (runState) => {
+              this.updateRuntime(key, (current) => ({
+                ...current,
+                runState,
+                finishedAt: runState === 'completed' || runState === 'stopped' ? nowStamp() : current.finishedAt,
+              }));
+            },
+            getNow: nowText,
+          });
         });
       });
-    });
+    } else {
+      runSequentialSimulation(
+        key,
+        initialTasks,
+        config.logPrefix,
+        (id, patch) => this.patchTask(key, id, patch),
+        (msg) => this.appendLog(key, config.logPrefix, msg),
+        (runState) => {
+          this.updateRuntime(key, (current) => ({
+            ...current,
+            runState,
+            finishedAt: runState === 'completed' || runState === 'stopped' ? nowStamp() : current.finishedAt,
+          }));
+        }
+      );
+    }
 
     return runtime;
   }
@@ -250,24 +466,47 @@ export class PipelineRuntimeService {
     const key = getPipelineRuntimeKey(flowKey, moduleKey);
     const config = pipelineFlowConfigs[flowKey];
 
-    config.onRerun(taskId, {
-      appendLog: (msg) => this.appendLog(key, config.logPrefix, msg),
-      patchTask: (id, patch) => this.patchTask(key, id, patch),
-      setRunState: (runState) => {
-        this.updateRuntime(key, (runtime) => ({
-          ...runtime,
-          runState,
-          finishedAt: runState === 'completed' || runState === 'stopped' ? nowStamp() : runtime.finishedAt,
-        }));
-      },
-      getNow: nowText,
-      schedule: (delay, action) => scheduleRuntime(key, delay, action),
-      setRuntime: (next) => {
-        this.updateRuntime(key, (runtime) => (
-          typeof next === 'function' ? next(runtime) : next
-        ));
-      },
-    });
+    const { tasks: parsedTasks } = loadPipelineConfig(flowKey);
+    const defaultTasks = config.getInitialTasks((id) => ({ id } as any));
+    const isDefault = defaultTasks.length === parsedTasks.length && defaultTasks.every((t, i) => t.id === parsedTasks[i].id);
+
+    if (isDefault) {
+      config.onRerun(taskId, {
+        appendLog: (msg) => this.appendLog(key, config.logPrefix, msg),
+        patchTask: (id, patch) => this.patchTask(key, id, patch),
+        setRunState: (runState) => {
+          this.updateRuntime(key, (runtime) => ({
+            ...runtime,
+            runState,
+            finishedAt: runState === 'completed' || runState === 'stopped' ? nowStamp() : runtime.finishedAt,
+          }));
+        },
+        getNow: nowText,
+        schedule: (delay, action) => scheduleRuntime(key, delay, action),
+        setRuntime: (next) => {
+          this.updateRuntime(key, (runtime) => (
+            typeof next === 'function' ? next(runtime) : next
+          ));
+        },
+      });
+    } else {
+      // Generic rerun
+      this.patchTask(key, taskId, {
+        status: 'running',
+        startedAt: nowText(),
+        finishedAt: undefined,
+      });
+      this.appendLog(key, config.logPrefix, `手动重跑任务 ${taskId}...`);
+
+      scheduleRuntime(key, 1200, () => {
+        this.patchTask(key, taskId, {
+          status: 'success',
+          finishedAt: nowText(),
+          duration: '1.2s',
+        });
+        this.appendLog(key, config.logPrefix, `任务 ${taskId} 重跑成功。`);
+      });
+    }
   }
 
   private appendLog(key: string, prefix: string, msg: string): void {
