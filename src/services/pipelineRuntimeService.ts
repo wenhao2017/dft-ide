@@ -39,7 +39,7 @@ export interface PipelineRuntimeHistoryRecord {
 interface PipelineRuntimeServiceOptions {
   onUpdate: (snapshot: PipelineRuntimeSnapshot) => void;
   onHistory: (record: PipelineRuntimeHistoryRecord) => void;
-  openTerminal: (title: string, command: string) => void;
+  openTerminal: (title: string, command: string, cwd?: string) => void;
 }
 
 const timers = new Map<string, ReturnType<typeof setTimeout>[]>();
@@ -129,19 +129,19 @@ function parseYamlTasks(content: string): PipelineTask[] {
 
 const DEFAULT_PIPELINE_TASKS: Record<PipelineFlowKey, Array<{ id: string; name: string; command: string; description: string }>> = {
   hibist: [
-    { id: 'gen_analysis_env', name: 'gen_analysis_env', command: 'dftm gen_analysis_env -cfg cpu_top.cfg', description: '生成 analysis 阶段分析环境' },
-    { id: 'run_analysis', name: 'run_analysis', command: 'dftm run_analysis -cfg cpu_top.cfg', description: '执行 design rule check 与 DFT 分析' },
-    { id: 'gen_insert_env', name: 'gen_insert_env', command: 'dftm gen_insert_env -cfg cpu_top.cfg', description: '生成 insert 阶段 MBIST 插入环境' },
-    { id: 'run_insert', name: 'run_insert', command: 'dftm run_insert -cfg cpu_top.cfg', description: '执行 wrapper generation 与 MBIST 插入' },
-    { id: 'gen_build_env', name: 'gen_build_env', command: 'dftm gen_build_env -cfg cpu_top.cfg', description: '生成 build 阶段环境' },
-    { id: 'run_build', name: 'run_build', command: 'dftm run_build -cfg cpu_top.cfg', description: '构建 post-MBIST RTL 与结构描述' },
-    { id: 'gen_syn_env', name: 'gen_syn_env', command: 'dftm gen_syn_env -cfg cpu_top.cfg', description: '生成 synthesis 综合环境' },
-    { id: 'run_syn', name: 'run_syn', command: 'dftm run_syn -cfg cpu_top.cfg', description: '执行 top-link check 与逻辑综合' },
-    { id: 'gen_fml_env', name: 'gen_fml_env', command: 'dftm gen_fml_env -cfg cpu_top.cfg', description: '生成 Formality 验证环境' },
-    { id: 'run_fml', name: 'run_fml', command: 'dftm run_fml -cfg cpu_top.cfg', description: '执行 Formality 形式等价性验证' },
-    { id: 'gen_sim_env', name: 'gen_sim_env', command: 'dftm gen_sim_env -cfg cpu_top.cfg', description: '生成仿真环境与 testbench' },
-    { id: 'run_sim', name: 'run_sim', command: 'dftm run_sim -cfg cpu_top.cfg', description: '运行 MBIST 并行/串行等多类型仿真' },
-    { id: 'release', name: 'release', command: 'dftm release -cfg cpu_top.cfg -version 0.1.0', description: '打包交付 release 介质及报告' },
+    { id: 'gen_analysis_env', name: 'gen_analysis_env', command: 'dftm gen_analysis_env', description: '生成 analysis 阶段分析环境' },
+    { id: 'run_analysis', name: 'run_analysis', command: 'dftm run_analysis', description: '执行 design rule check 与 DFT 分析' },
+    { id: 'gen_insert_env', name: 'gen_insert_env', command: 'dftm gen_insert_env', description: '生成 insert 阶段 MBIST 插入环境' },
+    { id: 'run_insert', name: 'run_insert', command: 'dftm run_insert', description: '执行 wrapper generation 与 MBIST 插入' },
+    { id: 'gen_build_env', name: 'gen_build_env', command: 'dftm gen_build_env', description: '生成 build 阶段环境' },
+    { id: 'run_build', name: 'run_build', command: 'dftm run_build', description: '构建 post-MBIST RTL 与结构描述' },
+    { id: 'gen_syn_env', name: 'gen_syn_env', command: 'dftm gen_syn_env', description: '生成 synthesis 综合环境' },
+    { id: 'run_syn', name: 'run_syn', command: 'dftm run_syn', description: '执行 top-link check 与逻辑综合' },
+    { id: 'gen_fml_env', name: 'gen_fml_env', command: 'dftm gen_fml_env', description: '生成 Formality 验证环境' },
+    { id: 'run_fml', name: 'run_fml', command: 'dftm run_fml', description: '执行 Formality 形式等价性验证' },
+    { id: 'gen_sim_env', name: 'gen_sim_env', command: 'dftm gen_sim_env', description: '生成仿真环境与 testbench' },
+    { id: 'run_sim', name: 'run_sim', command: 'dftm run_sim', description: '运行 MBIST 并行/串行等多类型仿真' },
+    { id: 'release', name: 'release', command: 'dftm release -version 0.1.0', description: '打包交付 release 介质及报告' },
   ],
   sailor: [
     { id: 'create_branch', name: 'create_branch', command: 'sailor branch -create feat_dft_scan', description: '创建或切换 feature 分支' },
@@ -240,6 +240,10 @@ function runSequentialSimulation(
   key: string,
   tasks: PipelineTask[],
   logPrefix: string,
+  flowLabel: string,
+  moduleKey: string,
+  cwd: string | undefined,
+  openTerminal: (title: string, command: string, cwd?: string) => void,
   patchTask: (id: string, patch: Partial<PipelineTask> | ((task: PipelineTask) => Partial<PipelineTask>)) => void,
   appendLog: (msg: string) => void,
   setRunState: (state: PipelineRunState) => void,
@@ -252,6 +256,9 @@ function runSequentialSimulation(
         status: 'running',
         startedAt: nowText(),
       });
+      if (task.command) {
+        openTerminal(`${flowLabel} / ${moduleKey} / ${task.name || task.id}`, task.command, cwd);
+      }
       appendLog(`${logPrefix} ${task.name} 运行启动。`);
     });
 
@@ -355,13 +362,12 @@ export class PipelineRuntimeService {
     moduleKey: string,
     flowLabel: string,
     selectedTaskIds?: string[],
+    cwd?: string,
   ): PipelineRuntimeSnapshot {
     const key = getPipelineRuntimeKey(flowKey, moduleKey);
     const config = pipelineFlowConfigs[flowKey];
     const runId = `pipeline_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
     clearRuntimeTimers(key);
-
-    this.options.openTerminal(config.terminalTitle, config.terminalCommand);
 
     const { tasks: parsedTasks, links: parsedLinks } = loadPipelineConfig(flowKey);
 
@@ -406,6 +412,10 @@ export class PipelineRuntimeService {
       key,
       selectedTasksToRun,
       config.logPrefix,
+      flowLabel,
+      moduleKey,
+      cwd,
+      this.options.openTerminal,
       (id, patch) => this.patchTask(key, id, patch),
       (msg) => this.appendLog(key, config.logPrefix, msg),
       (runState) => {

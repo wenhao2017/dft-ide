@@ -36,7 +36,7 @@ export interface PipelineRuntimeSnapshot {
 interface PipelineRuntimeStore {
   runtimes: Record<string, PipelineRuntimeSnapshot>;
   ensureRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string) => void;
-  startRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string, selectedTaskIds?: string[]) => void;
+  startRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string, selectedTaskIds?: string[], cwd?: string) => void;
   stopRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string) => void;
   selectTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string) => void;
   stopTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string) => void;
@@ -151,7 +151,7 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
     void ensurePipelineRuntime({ flowKey, moduleKey, flowLabel });
   },
 
-  startRuntime: (flowKey, moduleKey, flowLabel, selectedTaskIds) => {
+  startRuntime: (flowKey, moduleKey, flowLabel, selectedTaskIds, cwd) => {
     set((state) => ({
       runtimes: applySnapshot(
         state.runtimes,
@@ -162,7 +162,7 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
         },
       ),
     }));
-    void startPipelineRuntime({ flowKey, moduleKey, flowLabel, selectedTaskIds });
+    void startPipelineRuntime({ flowKey, moduleKey, flowLabel, selectedTaskIds, cwd });
   },
 
   stopRuntime: (flowKey, moduleKey, flowLabel) => {

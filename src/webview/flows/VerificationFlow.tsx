@@ -11,6 +11,7 @@ const VerificationFlow: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedModule, setSelectedModule] = useState('');
   const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>([]);
+  const [moduleWorkDirs, setModuleWorkDirs] = useState<Record<string, string>>({});
   const executionRef = useRef<PipelineExecutionRef>(null);
 
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
@@ -34,6 +35,7 @@ const VerificationFlow: React.FC = () => {
         <Step3Execution
           ref={executionRef}
           moduleKeys={executionModuleKeys}
+          moduleWorkDirs={moduleWorkDirs}
           activeModuleKey={selectedModule}
           onModuleSelect={setSelectedModule}
           onNext={nextStep}
@@ -64,6 +66,7 @@ const VerificationFlow: React.FC = () => {
             selectedKey={selectedModule}
             onSelect={setSelectedModule}
             onExecutionSelectionChange={setExecutionModuleKeys}
+            onModuleWorkDirsChange={setModuleWorkDirs}
             onRun={handleTreeRun}
             onStop={handleTreeStop}
           />

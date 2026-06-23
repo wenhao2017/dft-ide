@@ -30,7 +30,7 @@ export const pipelineFlowConfigs: Record<'hibist' | 'sailor' | 'verification', F
     title: 'DFTM MBIST Flow',
     logPrefix: '[DFTM]',
     terminalTitle: 'DFTM MBIST Flow 运行终端',
-    terminalCommand: 'dftm gen_analysis_env -cfg cpu_top.cfg',
+    terminalCommand: 'dftm gen_analysis_env',
   },
   sailor: {
     title: 'Sailor Design Flow',

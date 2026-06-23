@@ -12,7 +12,7 @@ interface Props {
   moduleKeys?: string[];
 }
 
-const Step3Execution: React.FC<Props> = ({ onNext, onPrev, category, moduleKeys = ['top_abc'], moduleKey}) => {
+const Step3Execution: React.FC<Props> = ({ onNext, onPrev, category, moduleKeys = [], moduleKey}) => {
   const repo = category?.toLowerCase() === 'sailor' ? 'sailor' : 'hibist';
   const flowLabel = repo === 'sailor' ? 'Sailor' : 'DFTM';
 

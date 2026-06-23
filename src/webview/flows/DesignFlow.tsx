@@ -17,6 +17,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedModule, setSelectedModule] = useState('');
   const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>([]);
+  const [moduleWorkDirs, setModuleWorkDirs] = useState<Record<string, string>>({});
   const executionRef = useRef<PipelineExecutionRef>(null);
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
@@ -47,6 +48,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
           onPrev={prevStep}
           category={category}
           moduleKeys={executionModuleKeys}
+          moduleWorkDirs={moduleWorkDirs}
         />
       ),
     },
@@ -94,6 +96,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
             selectedKey={selectedModule}
             onSelect={setSelectedModule}
             onExecutionSelectionChange={setExecutionModuleKeys}
+            onModuleWorkDirsChange={setModuleWorkDirs}
             onRun={handleTreeRun}
             onStop={handleTreeStop}
           />

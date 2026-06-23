@@ -53,6 +53,7 @@ interface DesignTreePanelProps {
   enableRun?: boolean;
   onSelect: (key: string) => void;
   onExecutionSelectionChange?: (keys: string[]) => void;
+  onModuleWorkDirsChange?: (workDirs: Record<string, string>) => void;
   onRun?: (keys: string[], targetTasks?: string[]) => void;
   onStop?: (keys: string[]) => void;
 }
@@ -67,6 +68,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   enableRun,
   onSelect,
   onExecutionSelectionChange,
+  onModuleWorkDirsChange,
   onRun,
   onStop,
 }) => {
@@ -89,6 +91,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   const [createValue, setCreateValue] = useState('');
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [runTargetKeys, setRunTargetKeys] = useState<string[]>([]);
+  const [batchModuleKeys, setBatchModuleKeys] = useState<string[]>([]);
   const [modalStepRange, setModalStepRange] = useState<[number, number]>([0, 0]);
 
   const selectedConfig = configs.find((item) => item.key === selectedKey) ?? configs[0];
@@ -139,6 +142,20 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     onExecutionSelectionChange(nextKeys);
     saveConfig(flow, { executionModuleKeys: nextKeys }).catch(() => undefined);
   }, [flow, onExecutionSelectionChange]);
+
+  const syncFocusedModules = useCallback((keys: string[]) => {
+    const nextKeys = Array.from(new Set(keys.filter(Boolean)));
+    updateExecutionKeys(nextKeys);
+    const configByKey = new Map(configs.map((item) => [item.key, item]));
+    const nextWorkDirs = nextKeys.reduce<Record<string, string>>((acc, key) => {
+      const workDir = configByKey.get(key)?.workDir;
+      if (workDir) {
+        acc[key] = workDir;
+      }
+      return acc;
+    }, {});
+    onModuleWorkDirsChange?.(nextWorkDirs);
+  }, [configs, onModuleWorkDirsChange, updateExecutionKeys]);
 
   const handleFullRun = useCallback((targetKeys: string[]) => {
     const keys = targetKeys.filter(Boolean);
@@ -216,9 +233,9 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     }
     const nextKeys = rawKeys.filter((key): key is string => typeof key === 'string' && Boolean(key));
     setFocusKeys(nextKeys);
-    updateExecutionKeys(nextKeys);
+    syncFocusedModules(nextKeys);
     focusHydratedRef.current = true;
-  }, [flowSavedData, updateExecutionKeys]);
+  }, [flowSavedData, syncFocusedModules]);
 
   useEffect(() => {
     if (!configs.length || !focusKeys.length) {
@@ -229,8 +246,19 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     if (nextKeys.length !== focusKeys.length) {
       setFocusKeys(nextKeys);
       saveConfig(flow, { focusModuleKeys: nextKeys }).catch(() => undefined);
+      syncFocusedModules(nextKeys);
     }
-  }, [configs, flow, focusKeys]);
+  }, [configs, flow, focusKeys, syncFocusedModules]);
+
+  useEffect(() => {
+    syncFocusedModules(focusKeys);
+  }, [configs, focusKeys, syncFocusedModules]);
+
+  useEffect(() => {
+    const validKeys = new Set(configs.map((item) => item.key));
+    const focusedKeys = new Set(focusKeys);
+    setBatchModuleKeys((prev) => prev.filter((key) => validKeys.has(key) && focusedKeys.has(key)));
+  }, [configs, focusKeys]);
 
   const openCreate = () => {
     setCreateValue('');
@@ -251,7 +279,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     const nextFocusKeys = Array.from(new Set([...focusKeys, result.config.key]));
     setFocusKeys(nextFocusKeys);
     saveConfig(flow, { focusModuleKeys: nextFocusKeys }).catch(() => undefined);
-    updateExecutionKeys(nextFocusKeys);
+    syncFocusedModules(nextFocusKeys);
     message.success(`已创建模块 ${result.config.moduleName}`);
     await refreshConfigs(result.config.key);
   };
@@ -290,7 +318,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
       const nextFocusKeys = focusKeys.map((key) => key === selectedConfig.key ? result.config!.key : key);
       setFocusKeys(nextFocusKeys);
       saveConfig(flow, { focusModuleKeys: nextFocusKeys }).catch(() => undefined);
-      updateExecutionKeys(nextFocusKeys);
+      syncFocusedModules(nextFocusKeys);
     }
     message.success(`已重命名为 ${result.config.moduleName}`);
     await refreshConfigs(result.config.key);
@@ -315,7 +343,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
         if (nextFocusKeys.length !== focusKeys.length) {
           setFocusKeys(nextFocusKeys);
           saveConfig(flow, { focusModuleKeys: nextFocusKeys }).catch(() => undefined);
-          updateExecutionKeys(nextFocusKeys);
+          syncFocusedModules(nextFocusKeys);
         }
         await refreshConfigs();
       },
@@ -323,7 +351,9 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   };
 
   const scopedConfigs = useMemo(() => {
-    if (focusKeys.length === 0) return [];
+    if (!focusKeys.length) {
+      return [];
+    }
     const focusSet = new Set(focusKeys);
     return configs.filter((item) => focusSet.has(item.key));
   }, [configs, focusKeys]);
@@ -355,8 +385,9 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   const updateFocusKeys = (keys: string[]) => {
     const nextKeys = Array.from(new Set(keys.filter(Boolean)));
     setFocusKeys(nextKeys);
+    setBatchModuleKeys((prev) => prev.filter((key) => nextKeys.includes(key)));
     saveConfig(flow, { focusModuleKeys: nextKeys }).catch(() => undefined);
-    updateExecutionKeys(nextKeys);
+    syncFocusedModules(nextKeys);
     if (keys.length === 0) {
       return;
     }
@@ -366,8 +397,12 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     }
   };
 
+  const updateBatchModuleKeys = (keys: string[]) => {
+    setBatchModuleKeys(Array.from(new Set(keys.filter(Boolean))));
+  };
+
   const getRunTargets = () => (
-    focusKeys
+    batchModuleKeys
   );
 
   const renderList = () => (
@@ -423,10 +458,10 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
         </Tooltip>
         {enableRun && (
           <>
-            <Tooltip title="运行所选模块">
+            <Tooltip title="运行已勾选模块">
               <Button size="small" icon={<CaretRightOutlined />} disabled={!getRunTargets().length} onClick={() => handleFullRun(getRunTargets())} />
             </Tooltip>
-            <Tooltip title="停止所选模块">
+            <Tooltip title="停止已勾选模块">
               <Button size="small" danger icon={<StopOutlined />} disabled={!getRunTargets().length} onClick={() => onStop?.(getRunTargets())} />
             </Tooltip>
           </>
@@ -440,6 +475,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
           dataSource={filteredConfigs}
           renderItem={(item) => {
             const isSelected = item.key === selectedConfig?.key;
+            const isBatchSelected = batchModuleKeys.includes(item.key);
             const dropdownItems = [
               ...(enableRun ? [
                 { key: 'run-select-tasks', icon: <PlayCircleOutlined />, label: '选择任务并运行' },
@@ -480,6 +516,17 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
                 >
                   <Space style={{ width: '100%', justifyContent: 'space-between' }}>
                     <Space size={8} style={{ minWidth: 0 }}>
+                      <span onClick={(event) => event.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center' }}>
+                        <Checkbox
+                          checked={isBatchSelected}
+                          onChange={(event) => {
+                            const nextKeys = event.target.checked
+                              ? [...batchModuleKeys, item.key]
+                              : batchModuleKeys.filter((key) => key !== item.key);
+                            updateBatchModuleKeys(nextKeys);
+                          }}
+                        />
+                      </span>
                       <FileTextOutlined style={{ color: isSelected ? accent : 'var(--vscode-descriptionForeground)', flexShrink: 0 }} />
                       <Text strong={isSelected} ellipsis={{ tooltip: item.moduleName }} style={{ minWidth: 0, fontSize: 13, color: isSelected ? selectedFg : undefined }}>
                         {item.moduleName}
@@ -492,7 +539,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
           }}
         />
       ) : (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={loading ? '正在读取模块' : '请先选择关注模块'} />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={loading ? '正在读取模块' : '暂无模块'} />
       )}
     </>
   );

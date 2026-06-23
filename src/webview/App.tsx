@@ -534,14 +534,6 @@ const App: React.FC = () => {
                     </Tag>
                   )}
                 </div>
-                <Button
-                  icon={<HomeOutlined />}
-                  onClick={() => navigateToFlow('HOME')}
-                  size="small"
-                  style={{ flex: '0 0 auto' }}
-                >
-                  返回首页
-                </Button>
               </div>
               <div
                 className="dft-shell-body"

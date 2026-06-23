@@ -107,8 +107,8 @@ const pipelineRuntimeService = new PipelineRuntimeService({
       console.error('Failed to persist pipeline execution history', error);
     });
   },
-  openTerminal: (title, command) => {
-    void openExecutionTerminal({ title, command });
+  openTerminal: (title, command, cwd) => {
+    void openExecutionTerminal({ title, command, cwd });
   },
 });
 
@@ -477,7 +477,8 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             pipelineRuntimeService.ensureRuntime(flowKey, moduleKey, flowLabel);
           } else if (msg.command === 'startPipelineRuntime') {
             const selectedTaskIds = Array.isArray(msg.selectedTaskIds) ? msg.selectedTaskIds : undefined;
-            pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel, selectedTaskIds);
+            const cwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
+            pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel, selectedTaskIds, cwd);
           } else if (msg.command === 'stopPipelineRuntime') {
             pipelineRuntimeService.stopRuntime(flowKey, moduleKey, flowLabel);
           } else if (msg.command === 'selectPipelineTask') {

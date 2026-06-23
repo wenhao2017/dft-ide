@@ -16,6 +16,7 @@ export interface FlowConfigFileInfo {
   moduleName: string;
   fileName: string;
   filePath: string;
+  workDir: string;
   updatedAt?: number;
   size?: number;
 }
@@ -178,11 +179,13 @@ export async function makeUniqueCfgModuleName(configsDir: string, base: string):
 export function toFlowConfigFileInfo(filePath: string, stat: vscode.FileStat): FlowConfigFileInfo {
   const fileName = path.basename(filePath);
   const moduleName = path.basename(fileName, '.cfg');
+  const repoRoot = path.dirname(path.dirname(filePath));
   return {
     key: moduleName,
     moduleName,
     fileName,
     filePath,
+    workDir: path.join(repoRoot, moduleName),
     updatedAt: stat.mtime,
     size: stat.size
   };
@@ -201,10 +204,6 @@ export async function readModulesFromNormalizedTable(flow: 'hibist' | 'sailor' |
     } catch {
       // The generator stays useful even when the mock table is absent or incomplete.
     }
-  }
-
-  if (modules.size === 0) {
-    modules.add('top_abc');
   }
 
   return [...modules].map(sanitizeCfgModuleName).sort((a, b) => a.localeCompare(b));

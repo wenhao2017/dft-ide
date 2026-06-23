@@ -308,6 +308,7 @@ export interface FlowConfigFileInfo {
   moduleName: string;
   fileName: string;
   filePath: string;
+  workDir: string;
   updatedAt?: number;
   size?: number;
 }
@@ -542,6 +543,7 @@ export async function startPipelineRuntime(options: {
   moduleKey: string;
   flowLabel: string;
   selectedTaskIds?: string[];
+  cwd?: string;
 }): Promise<{ success: boolean; error?: string }> {
   const res = await ipcRequest('startPipelineRuntime', options);
   return res as { success: boolean; error?: string };

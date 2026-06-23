@@ -3,66 +3,66 @@
 
 - id: gen_analysis_env
   name: gen_analysis_env
-  command: "dftm gen_analysis_env -cfg cpu_top.cfg"
+  command: "dftm gen_analysis_env"
   description: 生成 analysis 阶段分析环境
 
 - id: run_analysis
   name: run_analysis
-  command: "dftm run_analysis -cfg cpu_top.cfg"
+  command: "dftm run_analysis"
   description: 执行 design rule check 与 DFT 分析
 
 - id: gen_insert_env
   name: gen_insert_env
-  command: "dftm gen_insert_env -cfg cpu_top.cfg"
+  command: "dftm gen_insert_env"
   description: 生成 insert 阶段 MBIST 插入环境
 
 - id: run_insert
   name: run_insert
-  command: "dftm run_insert -cfg cpu_top.cfg"
+  command: "dftm run_insert"
   description: 执行 wrapper generation 与 MBIST 插入
 
 - id: gen_build_env
   name: gen_build_env
-  command: "dftm gen_build_env -cfg cpu_top.cfg"
+  command: "dftm gen_build_env"
   description: 生成 build 阶段环境
 
 - id: run_build
   name: run_build
-  command: "dftm run_build -cfg cpu_top.cfg"
+  command: "dftm run_build"
   description: 构建 post-MBIST RTL 与结构描述
 
 - id: gen_syn_env
   name: gen_syn_env
-  command: "dftm gen_syn_env -cfg cpu_top.cfg"
+  command: "dftm gen_syn_env"
   description: 生成 synthesis 综合环境
 
 - id: run_syn
   name: run_syn
-  command: "dftm run_syn -cfg cpu_top.cfg"
+  command: "dftm run_syn"
   description: 执行 top-link check 与逻辑综合
 
 - id: gen_fml_env
   name: gen_fml_env
-  command: "dftm gen_fml_env -cfg cpu_top.cfg"
+  command: "dftm gen_fml_env"
   description: 生成 Formality 验证环境
 
 - id: run_fml
   name: run_fml
-  command: "dftm run_fml -cfg cpu_top.cfg"
+  command: "dftm run_fml"
   description: 执行 Formality 形式等价性验证
 
 - id: gen_sim_env
   name: gen_sim_env
-  command: "dftm gen_sim_env -cfg cpu_top.cfg"
+  command: "dftm gen_sim_env"
   description: 生成仿真环境与 testbench
 
 - id: run_sim
   name: run_sim
-  command: "dftm run_sim -cfg cpu_top.cfg"
+  command: "dftm run_sim"
   description: 运行 MBIST 并行/串行等多类型仿真
 
 - id: release
   name: release
-  command: "dftm release -cfg cpu_top.cfg -version 0.1.0"
+  command: "dftm release -version 0.1.0"
   description: 打包交付 release 介质及报告
 

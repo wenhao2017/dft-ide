@@ -1,7 +1,6 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   Button,
-  Checkbox,
   Col,
   Empty,
   List,
@@ -19,8 +18,6 @@ import {
   ClockCircleOutlined,
   CloseCircleOutlined,
   PlayCircleOutlined,
-  ReloadOutlined,
-  StopOutlined,
   SyncOutlined,
 } from '@ant-design/icons';
 import usePipelineRuntimeStore, {
@@ -43,14 +40,13 @@ interface PipelineExecutionOverviewProps {
   flowKey: PipelineFlowKey;
   flowLabel: string;
   moduleKeys: string[];
+  moduleWorkDirs?: Record<string, string>;
   activeModuleKey?: string;
   onActiveModuleChange?: (moduleKey: string) => void;
-  onRetryStep?: (moduleKey: string, stepIndex: number) => void;
-  onRetryFailedStep?: (moduleKey: string, stepIndex: number) => void;
-  onRunSingleStep?: (moduleKey: string, stepIndex: number) => void;
 }
 
 interface PipelineRunOverview {
+  runId?: string;
   moduleKey: string;
   runState: OverviewRunState;
   total: number;
@@ -202,6 +198,7 @@ function summarizeRuntime(
   const mem = runtime?.runState === 'running' ? Number((Math.random() * 4 + 2).toFixed(1)) : 0;
 
   return {
+    runId: runtime?.runId,
     moduleKey,
     runState: runtime?.runState ?? 'idle',
     total,
@@ -256,6 +253,10 @@ function getAncestorIds(taskId: string, parentByChild: Map<string, string>): str
   return ancestors;
 }
 
+function getStepTerminalTitle(flowLabel: string, moduleKey: string, task: PipelineTask): string {
+  return `${flowLabel} / ${moduleKey} / ${task.name || task.id}`;
+}
+
 function getTrackTaskId(run: PipelineRunOverview, parentByChild: Map<string, string>): string | undefined {
   const activeTask =
     run.tasks.find((task) => task.status === 'failed') ??
@@ -302,11 +303,9 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   flowKey,
   flowLabel,
   moduleKeys,
+  moduleWorkDirs,
   activeModuleKey: externalActiveModuleKey,
   onActiveModuleChange,
-  onRetryStep,
-  onRetryFailedStep,
-  onRunSingleStep,
 }, ref) => {
   useEffect(() => {
     subscribePipelineRuntimeUpdates();
@@ -331,12 +330,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     const cleanKeys = moduleKeys.map((key) => key.trim()).filter(Boolean);
     return Array.from(new Set(cleanKeys));
   }, [moduleKeys]);
-
-  const [checkedModuleKeys, setCheckedModuleKeys] = useState<Set<string>>(() => new Set(selectedModuleKeys));
-
-  useEffect(() => {
-    setCheckedModuleKeys(new Set(selectedModuleKeys));
-  }, [selectedModuleKeys]);
 
   const getFlowLabel = useCallback((moduleKey: string) => `${flowLabel} / ${moduleKey}`, [flowLabel]);
 
@@ -395,14 +388,14 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
         return next;
       });
       ensureRuntimeVisible(moduleKey);
-      startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), selectedTaskIds);
+      startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), selectedTaskIds, moduleWorkDirs?.[moduleKey]);
     });
 
     if (runModalTargets.length === 1) {
       activateModule(runModalTargets[0]);
     }
     setRunModalOpen(false);
-  }, [runModalTargets, runModalRange, runtimes, flowKey, activeModuleData, ensureRuntimeVisible, getFlowLabel, startRuntime, activateModule]);
+  }, [runModalTargets, runModalRange, runtimes, flowKey, activeModuleData, ensureRuntimeVisible, getFlowLabel, startRuntime, activateModule, moduleWorkDirs]);
 
   const stopRun = useCallback((moduleKey: string) => {
     const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
@@ -422,69 +415,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     stopRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
   }, [ensureRuntimeVisible, flowKey, getFlowLabel, runtimes, stopRuntime]);
 
-  const handleSingleRunClick = useCallback((moduleKey: string) => {
-    const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
-    if (runtime?.runState === 'running') {
-      Modal.confirm({
-        title: '确认重新运行',
-        content: `模块 ${moduleKey} 当前正在运行，是否要结束当前运行并重新开始？`,
-        okText: '确定并重新开始',
-        cancelText: '取消',
-        okButtonProps: { danger: true },
-        onOk: () => {
-          stopRun(moduleKey);
-          setTimeout(() => {
-            prepareRun([moduleKey]);
-          }, 150);
-        },
-      });
-    } else {
-      prepareRun([moduleKey]);
-    }
-  }, [runtimes, flowKey, stopRun, prepareRun]);
-
-  const handleBatchRun = useCallback(() => {
-    const keysToRun = Array.from(checkedModuleKeys);
-    if (keysToRun.length === 0) return;
-
-    const runningKeys = keysToRun.filter((key) => {
-      const runtime = runtimes[getPipelineRuntimeKey(flowKey, key)];
-      return runtime?.runState === 'running';
-    });
-
-    const proceedRun = (keys: string[]) => {
-      prepareRun(keys);
-    };
-
-    if (runningKeys.length > 0) {
-      Modal.confirm({
-        title: '确认批量重新运行',
-        content: `模块 ${runningKeys.join(', ')} 正在运行中，是否结束运行并重新开始？`,
-        okText: '确定并重新开始',
-        cancelText: '取消',
-        okButtonProps: { danger: true },
-        onOk: () => {
-          runningKeys.forEach((key) => stopRun(key));
-          setTimeout(() => {
-            proceedRun(keysToRun);
-          }, 150);
-        },
-      });
-    } else {
-      proceedRun(keysToRun);
-    }
-  }, [checkedModuleKeys, runtimes, flowKey, stopRun, prepareRun]);
-
-  const handleBatchStop = useCallback(() => {
-    const keysToStop = Array.from(checkedModuleKeys);
-    keysToStop.forEach((key) => {
-      const runtime = runtimes[getPipelineRuntimeKey(flowKey, key)];
-      if (runtime?.runState === 'running') {
-        stopRun(key);
-      }
-    });
-  }, [checkedModuleKeys, runtimes, flowKey, stopRun]);
-
   useImperativeHandle(ref, () => ({
     handleExternalRun(keys: string[], selectedTaskIds?: string[]) {
       const cleanKeys = keys.filter(Boolean);
@@ -497,7 +427,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             return next;
           });
           ensureRuntimeVisible(moduleKey);
-          startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), selectedTaskIds);
+          startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), selectedTaskIds, moduleWorkDirs?.[moduleKey]);
         });
         if (cleanKeys.length === 1) {
           activateModule(cleanKeys[0]);
@@ -509,7 +439,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     handleExternalStop(keys: string[]) {
       keys.filter(Boolean).forEach(stopRun);
     },
-  }), [startRuntime, ensureRuntimeVisible, stopRun, flowKey, getFlowLabel, activateModule, prepareRun]);
+  }), [startRuntime, ensureRuntimeVisible, stopRun, flowKey, getFlowLabel, activateModule, prepareRun, moduleWorkDirs]);
 
 
   useEffect(() => {
@@ -558,17 +488,18 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     selectRuntimeTask(flowKey, run.moduleKey, taskId);
 
     const task = run.tasks.find((t) => t.id === taskId);
-    if (task && task.command) {
+    if (task && task.status !== 'pending' && task.status !== 'skipped') {
       void openExecutionTerminal({
-        title: `${run.moduleKey} - ${task.name || task.id}`,
+        title: getStepTerminalTitle(flowLabel, run.moduleKey, task),
         command: task.command,
+        cwd: moduleWorkDirs?.[run.moduleKey],
       });
     }
 
     window.requestAnimationFrame(() => {
       taskDetailRefs.current[taskId]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     });
-  }, [activateModule, flowKey, selectRuntimeTask]);
+  }, [activateModule, flowKey, flowLabel, moduleWorkDirs, selectRuntimeTask]);
 
   const toggleExpanded = useCallback((taskId: string) => {
     setExpandedTaskIds((prev) => {
@@ -628,14 +559,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     const color = getStatusColor(task.status);
     const latestLog = task.logs[task.logs.length - 1];
     const relationLabel = hasChildren ? '父步骤' : isChild ? '子步骤' : undefined;
-    const action = task.status === 'success'
-      ? <Tooltip title="重试该步骤"><Button size="small" type="text" icon={<ReloadOutlined style={{ color: themeStyles.accentText }} />} onClick={(e) => { e.stopPropagation(); onRetryStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id)); }} /></Tooltip>
-      : task.status === 'failed'
-        ? <Tooltip title="重试失败步骤"><Button size="small" type="text" icon={<ReloadOutlined style={{ color: themeStyles.error }} />} onClick={(e) => { e.stopPropagation(); onRetryFailedStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id)); }} /></Tooltip>
-        : !isRunning
-          ? <Tooltip title="单步运行"><Button size="small" type="text" icon={<PlayCircleOutlined style={{ color: themeStyles.success }} />} onClick={(e) => { e.stopPropagation(); onRunSingleStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id)); }} /></Tooltip>
-          : null;
-
     const isExcluded = false;
     const opacity = task.status === 'skipped' ? 0.55 : 1;
 
@@ -762,7 +685,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             <Tag style={{ margin: 0, color: isExcluded ? themeStyles.idle : color, borderColor: isExcluded ? themeStyles.borderLight : `${color}66`, background: themeStyles.metricBg, fontFamily: 'monospace', fontSize: 10, padding: '0 2px', height: 16, lineHeight: '14px' }}>
               {isExcluded ? '排除' : (statusText[task.status] ?? task.status)}
             </Tag>
-            {action}
           </div>
         </div>
         {hasChildren && expanded && (
@@ -782,9 +704,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     activeHierarchy,
     activeModuleData,
     expandedTaskIds,
-    onRetryFailedStep,
-    onRetryStep,
-    onRunSingleStep,
     selectStep,
     selectedTaskId,
     toggleExpanded,
@@ -824,43 +743,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
       />
 
       <Col span={8}>
-        {/* Batch operations toolbar */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, padding: '0 4px', gap: 8 }}>
-          <Checkbox
-            indeterminate={checkedModuleKeys.size > 0 && checkedModuleKeys.size < selectedModuleKeys.length}
-            checked={checkedModuleKeys.size === selectedModuleKeys.length && selectedModuleKeys.length > 0}
-            onChange={(e) => {
-              const next = e.target.checked ? new Set(selectedModuleKeys) : new Set<string>();
-              setCheckedModuleKeys(next);
-            }}
-            style={{ color: themeStyles.textSecondary, fontSize: 12 }}
-          >
-            全选
-          </Checkbox>
-          <Space size={4}>
-            <Button
-              type="primary"
-              size="small"
-              icon={<PlayCircleOutlined />}
-              disabled={checkedModuleKeys.size === 0}
-              onClick={handleBatchRun}
-              style={{ fontSize: 11, height: 22, padding: '0 8px' }}
-            >
-              运行已选
-            </Button>
-            <Button
-              size="small"
-              danger
-              icon={<StopOutlined />}
-              disabled={checkedModuleKeys.size === 0}
-              onClick={handleBatchStop}
-              style={{ fontSize: 11, height: 22, padding: '0 8px' }}
-            >
-              停止已选
-            </Button>
-          </Space>
-        </div>
-
         <List
           size="small"
           dataSource={visibleRuns}
@@ -897,8 +779,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                   ? themeStyles.warning
                   : themeStyles.idle;
 
-            const isChecked = checkedModuleKeys.has(run.moduleKey);
-
             return (
               <List.Item
                 onClick={() => activateModule(run.moduleKey)}
@@ -925,51 +805,25 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                     }}
                   >
                     <Space size={6} style={{ minWidth: 0 }}>
-                      <Checkbox
-                        checked={isChecked}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          setCheckedModuleKeys((prev) => {
-                            const next = new Set(prev);
-                            if (e.target.checked) {
-                              next.add(run.moduleKey);
-                            } else {
-                              next.delete(run.moduleKey);
-                            }
-                            return next;
-                          });
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                      />
                       <span style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor, flexShrink: 0 }} />
                       <span style={{ color: isSelected ? themeStyles.selectedFg : themeStyles.textPrimary, fontFamily: 'monospace', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>
                         {run.moduleKey}
                       </span>
                     </Space>
-                    <Space size={4}>
-                      {run.runState === 'running' && (
-                        <Tooltip title="停止">
-                          <Button type="text" size="small" icon={<StopOutlined style={{ color: themeStyles.error }} />} onClick={(event) => { event.stopPropagation(); stopRun(run.moduleKey); }} />
-                        </Tooltip>
-                      )}
-                      <Tooltip title={run.runState === 'running' ? "重新运行" : "运行"}>
-                        <Button type="text" size="small" icon={<PlayCircleOutlined style={{ color: themeStyles.success }} />} onClick={(event) => { event.stopPropagation(); handleSingleRunClick(run.moduleKey); }} />
-                      </Tooltip>
-                      <Tag
-                        style={{
-                          margin: 0,
-                          color: themeStyles.accentText,
-                          borderColor: themeStyles.borderLight,
-                          background: themeStyles.metricBg,
-                          fontFamily: 'monospace',
-                          fontWeight: 700,
-                          fontSize: 10,
-                          padding: '0 4px',
-                        }}
-                      >
-                        {counterText}
-                      </Tag>
-                    </Space>
+                    <Tag
+                      style={{
+                        margin: 0,
+                        color: themeStyles.accentText,
+                        borderColor: themeStyles.borderLight,
+                        background: themeStyles.metricBg,
+                        fontFamily: 'monospace',
+                        fontWeight: 700,
+                        fontSize: 10,
+                        padding: '0 4px',
+                      }}
+                    >
+                      {counterText}
+                    </Tag>
                   </div>
 
                   <div
@@ -1061,43 +915,19 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                   {activeModuleData.moduleKey}
                 </h5>
               </div>
-              <Space size={6} style={{ flexShrink: 0 }}>
-                {activeModuleData.runState === 'running' ? (
-                  <Button
-                    type="primary"
-                    danger
-                    size="small"
-                    icon={<StopOutlined />}
-                    onClick={() => stopRun(activeModuleData.moduleKey)}
-                    style={{ fontSize: 11, height: 22 }}
-                  >
-                    停止运行
-                  </Button>
-                ) : (
-                  <Button
-                    type="primary"
-                    size="small"
-                    icon={<PlayCircleOutlined />}
-                    onClick={() => handleSingleRunClick(activeModuleData.moduleKey)}
-                    style={{ fontSize: 11, height: 22 }}
-                  >
-                    开始运行
-                  </Button>
-                )}
-                <Tag
-                  style={{
-                    margin: 0,
-                    color: themeStyles.textSecondary,
-                    borderColor: themeStyles.borderLight,
-                    background: themeStyles.metricBg,
-                    fontFamily: 'monospace',
-                    height: 22,
-                    lineHeight: '20px',
-                  }}
-                >
-                  共 {activeModuleData.tasks.length} 步
-                </Tag>
-              </Space>
+              <Tag
+                style={{
+                  margin: 0,
+                  color: themeStyles.textSecondary,
+                  borderColor: themeStyles.borderLight,
+                  background: themeStyles.metricBg,
+                  fontFamily: 'monospace',
+                  height: 22,
+                  lineHeight: '20px',
+                }}
+              >
+                共 {activeModuleData.tasks.length} 步
+              </Tag>
             </div>
 
             {/* Module Metrics (CPU, MEM, Start Time, Run Time) displayed in the middle column header */}

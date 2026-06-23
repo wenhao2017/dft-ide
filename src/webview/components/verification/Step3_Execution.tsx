@@ -7,6 +7,7 @@ interface Props {
   onNext: () => void;
   onPrev: () => void;
   moduleKeys?: string[];
+  moduleWorkDirs?: Record<string, string>;
   activeModuleKey?: string;
   onModuleSelect?: (moduleKey: string) => void;
 }
@@ -19,7 +20,8 @@ export interface PipelineExecutionRef {
 const Step3Execution = forwardRef<PipelineExecutionRef, Props>(({
   onNext,
   onPrev,
-  moduleKeys = ['top_abc'],
+  moduleKeys = [],
+  moduleWorkDirs,
   activeModuleKey,
   onModuleSelect,
 }, ref) => {
@@ -41,6 +43,7 @@ const Step3Execution = forwardRef<PipelineExecutionRef, Props>(({
         flowKey="verification"
         flowLabel="Lander"
         moduleKeys={moduleKeys}
+        moduleWorkDirs={moduleWorkDirs}
         activeModuleKey={activeModuleKey}
         onActiveModuleChange={onModuleSelect}
       />

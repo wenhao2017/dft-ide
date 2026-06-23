@@ -34,6 +34,7 @@ interface Props {
   onModuleSelect?: (moduleKey: string) => void;
   category: string;
   moduleKeys: string[];
+  moduleWorkDirs?: Record<string, string>;
 }
 
 export interface PipelineExecutionRef {
@@ -63,7 +64,7 @@ const toolOptions = [
   }
 ]
 
-const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPrev, moduleKey, onModuleSelect, category, moduleKeys }, ref) => {
+const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPrev, moduleKey, onModuleSelect, category, moduleKeys, moduleWorkDirs }, ref) => {
   const flowKey = category.toLowerCase();
   const [activeTab, setActiveTab] = useState('task');
   const [taskForm] = Form.useForm();
@@ -365,6 +366,7 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
                   flowKey={repo}
                   flowLabel={flowLabel}
                   moduleKeys={moduleKeys}
+                  moduleWorkDirs={moduleWorkDirs}
                   activeModuleKey={moduleKey}
                   onActiveModuleChange={onModuleSelect}
                 />
