@@ -47,6 +47,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
           onPrev={prevStep}
           category={category}
           moduleKeys={executionModuleKeys}
+          onCheckedModuleKeysChange={setExecutionModuleKeys}
         />
       ),
     },

@@ -48,6 +48,7 @@ interface PipelineExecutionOverviewProps {
   onRetryStep?: (moduleKey: string, stepIndex: number) => void;
   onRetryFailedStep?: (moduleKey: string, stepIndex: number) => void;
   onRunSingleStep?: (moduleKey: string, stepIndex: number) => void;
+  onCheckedModuleKeysChange?: (keys: string[]) => void;
 }
 
 interface PipelineRunOverview {
@@ -307,6 +308,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   onRetryStep,
   onRetryFailedStep,
   onRunSingleStep,
+  onCheckedModuleKeysChange,
 }, ref) => {
   useEffect(() => {
     subscribePipelineRuntimeUpdates();
@@ -348,12 +350,20 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     });
   }, [flowKey, selectedModuleKeys, ensureRuntime, getFlowLabel]);
 
+  const displayedModuleKeys = useMemo(() => {
+    const keys = [...selectedModuleKeys];
+    if (activeModuleKey && !keys.includes(activeModuleKey)) {
+      keys.unshift(activeModuleKey);
+    }
+    return keys;
+  }, [selectedModuleKeys, activeModuleKey]);
+
   const visibleRuns = useMemo(() => (
-    selectedModuleKeys.map((moduleKey) => {
+    displayedModuleKeys.map((moduleKey) => {
       const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
       return summarizeRuntime(moduleKey, flowKey, runtime);
     })
-  ), [flowKey, runtimes, selectedModuleKeys]);
+  ), [flowKey, runtimes, displayedModuleKeys]);
 
   const activeModuleData = visibleRuns.find((run) => run.moduleKey === activeModuleKey);
   const activeHierarchy = activeModuleData ? getTaskHierarchy(activeModuleData) : undefined;
@@ -368,11 +378,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
 
   const activateModule = useCallback((moduleKey: string) => {
     setActiveModuleKey(moduleKey);
-    setCheckedModuleKeys((prev) => {
-      const next = new Set(prev);
-      next.add(moduleKey);
-      return next;
-    });
     onActiveModuleChange?.(moduleKey);
   }, [onActiveModuleChange]);
 
@@ -802,14 +807,12 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
         {/* Batch operations toolbar */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, padding: '0 4px', gap: 8 }}>
           <Checkbox
-            indeterminate={checkedModuleKeys.size > 0 && checkedModuleKeys.size < selectedModuleKeys.length}
-            checked={checkedModuleKeys.size === selectedModuleKeys.length}
+            indeterminate={checkedModuleKeys.size > 0 && checkedModuleKeys.size < displayedModuleKeys.length}
+            checked={checkedModuleKeys.size === displayedModuleKeys.length && displayedModuleKeys.length > 0}
             onChange={(e) => {
-              if (e.target.checked) {
-                setCheckedModuleKeys(new Set(selectedModuleKeys));
-              } else {
-                setCheckedModuleKeys(new Set());
-              }
+              const next = e.target.checked ? new Set(displayedModuleKeys) : new Set<string>();
+              setCheckedModuleKeys(next);
+              onCheckedModuleKeysChange?.(Array.from(next));
             }}
             style={{ color: themeStyles.textSecondary, fontSize: 12 }}
           >
@@ -914,6 +917,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                             } else {
                               next.delete(run.moduleKey);
                             }
+                            onCheckedModuleKeysChange?.(Array.from(next));
                             return next;
                           });
                         }}
@@ -1207,6 +1211,15 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
 
                 {/* Body Details */}
                 <div style={{ padding: 14, flex: 1, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
+                  {selectedTask.description && (
+                    <div style={{ fontSize: 12 }}>
+                      <div style={{ color: themeStyles.textMuted, fontWeight: 700, marginBottom: 4 }}>步骤描述</div>
+                      <div style={{ color: themeStyles.textPrimary, lineHeight: '1.4', fontSize: 12 }}>
+                        {selectedTask.description}
+                      </div>
+                    </div>
+                  )}
+
                   {selectedTask.command && (
                     <div style={{ fontSize: 12 }}>
                       <div style={{ color: themeStyles.textMuted, fontWeight: 700, marginBottom: 4 }}>执行命令</div>
@@ -1226,37 +1239,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                       </div>
                     </div>
                   )}
-
-                  <div
-                    style={{
-                      marginTop: 10,
-                      padding: 10,
-                      borderRadius: 6,
-                      background: 'var(--vscode-list-hoverBackground, rgba(127,127,127,0.04))',
-                      border: `1px solid ${themeStyles.borderLight}`,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 8,
-                    }}
-                  >
-                    <div style={{ fontSize: 12, color: themeStyles.textSecondary, lineHeight: '1.4' }}>
-                      该步骤的执行日志和实时输出已重定向到 VS Code 终端。点击步骤时会自动开启，若不慎关闭，可点击下方按钮重新打开终端查看：
-                    </div>
-                    <Button
-                      type="primary"
-                      size="small"
-                      icon={<PlayCircleOutlined />}
-                      onClick={() => {
-                        void openExecutionTerminal({
-                          title: `${activeModuleData.moduleKey} - ${selectedTask.name || selectedTask.id}`,
-                          command: selectedTask.command,
-                        });
-                      }}
-                      style={{ alignSelf: 'flex-start' }}
-                    >
-                      打开 VS Code 终端
-                    </Button>
-                  </div>
                 </div>
               </div>
             ) : (

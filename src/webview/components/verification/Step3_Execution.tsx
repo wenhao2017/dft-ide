@@ -9,6 +9,7 @@ interface Props {
   moduleKeys?: string[];
   activeModuleKey?: string;
   onModuleSelect?: (moduleKey: string) => void;
+  onCheckedModuleKeysChange?: (keys: string[]) => void;
 }
 
 export interface PipelineExecutionRef {
@@ -22,6 +23,7 @@ const Step3Execution = forwardRef<PipelineExecutionRef, Props>(({
   moduleKeys = ['top_abc'],
   activeModuleKey,
   onModuleSelect,
+  onCheckedModuleKeysChange,
 }, ref) => {
   const overviewRef = useRef<OverviewRef>(null);
 
@@ -43,6 +45,7 @@ const Step3Execution = forwardRef<PipelineExecutionRef, Props>(({
         moduleKeys={moduleKeys}
         activeModuleKey={activeModuleKey}
         onActiveModuleChange={onModuleSelect}
+        onCheckedModuleKeysChange={onCheckedModuleKeysChange}
       />
 
       <Divider style={{ margin: '18px 0 14px' }} />
