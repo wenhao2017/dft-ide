@@ -70,6 +70,10 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   onRun,
   onStop,
 }) => {
+  const selectedBg = `var(--vscode-list-inactiveSelectionBackground, color-mix(in srgb, ${accent} 14%, var(--vscode-editor-background, #ffffff)))`;
+  const selectedFg = 'var(--vscode-list-inactiveSelectionForeground, var(--vscode-editor-foreground, var(--vscode-foreground)))';
+  const selectedBorder = `color-mix(in srgb, ${accent} 68%, var(--vscode-panel-border, rgba(127,127,127,0.26)))`;
+  const selectedShadow = `0 0 0 1px color-mix(in srgb, ${accent} 24%, transparent), 0 4px 12px rgba(0,0,0,0.08)`;
   const { savedData: flowSavedData } = useFlowConfig(flow);
   const focusHydratedRef = useRef(false);
   const executionHydratedRef = useRef(false);
@@ -490,8 +494,11 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
                   onClick={() => selectModule(item.key)}
                   style={{
                     cursor: 'pointer',
-                    background: isSelected ? 'var(--vscode-list-activeSelectionBackground, rgba(127,127,127,0.11))' : undefined,
+                    background: isSelected ? selectedBg : undefined,
+                    border: isSelected ? `1px solid ${selectedBorder}` : '1px solid transparent',
                     borderLeft: isSelected ? `3px solid ${accent}` : '3px solid transparent',
+                    borderRadius: 6,
+                    boxShadow: isSelected ? selectedShadow : 'none',
                     padding: '6px 12px 6px 9px',
                     transition: 'all 0.15s ease',
                   }}
@@ -507,7 +514,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
                         </span>
                       )}
                       <FileTextOutlined style={{ color: isSelected ? accent : 'var(--vscode-descriptionForeground)', flexShrink: 0 }} />
-                      <Text strong={isSelected} ellipsis={{ tooltip: item.moduleName }} style={{ minWidth: 0, fontSize: 13 }}>
+                      <Text strong={isSelected} ellipsis={{ tooltip: item.moduleName }} style={{ minWidth: 0, fontSize: 13, color: isSelected ? selectedFg : undefined }}>
                         {item.moduleName}
                       </Text>
                     </Space>
