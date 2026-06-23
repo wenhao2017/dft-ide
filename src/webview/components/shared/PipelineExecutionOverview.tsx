@@ -324,7 +324,9 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(() => new Set());
   const [peakMetrics, setPeakMetrics] = useState<Record<string, { maxCpu: number; maxMem: number }>>({});
   const [stoppedTaskSnapshots, setStoppedTaskSnapshots] = useState<Record<string, { taskIndex: number; taskName: string }>>({});
-  const [stepRange, setStepRange] = useState<[number, number]>([0, 0]);
+  const [runModalOpen, setRunModalOpen] = useState(false);
+  const [runModalTargets, setRunModalTargets] = useState<string[]>([]);
+  const [runModalRange, setRunModalRange] = useState<[number, number]>([0, 0]);
   const taskDetailRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const selectedModuleKeys = useMemo(() => {
@@ -369,33 +371,49 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   const activeHierarchy = activeModuleData ? getTaskHierarchy(activeModuleData) : undefined;
   const selectedTask = activeModuleData?.tasks.find((task) => task.id === selectedTaskId);
 
-  const taskCount = activeModuleData?.tasks.length || 0;
-  useEffect(() => {
-    if (taskCount > 0) {
-      setStepRange([0, taskCount - 1]);
-    }
-  }, [taskCount]);
+
 
   const activateModule = useCallback((moduleKey: string) => {
     setActiveModuleKey(moduleKey);
     onActiveModuleChange?.(moduleKey);
   }, [onActiveModuleChange]);
 
-  const startRun = useCallback((moduleKey: string) => {
-    setPeakMetrics((prev) => ({ ...prev, [moduleKey]: { maxCpu: 0, maxMem: 0 } }));
-    setStoppedTaskSnapshots((prev) => {
-      const next = { ...prev };
-      delete next[moduleKey];
-      return next;
-    });
-    ensureRuntimeVisible(moduleKey);
+  const prepareRun = useCallback((targets: string[]) => {
+    setRunModalTargets(targets);
+    const targetKey = targets[0];
+    const runtime = runtimes[getPipelineRuntimeKey(flowKey, targetKey)] || activeModuleData;
+    const tasks = runtime?.tasks || [];
+    if (tasks.length > 0) {
+      setRunModalRange([0, tasks.length - 1]);
+    } else {
+      setRunModalRange([0, 0]);
+    }
+    setRunModalOpen(true);
+  }, [activeModuleData, flowKey, runtimes]);
 
-    const targetTasks = activeModuleData?.tasks.slice(stepRange[0], stepRange[1] + 1) || [];
+  const confirmRunModal = useCallback(() => {
+    const targetKey = runModalTargets[0];
+    const runtime = runtimes[getPipelineRuntimeKey(flowKey, targetKey)] || activeModuleData;
+    const tasks = runtime?.tasks || [];
+    const targetTasks = tasks.slice(runModalRange[0], runModalRange[1] + 1);
     const selectedTaskIds = targetTasks.length > 0 ? targetTasks.map((t) => t.id) : undefined;
 
-    startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), selectedTaskIds);
-    activateModule(moduleKey);
-  }, [activateModule, ensureRuntimeVisible, flowKey, getFlowLabel, startRuntime, activeModuleData, stepRange]);
+    runModalTargets.forEach((moduleKey) => {
+      setPeakMetrics((prev) => ({ ...prev, [moduleKey]: { maxCpu: 0, maxMem: 0 } }));
+      setStoppedTaskSnapshots((prev) => {
+        const next = { ...prev };
+        delete next[moduleKey];
+        return next;
+      });
+      ensureRuntimeVisible(moduleKey);
+      startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), selectedTaskIds);
+    });
+
+    if (runModalTargets.length === 1) {
+      activateModule(runModalTargets[0]);
+    }
+    setRunModalOpen(false);
+  }, [runModalTargets, runModalRange, runtimes, flowKey, activeModuleData, ensureRuntimeVisible, getFlowLabel, startRuntime, activateModule]);
 
   const stopRun = useCallback((moduleKey: string) => {
     const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
@@ -427,14 +445,14 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
         onOk: () => {
           stopRun(moduleKey);
           setTimeout(() => {
-            startRun(moduleKey);
+            prepareRun([moduleKey]);
           }, 150);
         },
       });
     } else {
-      startRun(moduleKey);
+      prepareRun([moduleKey]);
     }
-  }, [runtimes, flowKey, startRun, stopRun]);
+  }, [runtimes, flowKey, stopRun, prepareRun]);
 
   const handleBatchRun = useCallback(() => {
     const keysToRun = Array.from(checkedModuleKeys);
@@ -446,9 +464,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     });
 
     const proceedRun = (keys: string[]) => {
-      keys.forEach((key) => {
-        startRun(key);
-      });
+      prepareRun(keys);
     };
 
     if (runningKeys.length > 0) {
@@ -468,7 +484,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     } else {
       proceedRun(keysToRun);
     }
-  }, [checkedModuleKeys, runtimes, flowKey, startRun, stopRun]);
+  }, [checkedModuleKeys, runtimes, flowKey, stopRun, prepareRun]);
 
   const handleBatchStop = useCallback(() => {
     const keysToStop = Array.from(checkedModuleKeys);
@@ -481,13 +497,30 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   }, [checkedModuleKeys, runtimes, flowKey, stopRun]);
 
   useImperativeHandle(ref, () => ({
-    handleExternalRun(keys: string[]) {
-      keys.filter(Boolean).forEach(startRun);
+    handleExternalRun(keys: string[], selectedTaskIds?: string[]) {
+      const cleanKeys = keys.filter(Boolean);
+      if (selectedTaskIds && selectedTaskIds.length > 0) {
+        cleanKeys.forEach((moduleKey) => {
+          setPeakMetrics((prev) => ({ ...prev, [moduleKey]: { maxCpu: 0, maxMem: 0 } }));
+          setStoppedTaskSnapshots((prev) => {
+            const next = { ...prev };
+            delete next[moduleKey];
+            return next;
+          });
+          ensureRuntimeVisible(moduleKey);
+          startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), selectedTaskIds);
+        });
+        if (cleanKeys.length === 1) {
+          activateModule(cleanKeys[0]);
+        }
+      } else {
+        prepareRun(cleanKeys);
+      }
     },
     handleExternalStop(keys: string[]) {
       keys.filter(Boolean).forEach(stopRun);
     },
-  }), [startRun, stopRun]);
+  }), [startRuntime, ensureRuntimeVisible, stopRun, flowKey, getFlowLabel, activateModule, prepareRun]);
 
 
   useEffect(() => {
@@ -614,9 +647,8 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
           ? <Tooltip title="单步运行"><Button size="small" type="text" icon={<PlayCircleOutlined style={{ color: themeStyles.success }} />} onClick={(e) => { e.stopPropagation(); onRunSingleStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id)); }} /></Tooltip>
           : null;
 
-    const taskIndex = activeModuleData.tasks.findIndex((item) => item.id === task.id);
-    const isExcluded = activeModuleData.runState === 'idle' && taskIndex !== -1 && (taskIndex < stepRange[0] || taskIndex > stepRange[1]);
-    const opacity = (isExcluded || task.status === 'skipped') ? 0.55 : 1;
+    const isExcluded = false;
+    const opacity = task.status === 'skipped' ? 0.55 : 1;
 
     return (
       <div
@@ -705,20 +737,20 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
               <span style={{ width: 16, flex: '0 0 16px' }} />
             )}
             {task.status === 'success' ? (
-              <CheckCircleOutlined style={{ color, fontSize: 13 }} />
+              <CheckCircleOutlined style={{ color, fontSize: 15 }} />
             ) : task.status === 'running' ? (
-              <SyncOutlined spin style={{ color, fontSize: 13 }} />
+              <SyncOutlined spin style={{ color, fontSize: 15 }} />
             ) : task.status === 'failed' || task.status === 'stopped' ? (
-              <CloseCircleOutlined style={{ color, fontSize: 13 }} />
+              <CloseCircleOutlined style={{ color, fontSize: 15 }} />
             ) : (
-              <ClockCircleOutlined style={{ color: isExcluded ? themeStyles.idle : color, fontSize: 13 }} />
+              <ClockCircleOutlined style={{ color: isExcluded ? themeStyles.idle : color, fontSize: 15 }} />
             )}
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-              <span style={{ color: isSelected ? themeStyles.selectedFg : themeStyles.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace', fontWeight: isSelected ? 700 : 500, fontSize: 12 }}>
+              <span style={{ color: isSelected ? themeStyles.selectedFg : themeStyles.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace', fontWeight: isSelected ? 700 : 500, fontSize: 13 }}>
                 {task.name || task.id}
               </span>
               {(task.status === 'running' || task.status === 'success' || task.status === 'failed') && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 8px', fontSize: 10, color: isSelected ? themeStyles.selectedFg : themeStyles.textSecondary, marginTop: 2, opacity: 0.85, fontFamily: 'monospace' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 8px', fontSize: 11, color: isSelected ? themeStyles.selectedFg : themeStyles.textSecondary, marginTop: 2, opacity: 0.85, fontFamily: 'monospace' }}>
                   <span>CPU: {getTaskMetrics(task).cpu}</span>
                   <span>MEM: {getTaskMetrics(task).mem}</span>
                   {task.startedAt && <span>开始: {task.startedAt}</span>}
@@ -729,16 +761,16 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
             {relationLabel && (
-              <Tag style={{ margin: 0, color: themeStyles.textSecondary, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontFamily: 'monospace', fontSize: 9, padding: '0 2px', height: 16, lineHeight: '14px' }}>
+              <Tag style={{ margin: 0, color: themeStyles.textSecondary, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontFamily: 'monospace', fontSize: 10, padding: '0 2px', height: 16, lineHeight: '14px' }}>
                 {relationLabel}
               </Tag>
             )}
             {hasChildren && (
-              <Tag style={{ margin: 0, color: themeStyles.textSecondary, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontFamily: 'monospace', fontSize: 9, padding: '0 2px', height: 16, lineHeight: '14px' }}>
+              <Tag style={{ margin: 0, color: themeStyles.textSecondary, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontFamily: 'monospace', fontSize: 10, padding: '0 2px', height: 16, lineHeight: '14px' }}>
                 {children.length}子项
               </Tag>
             )}
-            <Tag style={{ margin: 0, color: isExcluded ? themeStyles.idle : color, borderColor: isExcluded ? themeStyles.borderLight : `${color}66`, background: themeStyles.metricBg, fontFamily: 'monospace', fontSize: 9, padding: '0 2px', height: 16, lineHeight: '14px' }}>
+            <Tag style={{ margin: 0, color: isExcluded ? themeStyles.idle : color, borderColor: isExcluded ? themeStyles.borderLight : `${color}66`, background: themeStyles.metricBg, fontFamily: 'monospace', fontSize: 10, padding: '0 2px', height: 16, lineHeight: '14px' }}>
               {isExcluded ? '排除' : (statusText[task.status] ?? task.status)}
             </Tag>
             {action}
@@ -1040,7 +1072,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <div style={{ minWidth: 0, flex: 1, marginRight: 8 }}>
                 <div style={{ fontSize: 10, color: themeStyles.textMuted, fontWeight: 800, letterSpacing: 2 }}>模块流水线</div>
-                <h5 style={{ margin: '2px 0 0', color: themeStyles.accentText, fontWeight: 700, fontSize: 15, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <h5 style={{ margin: '2px 0 0', color: themeStyles.accentText, fontWeight: 700, fontSize: 16, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {activeModuleData.moduleKey}
                 </h5>
               </div>
@@ -1084,59 +1116,12 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             </div>
 
             {/* Module Metrics (CPU, MEM, Start Time, Run Time) displayed in the middle column header */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', background: 'var(--vscode-list-hoverBackground, rgba(127,127,127,0.04))', padding: '6px 10px', borderRadius: 6, border: `1px solid ${themeStyles.borderLight}`, fontSize: 11, marginBottom: 10 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', background: 'var(--vscode-list-hoverBackground, rgba(127,127,127,0.04))', padding: '6px 10px', borderRadius: 6, border: `1px solid ${themeStyles.borderLight}`, fontSize: 12, marginBottom: 10 }}>
               <div><span style={{ color: themeStyles.textSecondary }}>CPU:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{(peakMetrics[activeModuleData.moduleKey]?.maxCpu || activeModuleData.cpu)}%</span></div>
               <div><span style={{ color: themeStyles.textSecondary }}>内存:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{(peakMetrics[activeModuleData.moduleKey]?.maxMem || activeModuleData.mem).toFixed(1)}GB</span></div>
               <div><span style={{ color: themeStyles.textSecondary }}>开始:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{formatStartTime(activeModuleData.startedAt)}</span></div>
               <div><span style={{ color: themeStyles.textSecondary }}>用时:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{getModuleRuntime(activeModuleData)}</span></div>
             </div>
-
-            {/* Step Selection Range Slider */}
-            {activeModuleData.tasks.length > 1 && (
-              <div
-                style={{
-                  background: 'var(--vscode-list-hoverBackground, rgba(127,127,127,0.02))',
-                  padding: '6px 10px 10px',
-                  borderRadius: 6,
-                  border: `1px solid ${themeStyles.borderLight}`,
-                  marginBottom: 10,
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <span style={{ fontSize: 11, color: themeStyles.textSecondary, fontWeight: 700 }}>
-                    运行步骤范围选择 {activeModuleData.runState === 'running' && <span style={{ color: themeStyles.amber, fontWeight: 500 }}>(运行中不可修改)</span>}:
-                  </span>
-                  <span style={{ fontSize: 11, color: themeStyles.accentText, fontWeight: 700, fontFamily: 'monospace' }}>
-                    {activeModuleData.tasks[stepRange[0]]?.name} ➔ {activeModuleData.tasks[stepRange[1]]?.name}
-                  </span>
-                </div>
-                <Slider
-                  range
-                  disabled={activeModuleData.runState === 'running'}
-                  min={0}
-                  max={activeModuleData.tasks.length - 1}
-                  value={stepRange}
-                  onChange={(val) => setStepRange(val as [number, number])}
-                  tooltip={{
-                    formatter: (val) => {
-                      if (val === undefined) return '';
-                      const task = activeModuleData.tasks[val];
-                      return task ? `${val + 1}. ${task.name}` : '';
-                    }
-                  }}
-                  styles={{
-                    track: {
-                      background: themeStyles.accent,
-                    },
-                    handle: {
-                      borderColor: themeStyles.accent,
-                      backgroundColor: 'var(--vscode-editor-background)',
-                    }
-                  }}
-                  style={{ margin: '8px 6px 4px' }}
-                />
-              </div>
-            )}
 
             <div style={{ display: 'grid', gap: 5, flex: 1, overflowY: 'auto', maxHeight: 340, paddingRight: 4 }}>
               {(activeHierarchy?.topLevelTasks ?? activeModuleData.tasks).map((task) => renderTaskDetail(task))}
@@ -1173,9 +1158,9 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                 {/* Header */}
                 <div style={{ padding: '12px 14px', borderBottom: `1px solid ${themeStyles.borderLight}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 10, color: themeStyles.textMuted, fontWeight: 800, letterSpacing: 2 }}>步骤详情</div>
+                    <div style={{ fontSize: 11, color: themeStyles.textMuted, fontWeight: 800, letterSpacing: 2 }}>步骤详情</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                      <span style={{ color: themeStyles.accentText, fontFamily: 'monospace', fontSize: 15, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ color: themeStyles.accentText, fontFamily: 'monospace', fontSize: 16, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {selectedTask.name || selectedTask.id}
                       </span>
                     </div>
@@ -1189,6 +1174,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                         background: themeStyles.metricBg,
                         fontFamily: 'monospace',
                         fontWeight: 600,
+                        fontSize: 11,
                       }}
                     >
                       {statusText[selectedTask.status] ?? selectedTask.status}
@@ -1212,17 +1198,17 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                 {/* Body Details */}
                 <div style={{ padding: 14, flex: 1, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
                   {selectedTask.description && (
-                    <div style={{ fontSize: 12 }}>
-                      <div style={{ color: themeStyles.textMuted, fontWeight: 700, marginBottom: 4 }}>步骤描述</div>
-                      <div style={{ color: themeStyles.textPrimary, lineHeight: '1.4', fontSize: 12 }}>
+                    <div style={{ fontSize: 13 }}>
+                      <div style={{ color: themeStyles.textMuted, fontWeight: 700, marginBottom: 4, fontSize: 13 }}>步骤描述</div>
+                      <div style={{ color: themeStyles.textPrimary, lineHeight: '1.4', fontSize: 13 }}>
                         {selectedTask.description}
                       </div>
                     </div>
                   )}
 
                   {selectedTask.command && (
-                    <div style={{ fontSize: 12 }}>
-                      <div style={{ color: themeStyles.textMuted, fontWeight: 700, marginBottom: 4 }}>执行命令</div>
+                    <div style={{ fontSize: 13 }}>
+                      <div style={{ color: themeStyles.textMuted, fontWeight: 700, marginBottom: 4, fontSize: 13 }}>执行命令</div>
                       <div
                         style={{
                           background: 'var(--vscode-textCodeBlock-background, rgba(0,0,0,0.2))',
@@ -1233,6 +1219,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                           color: themeStyles.accentText,
                           whiteSpace: 'pre-wrap',
                           wordBreak: 'break-all',
+                          fontSize: 13,
                         }}
                       >
                         {selectedTask.command}
@@ -1259,6 +1246,79 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
           </div>
         )}
       </Col>
+
+      {/* Run Confirmation and Step Range Selection Modal */}
+      <Modal
+        open={runModalOpen}
+        title={
+          <Space>
+            <PlayCircleOutlined style={{ color: themeStyles.accent }} />
+            <span>启动流水线 (选择步骤范围)</span>
+          </Space>
+        }
+        okText="运行"
+        cancelText="取消"
+        onOk={confirmRunModal}
+        onCancel={() => setRunModalOpen(false)}
+      >
+        <Space direction="vertical" size={14} style={{ width: '100%' }}>
+          <div>
+            <span style={{ color: themeStyles.textSecondary, fontSize: 12 }}>目标模块：</span>
+            <strong style={{ color: themeStyles.textPrimary, fontSize: 13, fontFamily: 'monospace' }}>
+              {runModalTargets.join(', ')}
+            </strong>
+          </div>
+          {(() => {
+            const targetKey = runModalTargets[0];
+            const runtime = runtimes[getPipelineRuntimeKey(flowKey, targetKey)] || activeModuleData;
+            const tasks = runtime?.tasks || [];
+            if (tasks.length > 1) {
+              return (
+                <div
+                  style={{
+                    padding: '12px 16px',
+                    background: 'var(--vscode-sideBar-background, rgba(0,0,0,0.02))',
+                    border: `1px solid ${themeStyles.border}`,
+                    borderRadius: 6,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, color: themeStyles.textSecondary }}>执行步骤范围:</span>
+                    <span style={{ fontSize: 12, color: themeStyles.accentText, fontWeight: 700, fontFamily: 'monospace' }}>
+                      {tasks[runModalRange[0]]?.name} ➔ {tasks[runModalRange[1]]?.name}
+                    </span>
+                  </div>
+                  <Slider
+                    range
+                    min={0}
+                    max={tasks.length - 1}
+                    value={runModalRange}
+                    onChange={(val) => setRunModalRange(val as [number, number])}
+                    tooltip={{
+                      formatter: (val) => {
+                        if (val === undefined) return '';
+                        const task = tasks[val];
+                        return task ? `${val + 1}. ${task.name}` : '';
+                      }
+                    }}
+                    styles={{
+                      track: {
+                        background: themeStyles.accent,
+                      },
+                      handle: {
+                        borderColor: themeStyles.accent,
+                        backgroundColor: 'var(--vscode-editor-background)',
+                      }
+                    }}
+                    style={{ margin: '8px 6px 4px' }}
+                  />
+                </div>
+              );
+            }
+            return null;
+          })()}
+        </Space>
+      </Modal>
     </Row>
   );
 });

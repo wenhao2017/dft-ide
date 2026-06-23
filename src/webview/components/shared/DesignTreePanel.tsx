@@ -9,6 +9,7 @@ import {
   List,
   Modal,
   Select,
+  Slider,
   Space,
   Tooltip,
   Typography,
@@ -40,6 +41,7 @@ import {
   saveConfig,
 } from '../../utils/ipc';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
+import usePipelineRuntimeStore from '../../store/pipelineRuntimeStore';
 
 const { Text, Title } = Typography;
 
@@ -56,7 +58,7 @@ interface DesignTreePanelProps {
   onStop?: (keys: string[]) => void;
 }
 
-const defaultTasks = ['加载数据', '检查环境', '规则校验', '核心流程', '生成快照'];
+
 
 const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   accent,
@@ -90,10 +92,43 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   const [createValue, setCreateValue] = useState('');
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [runTargetKeys, setRunTargetKeys] = useState<string[]>([]);
-  const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
+  const [modalStepRange, setModalStepRange] = useState<[number, number]>([0, 0]);
 
   const selectedConfig = configs.find((item) => item.key === selectedKey) ?? configs[0];
   const executionKeys = executionSelectedKeys ?? [];
+
+  const runtimes = usePipelineRuntimeStore((state) => state.runtimes);
+  const flowRuntimes = Object.values(runtimes).filter((r) => r.flowKey === flow);
+  const flowTasks = flowRuntimes.find((r) => r.tasks && r.tasks.length > 0)?.tasks || [];
+
+  const DEFAULT_FLOW_STEPS: Record<'hibist' | 'sailor' | 'verification', string[]> = useMemo(() => ({
+    hibist: [
+      'gen_analysis_env', 'run_analysis', 'gen_insert_env', 'run_insert',
+      'gen_build_env', 'run_build', 'gen_syn_env', 'run_syn',
+      'gen_fml_env', 'run_fml', 'gen_sim_env', 'run_sim', 'release'
+    ],
+    sailor: [
+      'create_branch', 'gen_cfg', 'user_hook_before_gen_dcg_env', 'gen_dcg_env',
+      'user_hook_after_gen_cfg', 'run_scan', 'gen_analysis_env', 'run_analysis', 'commit_result'
+    ],
+    verification: [
+      'prepare_workspace', 'load_config', 'check_env', 'submit_mode',
+      'collect_result', 'parse_report', 'publish_dashboard'
+    ]
+  }), []);
+
+  const stepList = useMemo(() => {
+    if (flowTasks.length > 0) {
+      return flowTasks.map((t) => ({ id: t.id, name: t.name, description: t.description }));
+    }
+    return (DEFAULT_FLOW_STEPS[flow] || []).map((id) => ({ id, name: id, description: '' }));
+  }, [flowTasks, flow, DEFAULT_FLOW_STEPS]);
+
+  useEffect(() => {
+    if (taskModalOpen && stepList.length > 0) {
+      setModalStepRange([0, stepList.length - 1]);
+    }
+  }, [taskModalOpen, stepList.length]);
 
   const selectModule = useCallback((key: string) => {
     onSelect(key);
@@ -131,17 +166,17 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
       return;
     }
     setRunTargetKeys(keys);
-    setSelectedTasks([...defaultTasks]);
     setTaskModalOpen(true);
   }, [onRun]);
 
   const confirmSelectRun = () => {
-    if (!selectedTasks.length) {
-      message.warning('请至少选择一个任务');
+    if (stepList.length === 0) {
+      message.error('未加载到流水线步骤');
       return;
     }
-    onRun?.(runTargetKeys, selectedTasks);
-    message.success('已启动所选任务');
+    const selectedTaskIds = stepList.slice(modalStepRange[0], modalStepRange[1] + 1).map((t) => t.id);
+    onRun?.(runTargetKeys, selectedTaskIds);
+    message.success('已启动所选步骤');
     setTaskModalOpen(false);
   };
 
@@ -690,47 +725,64 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
 
       <Modal
         open={taskModalOpen}
-        title={<Space><PlayCircleOutlined style={{ color: accent }} /><span>选择运行任务</span></Space>}
+        title={<Space><PlayCircleOutlined style={{ color: accent }} /><span>选择运行步骤范围</span></Space>}
         okText="运行"
         cancelText="取消"
         onOk={confirmSelectRun}
         onCancel={() => setTaskModalOpen(false)}
       >
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-            <Text type="secondary" ellipsis={{ tooltip: runTargetKeys.join(', ') }}>
-              目标模块：<Text strong>{runTargetKeys.join(', ')}</Text>
-            </Text>
-            <Checkbox
-              indeterminate={selectedTasks.length > 0 && selectedTasks.length < defaultTasks.length}
-              checked={selectedTasks.length === defaultTasks.length}
-              onChange={(event) => setSelectedTasks(event.target.checked ? [...defaultTasks] : [])}
-            >
-              全选
-            </Checkbox>
-          </Space>
-          <div
-            style={{
-              padding: 12,
-              background: 'var(--vscode-sideBar-background, rgba(0,0,0,0.02))',
-              border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.15))',
-              borderRadius: 6,
-              maxHeight: 260,
-              overflowY: 'auto',
-            }}
-          >
-            <Checkbox.Group
-              style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}
-              value={selectedTasks}
-              onChange={(checkedValues) => setSelectedTasks(checkedValues as string[])}
-            >
-              {defaultTasks.map((taskName) => (
-                <Checkbox key={taskName} value={taskName} style={{ fontFamily: 'monospace', fontSize: 13 }}>
-                  {taskName}
-                </Checkbox>
-              ))}
-            </Checkbox.Group>
+        <Space direction="vertical" size={14} style={{ width: '100%' }}>
+          <div>
+            <span style={{ color: 'var(--vscode-descriptionForeground)', fontSize: 12 }}>目标模块：</span>
+            <strong style={{ color: 'var(--vscode-editor-foreground, var(--vscode-foreground))', fontSize: 13, fontFamily: 'monospace' }}>
+              {runTargetKeys.join(', ')}
+            </strong>
           </div>
+          {stepList.length > 1 ? (
+            <div
+              style={{
+                padding: '12px 16px',
+                background: 'var(--vscode-sideBar-background, rgba(0,0,0,0.02))',
+                border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.15))',
+                borderRadius: 6,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 12, color: 'var(--vscode-descriptionForeground)' }}>执行范围:</span>
+                <span style={{ fontSize: 12, color: accent, fontWeight: 700, fontFamily: 'monospace' }}>
+                  {stepList[modalStepRange[0]]?.name} ➔ {stepList[modalStepRange[1]]?.name}
+                </span>
+              </div>
+              <Slider
+                range
+                min={0}
+                max={stepList.length - 1}
+                value={modalStepRange}
+                onChange={(val) => setModalStepRange(val as [number, number])}
+                tooltip={{
+                  formatter: (val) => {
+                    if (val === undefined) return '';
+                    const step = stepList[val];
+                    return step ? `${val + 1}. ${step.name}${step.description ? ` (${step.description})` : ''}` : '';
+                  }
+                }}
+                styles={{
+                  track: {
+                    background: accent,
+                  },
+                  handle: {
+                    borderColor: accent,
+                    backgroundColor: 'var(--vscode-editor-background)',
+                  }
+                }}
+                style={{ margin: '8px 6px 4px' }}
+              />
+            </div>
+          ) : (
+            <div style={{ padding: 12, textAlign: 'center', color: 'var(--vscode-disabledForeground)' }}>
+              加载流水线步骤中...
+            </div>
+          )}
         </Space>
       </Modal>
     </div>
