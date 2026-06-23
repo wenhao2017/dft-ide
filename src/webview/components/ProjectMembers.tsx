@@ -14,6 +14,8 @@ import {
   Tooltip,
   Typography,
   message,
+  Dropdown,
+  Avatar,
 } from 'antd';
 import {
   DeleteOutlined,
@@ -21,6 +23,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
   TeamOutlined,
+  GitlabOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -37,6 +40,7 @@ import {
   updateProjectMember,
 } from '../services/projectService';
 import dayjs from 'dayjs';
+import {openExternalUrl} from '../utils/ipc';
 
 const { Text, Title } = Typography;
 
@@ -221,6 +225,17 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
     }
   };
 
+  const openGitlabMemberPage = async (webUrl: string | undefined) => {
+    if (webUrl) {
+      const result = await openExternalUrl(`${webUrl}/-/project_members`);
+      if (!result.success) {
+        message.error(result.error ?? '无法打开浏览器, 请检查系统默认设置');
+      }
+    } else {
+      message.error('Gitlab 成员管理页面地址为空');
+    }
+  }
+
   const columns = useMemo<ColumnsType<ProjectMember>>(() => [
     {
       title: '工号',
@@ -310,6 +325,20 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
       }
       extra={
         <Space wrap>
+          <Dropdown
+            menu={{
+              items: project.repos?.map(repo => ({
+                label: repo.key,
+                key: repo.key,
+                onClick: () => openGitlabMemberPage(repo.web_url)
+              })) || []
+            }}
+            disabled={!canManage}
+          >
+            <Tooltip title="打开 Gitlab 成员管理页面">
+              <Button icon={<GitlabOutlined />} />
+            </Tooltip>
+          </Dropdown>
           <Button icon={<ReloadOutlined />} onClick={loadMembers} loading={loading}>
             刷新
           </Button>
@@ -386,7 +415,25 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
               mode="tags"
               disabled={Boolean(editingMember)}
               placeholder="Search or Input "
-              options={users.map(user => ({ label: user.username, value: user.username }))}
+              options={users.map(user => ({
+                label: (
+                  <>
+                    <Avatar
+                      size="small"
+                      src={user.avatar_url}
+                      style={{
+                        width: 20,
+                        height: 20,
+                        marginRight: 8
+                      }}
+                    >
+                      {user.name.charAt(0)}
+                    </Avatar>
+                    {user.name}
+                  </>
+                ),
+                value: user.username
+              }))}
               onChange={handleChange}
             />
           </Form.Item>

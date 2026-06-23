@@ -475,7 +475,7 @@ const App: React.FC = () => {
         {/* 主内容区域 */}
         <Content
           style={{
-            maxWidth: 1180,
+            // maxWidth: 1180,
             margin: '0 auto',
             width: '100%',
             padding: '12px',

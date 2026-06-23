@@ -592,6 +592,13 @@ export async function openGitlabHost(
   return res as { success: boolean; error?: string };
 }
 
+export async function openExternalUrl(
+  externalUrl: string
+): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('openExternalUrl', { externalUrl });
+  return res as { success: boolean; error?: string };
+}
+
 export async function getBranches(
   repo: RepoKey
 ): Promise<{ success: boolean; error?: string; branches?: any }> {

@@ -3,6 +3,8 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { submitJob, queryJobStatus, getDonauResources } from './services/donauService';
 import { gitService } from './services/gitService';
 import { obsService } from './services/obsService';
@@ -89,6 +91,8 @@ import {
   openObsReadonlyDocument,
   cleanupObsReadonlyDocument,
 } from './services/obsPreviewService';
+
+const execFileAsync = promisify(execFile);
 
 let currentPanel: vscode.WebviewPanel | undefined = undefined;
 let activeCategory: string | undefined = undefined;
@@ -1619,6 +1623,64 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         } catch (err) {
           currentPanel?.webview.postMessage({
             command: 'openGitlabHostResponse',
+            requestId,
+            success: false,
+            error: String(err),
+          });
+        }
+        return;
+      }
+
+      case 'openExternalUrl': {
+        const requestId: string = msg.requestId;
+        const externalUrl = typeof msg.externalUrl === 'string' ? msg.externalUrl.trim() : '';
+        const openUrl = async (url: string): Promise<boolean> => {
+          const platform = process.platform;
+          const urlToOpen = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+
+          try {
+            switch (platform) {
+              case 'win32':
+                await execFileAsync('cmd', ['/c', 'start', '', urlToOpen]);
+                return true;
+              case 'darwin':
+                await execFileAsync('open', [urlToOpen]);
+                return true;
+              default:
+                try {
+                  await execFileAsync('xdg-open', [urlToOpen]);
+                  return true;
+                } catch {
+                  const browsers = ['chromium', 'chrome', 'google-chrome', 'firefox', 'brave', 'epiphany', 'vivaldi'];
+                  for (const browser of browsers) {
+                    try {
+                      await execFileAsync(browser, [urlToOpen]);
+                      return true;
+                    } catch {
+                      // Try the next browser candidate.
+                    }
+                  }
+                  return false;
+                }
+            }
+          } catch {
+            return false;
+          }
+        };
+
+        try {
+          if (!externalUrl) {
+            throw new Error('External URL is required.');
+          }
+          const success = await openUrl(externalUrl);
+          currentPanel?.webview.postMessage({
+            command: 'openExternalUrlResponse',
+            requestId,
+            success,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'openExternalUrlResponse',
             requestId,
             success: false,
             error: String(err),

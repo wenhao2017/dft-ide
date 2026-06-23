@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import Step1CommonConfig from '../components/design/Step1_CommonConfig';
-import Step2ToolConfig from '../components/design/Step2_ToolConfig';
+import Step2ToolConfig, { PipelineExecutionRef } from '../components/design/Step2_ToolConfig';
 import Step3Execution from '../components/design/Step3_Execution';
 import Step4Result from '../components/design/Step4_Result';
 import Step5Cloud from '../components/design/Step5_Cloud';
@@ -17,8 +17,17 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedModule, setSelectedModule] = useState('');
   const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>([]);
+  const executionRef = useRef<PipelineExecutionRef>(null);
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
+
+  const handleTreeRun = (keys: string[]) => {
+    executionRef.current?.handleExternalRun(keys);
+  };
+
+  const handleTreeStop = (keys: string[]) => {
+    executionRef.current?.handleExternalStop(keys);
+  };
 
   const steps = [
     {
@@ -31,6 +40,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
       description: '版本与资源',
       content: (
         <Step2ToolConfig
+          ref={executionRef}
           moduleKey={selectedModule}
           onNext={nextStep}
           onPrev={prevStep}
@@ -79,10 +89,13 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
             accent={accent}
             flow={repo}
             flowLabel={category}
+            enableRun={currentStep === 1}
             selectedKey={selectedModule}
             onSelect={setSelectedModule}
             executionSelectedKeys={executionModuleKeys}
             onExecutionSelectionChange={setExecutionModuleKeys}
+            onRun={handleTreeRun}
+            onStop={handleTreeStop}
           />
         ) : undefined
       }

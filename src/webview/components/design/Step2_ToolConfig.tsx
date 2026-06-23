@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import {
   Form,
   Input,
@@ -23,7 +23,7 @@ import { useFlowConfig } from '../../hooks/useFlowConfig';
 import ControlledPathInput from '../shared/ControlledPathInput';
 import CollapsibleSection from '../shared/CollapsibleSection';
 import DonauResourcePicker from '../shared/DonauResourcePicker';
-import PipelineExecutionOverview from '../shared/PipelineExecutionOverview';
+import PipelineExecutionOverview, { PipelineExecutionRef as OverviewRef } from '../shared/PipelineExecutionOverview';
 
 const { Text } = Typography;
 
@@ -33,6 +33,11 @@ interface Props {
   moduleKey?: string;
   category: string;
   moduleKeys: string[];
+}
+
+export interface PipelineExecutionRef {
+  handleExternalRun: (keys: string[]) => void;
+  handleExternalStop: (keys: string[]) => void;
 }
 
 const toolOptions = [
@@ -57,16 +62,58 @@ const toolOptions = [
   }
 ]
 
-const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category, moduleKeys }) => {
+const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPrev, moduleKey, category, moduleKeys }, ref) => {
   const flowKey = category.toLowerCase();
   const [activeTab, setActiveTab] = useState('task');
   const [taskForm] = Form.useForm();
   const [designForm] = Form.useForm();
+  const overviewRef = useRef<OverviewRef>(null);
+  const pendingCommandRef = useRef<{ type: 'run' | 'stop'; keys: string[] } | null>(null);
   const selectedAccount = Form.useWatch('clusterGroup', taskForm);
   const selectedQueue = Form.useWatch('clusterQueue', taskForm);
 
   const repo = category?.toLowerCase() === 'sailor' ? 'sailor' : 'hibist';
   const flowLabel = repo === 'sailor' ? 'Sailor' : 'DFTM';
+
+  useImperativeHandle(ref, () => ({
+    handleExternalRun(keys: string[]) {
+      const cleanKeys = keys.filter(Boolean);
+      if (!cleanKeys.length) {
+        return;
+      }
+      if (overviewRef.current) {
+        overviewRef.current.handleExternalRun(cleanKeys);
+      } else {
+        pendingCommandRef.current = { type: 'run', keys: cleanKeys };
+      }
+      setActiveTab('execution');
+    },
+    handleExternalStop(keys: string[]) {
+      const cleanKeys = keys.filter(Boolean);
+      if (!cleanKeys.length) {
+        return;
+      }
+      if (overviewRef.current) {
+        overviewRef.current.handleExternalStop(cleanKeys);
+      } else {
+        pendingCommandRef.current = { type: 'stop', keys: cleanKeys };
+      }
+      setActiveTab('execution');
+    },
+  }));
+
+  useEffect(() => {
+    if (activeTab !== 'execution' || !overviewRef.current || !pendingCommandRef.current) {
+      return;
+    }
+    const command = pendingCommandRef.current;
+    pendingCommandRef.current = null;
+    if (command.type === 'run') {
+      overviewRef.current.handleExternalRun(command.keys);
+    } else {
+      overviewRef.current.handleExternalStop(command.keys);
+    }
+  }, [activeTab]);
 
   // ── 配置持久化 Hook ─────────────────────────────────
   // 注意：Step2 与 Step1 同属 design flow，但字段不同，合并到同一个文件中
@@ -313,9 +360,11 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category,
               label: '执行配置',
               children: (
                 <PipelineExecutionOverview
+                  ref={overviewRef}
                   flowKey={repo}
                   flowLabel={flowLabel}
                   moduleKeys={moduleKeys}
+                  activeModuleKey={moduleKey}
                 />
               ),
             },
@@ -337,6 +386,8 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, category,
       </div>
     </Spin>
   );
-};
+});
+
+Step2ToolConfig.displayName = 'Step2ToolConfig';
 
 export default Step2ToolConfig;

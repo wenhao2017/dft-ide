@@ -3,6 +3,7 @@ export type ProjectRepoKey = 'data' | 'hibist' | 'sailor' | 'verification';
 export interface ProjectRepoStatus {
   key: ProjectRepoKey;
   gitlabProjectName: string;
+  web_url?: string;
   http_url_to_repo?: string;
   status: 'ready' | 'missing' | 'unknown';
   name?: string;
@@ -133,6 +134,14 @@ function normalizeProjectRepoKey(value: unknown): ProjectRepoKey | null {
     : null;
 }
 
+async function responseErrorHandler(response: Response, defaultError: string): Promise<void> {
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => undefined) as { error?: string } | undefined;
+    const errorMessage = errorData?.error || `${defaultError}: ${response.status}`;
+    throw new Error(errorMessage);
+  }
+}
+
 function getApiBase(): string | null {
   const configured = (window as unknown as { DFT_IDE_API_BASE?: string }).DFT_IDE_API_BASE;
   return configured?.replace(/\/$/, '') ?? null;
@@ -159,9 +168,7 @@ export async function createProject(currentUser: string, project: {
     }),
   });
 
-  if (!response.ok) {
-    throw new Error(`Project create failed: ${response.status}`);
-  }
+  await responseErrorHandler(response, 'Project create failed');
 
   return true;
 }
@@ -183,9 +190,7 @@ export async function initProject(project: DftProject): Promise<boolean> {
     }),
   });
 
-  if (!response.ok) {
-    throw new Error(`Project init failed: ${response.status}`);
-  }
+  await responseErrorHandler(response, 'Project init failed');
 
   return true;
 }
@@ -213,9 +218,7 @@ export async function fetchProjectDashboard(currentUser:string): Promise<Project
   url.searchParams.append('user_id', currentUser);
   const response = await fetch(url);
 
-  if (!response.ok) {
-    throw new Error(`Project API failed: ${response.status}`);
-  }
+  await responseErrorHandler(response, 'Fetch projects failed');
 
   // return response.json() as Promise<ProjectDashboard>;
   const data = await response.json();
@@ -263,9 +266,7 @@ export async function selectProject(projectId: string): Promise<DftProject> {
   const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/select`, {
     method: 'POST',
   });
-  if (!response.ok) {
-    throw new Error(`Select project failed: ${response.status}`);
-  }
+  await responseErrorHandler(response, 'Select project failed');
 
   return response.json() as Promise<DftProject>;
 }
@@ -281,9 +282,7 @@ export async function fetchProjectMembers(projectId: string): Promise<ProjectMem
   }
 
   const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/members/`);
-  if (!response.ok) {
-    throw new Error(`Fetch project members failed: ${response.status}`);
-  }
+  await responseErrorHandler(response, 'Fetch project members failed');
 
   // return response.json() as Promise<ProjectMembersResponse>;
   const data = await response.json();
@@ -311,9 +310,7 @@ export async function addProjectMember(projectId: string, member: ProjectMember)
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(member),
   });
-  if (!response.ok) {
-    throw new Error(`Add project member failed: ${response.status}`);
-  }
+  await responseErrorHandler(response, 'Add project member failed');
 
   return response.json() as Promise<ProjectMember>;
 }
@@ -332,9 +329,7 @@ export async function updateProjectMember(projectId: string, employeeId: string,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(member),
   });
-  if (!response.ok) {
-    throw new Error(`Update project member failed: ${response.status}`);
-  }
+  await responseErrorHandler(response, 'Update project member failed');
 
   return response.json() as Promise<ProjectMember>;
 }
@@ -357,9 +352,7 @@ export async function deleteProjectMember(projectId: string, employeeId: string)
   const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/members/${encodeURIComponent(employeeId)}/`, {
     method: 'DELETE',
   });
-  if (!response.ok) {
-    throw new Error(`Delete project member failed: ${response.status}`);
-  }
+  await responseErrorHandler(response, 'Delete project member failed');
 
   return response.json() as Promise<{ success: boolean }>;
 }
@@ -371,9 +364,7 @@ export async function fetchUsers(): Promise<UserInfo[]> {
   }
 
   const response = await fetch(`${apiBase}/api/dft-ide/users/?state=active`);
-  if (!response.ok) {
-    throw new Error(`Fetch users failed: ${response.status}`);
-  }
+  await responseErrorHandler(response, 'Fetch users failed');
 
   return response.json() as Promise<UserInfo[]>;
 }
@@ -416,9 +407,7 @@ export async function uploadExecutionData(projectId: string, data: ExecutionData
     body: JSON.stringify(data),
   });
 
-  if (!response.ok) {
-    throw new Error(`Upload execution data failed: ${response.status}`);
-  }
+  await responseErrorHandler(response, 'Upload execution data failed');
 
   return response.json() as Promise<{ success: boolean; id?: string }>;
 }
@@ -435,9 +424,7 @@ export async function updateProjectRootPath(projectId: string, employeeId: strin
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ local_root: porjectRootPath }),
   });
-  if (!response.ok) {
-    throw new Error(`Update project rootPath failed: ${response.status}`);
-  }
+  await responseErrorHandler(response, 'Update project rootPath failed');
 
   return response.json() as Promise<{ success: boolean}>;
 }

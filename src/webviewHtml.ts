@@ -29,7 +29,7 @@ export function getWebviewHtml(
                  style-src ${webview.cspSource} 'unsafe-inline';
                  script-src 'nonce-${nonce}';
                  font-src ${webview.cspSource};
-                 img-src ${webview.cspSource} data:;" />
+                 img-src ${webview.cspSource} data: http://devops.hisi.beta.huawei.com http://repo.hisi.huawei.com https://w3.huawei.com;" />
   <title>DFT IDE</title>
 </head>
 <body style="padding: 0; margin: 0; background-color: var(--vscode-editor-background);">

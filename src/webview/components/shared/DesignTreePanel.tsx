@@ -16,6 +16,7 @@ import {
 } from 'antd';
 import {
   BranchesOutlined,
+  CaretRightOutlined,
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
@@ -27,6 +28,7 @@ import {
   ReloadOutlined,
   RightOutlined,
   SearchOutlined,
+  StopOutlined,
 } from '@ant-design/icons';
 import {
   FlowConfigFileInfo,
@@ -46,19 +48,27 @@ interface DesignTreePanelProps {
   flow: 'hibist' | 'sailor' | 'verification';
   flowLabel: string;
   selectedKey: string;
+  enableRun?: boolean;
   onSelect: (key: string) => void;
   executionSelectedKeys?: string[];
   onExecutionSelectionChange?: (keys: string[]) => void;
+  onRun?: (keys: string[], targetTasks?: string[]) => void;
+  onStop?: (keys: string[]) => void;
 }
+
+const defaultTasks = ['Load data', 'Check environment', 'Validate rules', 'Run core flow', 'Generate snapshot'];
 
 const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   accent,
   flow,
   flowLabel,
   selectedKey,
+  enableRun,
   onSelect,
   executionSelectedKeys,
   onExecutionSelectionChange,
+  onRun,
+  onStop,
 }) => {
   const { savedData: flowSavedData } = useFlowConfig(flow);
   const focusHydratedRef = useRef(false);
@@ -74,6 +84,9 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   const [collapsed, setCollapsed] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createValue, setCreateValue] = useState('');
+  const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [runTargetKeys, setRunTargetKeys] = useState<string[]>([]);
+  const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
 
   const selectedConfig = configs.find((item) => item.key === selectedKey) ?? configs[0];
   const executionKeys = executionSelectedKeys ?? [];
@@ -99,12 +112,41 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     updateExecutionKeys(nextKeys);
   }, [executionKeys, updateExecutionKeys]);
 
+  const handleFullRun = useCallback((targetKeys: string[]) => {
+    const keys = targetKeys.filter(Boolean);
+    if (!onRun || !keys.length) {
+      return;
+    }
+    onRun(keys, []);
+    message.success(`Started ${keys.length} module(s).`);
+  }, [onRun]);
+
+  const prepareSelectRun = useCallback((targetKeys: string[]) => {
+    const keys = targetKeys.filter(Boolean);
+    if (!onRun || !keys.length) {
+      return;
+    }
+    setRunTargetKeys(keys);
+    setSelectedTasks([...defaultTasks]);
+    setTaskModalOpen(true);
+  }, [onRun]);
+
+  const confirmSelectRun = () => {
+    if (!selectedTasks.length) {
+      message.warning('Select at least one task.');
+      return;
+    }
+    onRun?.(runTargetKeys, selectedTasks);
+    message.success('Started selected tasks.');
+    setTaskModalOpen(false);
+  };
+
   const refreshConfigs = useCallback(async (preferredKey?: string) => {
     setLoading(true);
     try {
       const result = await listFlowConfigFiles(flow);
       if (!result.success) {
-        message.error(result.error ?? '读取模块列表失败');
+        message.error(result.error ?? 'Failed to read module list');
         return;
       }
 
@@ -184,7 +226,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     if (nextKeys.length !== executionKeys.length) {
       updateExecutionKeys(nextKeys);
     }
-  }, [configs, executionKeys, onExecutionSelectionChange, updateExecutionKeys]);
+  }, [configs, configsLoaded, executionKeys, onExecutionSelectionChange, updateExecutionKeys]);
 
   const openCreate = () => {
     setCreateValue('');
@@ -197,13 +239,13 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
 
     const result = await createFlowConfigFile(flow, nextName);
     if (!result.success || !result.config) {
-      message.error(result.error ?? '新增模块失败');
+      message.error(result.error ?? 'Failed to create module');
       return;
     }
 
     setCreateOpen(false);
     updateExecutionKeys([...executionKeys, result.config.key]);
-    message.success(`已创建模块 ${result.config.moduleName}`);
+    message.success(`Created module ${result.config.moduleName}`);
     await refreshConfigs(result.config.key);
   };
 
@@ -211,10 +253,10 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     if (!moduleName) return;
     const result = await duplicateFlowConfigFile(flow, moduleName);
     if (!result.success || !result.config) {
-      message.error(result.error ?? '复制模块失败');
+      message.error(result.error ?? 'Failed to duplicate module');
       return;
     }
-    message.success(`已复制模块 ${result.config.moduleName}`);
+    message.success(`Duplicated module ${result.config.moduleName}`);
     await refreshConfigs(result.config.key);
   };
 
@@ -232,7 +274,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
 
     const result = await renameFlowConfigFile(flow, selectedConfig.moduleName, nextName);
     if (!result.success || !result.config) {
-      message.error(result.error ?? '重命名模块失败');
+      message.error(result.error ?? 'Failed to rename module');
       return;
     }
 
@@ -245,25 +287,25 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     if (executionKeys.includes(selectedConfig.key)) {
       updateExecutionKeys(executionKeys.map((key) => key === selectedConfig.key ? result.config!.key : key));
     }
-    message.success(`已重命名模块为 ${result.config.moduleName}`);
+    message.success(`Renamed module to ${result.config.moduleName}`);
     await refreshConfigs(result.config.key);
   };
 
   const deleteSelected = (moduleName = selectedConfig?.moduleName) => {
     if (!moduleName) return;
     Modal.confirm({
-      title: `删除模块 ${moduleName}？`,
-      content: '该操作会从当前流程的配置目录中删除该模块的所有配置。',
-      okText: '删除',
+      title: `Delete module ${moduleName}?`,
+      content: 'This removes the module config file from the current flow config directory.',
+      okText: 'Delete',
       okButtonProps: { danger: true },
-      cancelText: '取消',
+      cancelText: 'Cancel',
       onOk: async () => {
         const result = await deleteFlowConfigFile(flow, moduleName);
         if (!result.success) {
-          message.error(result.error ?? '删除模块失败');
+          message.error(result.error ?? 'Failed to delete module');
           return;
         }
-        message.success(`已删除模块 ${moduleName}`);
+        message.success(`Deleted module ${moduleName}`);
         const nextFocusKeys = focusKeys.filter((key) => key !== moduleName);
         if (nextFocusKeys.length !== focusKeys.length) {
           setFocusKeys(nextFocusKeys);
@@ -319,6 +361,10 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     }
   };
 
+  const getRunTargets = () => (
+    executionKeys.length > 0 ? executionKeys : [selectedConfig?.key].filter((key): key is string => Boolean(key))
+  );
+
   const renderList = () => (
     <>
       <Space.Compact style={{ width: '100%', marginBottom: 10 }}>
@@ -327,9 +373,9 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
           prefix={<SearchOutlined />}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="搜索模块"
+          placeholder="Search modules"
         />
-        <Tooltip title="刷新">
+        <Tooltip title="Refresh">
           <Button icon={<ReloadOutlined />} loading={loading} onClick={() => refreshConfigs()} />
         </Tooltip>
       </Space.Compact>
@@ -337,12 +383,10 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
       <Space direction="vertical" size={6} style={{ width: '100%', marginBottom: 10 }}>
         <Space size={6}>
           <FilterOutlined style={{ color: focusKeys.length ? accent : 'var(--vscode-descriptionForeground)' }} />
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            关注模块
-          </Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>Focused modules</Text>
           {focusKeys.length > 0 && (
             <Button size="small" type="link" onClick={() => updateFocusKeys([])} style={{ padding: 0 }}>
-              显示全部
+              Show all
             </Button>
           )}
         </Space>
@@ -351,7 +395,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
           allowClear
           size="small"
           maxTagCount="responsive"
-          placeholder="选择自己负责的模块"
+          placeholder="Select owned modules"
           value={focusKeys}
           options={moduleOptions}
           onChange={(keys) => updateFocusKeys(keys)}
@@ -363,12 +407,10 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
         <Space direction="vertical" size={6} style={{ width: '100%', marginBottom: 10 }}>
           <Space size={6}>
             <PlayCircleOutlined style={{ color: executionKeys.length ? accent : 'var(--vscode-descriptionForeground)' }} />
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              执行选择
-            </Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>Execution selection</Text>
             {executionKeys.length > 0 && (
               <Button size="small" type="link" onClick={() => updateExecutionKeys([])} style={{ padding: 0 }}>
-                清空
+                Clear
               </Button>
             )}
           </Space>
@@ -377,7 +419,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
             allowClear
             size="small"
             maxTagCount="responsive"
-            placeholder="选择要同时启动的模块"
+            placeholder="Select modules to run together"
             value={executionKeys}
             options={moduleOptions}
             onChange={(keys) => updateExecutionKeys(keys)}
@@ -387,18 +429,28 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
       )}
 
       <Space size={6} wrap style={{ marginBottom: 10 }}>
-        <Tooltip title="新增">
+        <Tooltip title="Create">
           <Button size="small" icon={<PlusOutlined />} onClick={() => openCreate()} />
         </Tooltip>
-        <Tooltip title="复制">
+        <Tooltip title="Duplicate">
           <Button size="small" icon={<CopyOutlined />} disabled={!selectedConfig} onClick={() => duplicateSelected()} />
         </Tooltip>
-        <Tooltip title="重命名">
+        <Tooltip title="Rename">
           <Button size="small" icon={<EditOutlined />} disabled={!selectedConfig} onClick={() => openRename()} />
         </Tooltip>
-        <Tooltip title="删除">
+        <Tooltip title="Delete">
           <Button size="small" danger icon={<DeleteOutlined />} disabled={!selectedConfig} onClick={() => deleteSelected()} />
         </Tooltip>
+        {enableRun && (
+          <>
+            <Tooltip title="Run selected modules">
+              <Button size="small" icon={<CaretRightOutlined />} disabled={!getRunTargets().length} onClick={() => handleFullRun(getRunTargets())} />
+            </Tooltip>
+            <Tooltip title="Stop selected modules">
+              <Button size="small" danger icon={<StopOutlined />} disabled={!getRunTargets().length} onClick={() => onStop?.(getRunTargets())} />
+            </Tooltip>
+          </>
+        )}
       </Space>
 
       {filteredConfigs.length ? (
@@ -407,23 +459,30 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
           size="small"
           dataSource={filteredConfigs}
           renderItem={(item) => {
-            const selected = item.key === selectedConfig?.key;
+            const isSelected = item.key === selectedConfig?.key;
             const executionChecked = executionKeys.includes(item.key);
+            const dropdownItems = [
+              ...(enableRun ? [
+                { key: 'run-select-tasks', icon: <PlayCircleOutlined />, label: 'Select tasks and run' },
+                { type: 'divider' as const },
+              ] : []),
+              { key: 'copy', icon: <CopyOutlined />, label: 'Duplicate' },
+              { key: 'rename', icon: <EditOutlined />, label: 'Rename' },
+              { key: 'delete', icon: <DeleteOutlined />, label: 'Delete', danger: true },
+            ];
+
             return (
               <Dropdown
                 trigger={['contextMenu']}
                 menu={{
-                  items: [
-                    { key: 'copy', icon: <CopyOutlined />, label: '复制' },
-                    { key: 'rename', icon: <EditOutlined />, label: '重命名' },
-                    { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true },
-                  ],
+                  items: dropdownItems,
                   onClick: ({ key, domEvent }) => {
                     domEvent.stopPropagation();
                     selectModule(item.key);
                     if (key === 'copy') void duplicateSelected(item.moduleName);
                     if (key === 'rename') openRename(item.moduleName);
                     if (key === 'delete') deleteSelected(item.moduleName);
+                    if (key === 'run-select-tasks') prepareSelectRun([item.key]);
                   },
                 }}
               >
@@ -431,25 +490,27 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
                   onClick={() => selectModule(item.key)}
                   style={{
                     cursor: 'pointer',
-                    borderRadius: 6,
-                    padding: '7px 8px',
-                    background: selected ? `${accent}18` : 'transparent',
-                    border: selected ? `1px solid ${accent}55` : '1px solid transparent',
+                    background: isSelected ? 'var(--vscode-list-activeSelectionBackground, rgba(127,127,127,0.11))' : undefined,
+                    borderLeft: isSelected ? `3px solid ${accent}` : '3px solid transparent',
+                    padding: '6px 12px 6px 9px',
+                    transition: 'all 0.15s ease',
                   }}
                 >
-                  <Space style={{ minWidth: 0, width: '100%' }}>
-                    {onExecutionSelectionChange && (
-                      <span onClick={(event) => event.stopPropagation()}>
-                        <Checkbox
-                          checked={executionChecked}
-                          onChange={(event) => toggleExecutionKey(item.key, event.target.checked)}
-                        />
-                      </span>
-                    )}
-                    <FileTextOutlined style={{ color: selected ? accent : 'var(--vscode-descriptionForeground)' }} />
-                    <Text strong={selected} ellipsis={{ tooltip: item.moduleName }} style={{ minWidth: 0 }}>
-                      {item.moduleName}
-                    </Text>
+                  <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                    <Space size={8} style={{ minWidth: 0 }}>
+                      {onExecutionSelectionChange && (
+                        <span onClick={(event) => event.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center' }}>
+                          <Checkbox
+                            checked={executionChecked}
+                            onChange={(event) => toggleExecutionKey(item.key, event.target.checked)}
+                          />
+                        </span>
+                      )}
+                      <FileTextOutlined style={{ color: isSelected ? accent : 'var(--vscode-descriptionForeground)', flexShrink: 0 }} />
+                      <Text strong={isSelected} ellipsis={{ tooltip: item.moduleName }} style={{ minWidth: 0, fontSize: 13 }}>
+                        {item.moduleName}
+                      </Text>
+                    </Space>
                   </Space>
                 </List.Item>
               </Dropdown>
@@ -457,7 +518,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
           }}
         />
       ) : (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={loading ? '正在读取模块列表' : '暂无模块'} />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={loading ? 'Loading modules' : 'No modules'} />
       )}
     </>
   );
@@ -466,7 +527,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     return (
       <div
         onClick={() => setCollapsed(false)}
-        title="展开模块列表"
+        title="Expand module list"
         style={{
           flex: 1,
           width: 32,
@@ -482,7 +543,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
           overflow: 'hidden',
         }}
       >
-        <Tooltip title="展开模块列表" placement="right">
+        <Tooltip title="Expand module list" placement="right">
           <div
             style={{
               marginTop: 10,
@@ -532,18 +593,14 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
         }}
       >
         <Space direction="vertical" size={2} style={{ minWidth: 0, flex: 1 }}>
-          <Text style={{ color: accent, fontSize: 12, fontWeight: 700 }}>
-            模块
-          </Text>
-          <Title level={5} style={{ margin: 0, fontSize: 15 }}>
-            {flowLabel} 模块配置
-          </Title>
+          <Text style={{ color: accent, fontSize: 12, fontWeight: 700 }}>Modules</Text>
+          <Title level={5} style={{ margin: 0, fontSize: 15 }}>{flowLabel} Module Config</Title>
           <Text type="secondary" ellipsis={{ tooltip: configsDir || 'configs' }} style={{ fontSize: 12 }}>
             {configsDir || 'configs'}
           </Text>
         </Space>
 
-        <Tooltip title="收起模块列表" placement="right">
+        <Tooltip title="Collapse module list" placement="right">
           <Button
             type="text"
             size="small"
@@ -581,29 +638,27 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
         }}
       >
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            当前模块
-          </Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>Current module</Text>
           <Space style={{ minWidth: 0 }}>
             <BranchesOutlined style={{ color: accent }} />
             <Text strong ellipsis={{ tooltip: selectedConfig?.moduleName }} style={{ minWidth: 0 }}>
-              {selectedConfig?.moduleName ?? '未选择模块'}
+              {selectedConfig?.moduleName ?? 'No module selected'}
             </Text>
           </Space>
-          <Badge color={accent} text={`共 ${configs.length} 个模块`} />
+          <Badge color={accent} text={`${configs.length} module(s)`} />
         </Space>
       </div>
 
       <Modal
         open={createOpen}
-        title="新增"
-        okText="创建"
-        cancelText="取消"
+        title="Create Module"
+        okText="Create"
+        cancelText="Cancel"
         onOk={confirmCreate}
         onCancel={() => setCreateOpen(false)}
       >
         <Input
-          placeholder="请输入模块名称"
+          placeholder="Enter module name"
           value={createValue}
           onChange={(event) => setCreateValue(event.target.value)}
           onPressEnter={confirmCreate}
@@ -612,18 +667,64 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
 
       <Modal
         open={renameOpen}
-        title="重命名"
-        okText="重命名"
-        cancelText="取消"
+        title="Rename Module"
+        okText="Rename"
+        cancelText="Cancel"
         onOk={confirmRename}
         onCancel={() => setRenameOpen(false)}
       >
         <Input
-          placeholder="请输入新的模块名称"
+          placeholder="Enter new module name"
           value={renameValue}
           onChange={(event) => setRenameValue(event.target.value)}
           onPressEnter={confirmRename}
         />
+      </Modal>
+
+      <Modal
+        open={taskModalOpen}
+        title={<Space><PlayCircleOutlined style={{ color: accent }} /><span>Select Tasks</span></Space>}
+        okText="Run"
+        cancelText="Cancel"
+        onOk={confirmSelectRun}
+        onCancel={() => setTaskModalOpen(false)}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Text type="secondary" ellipsis={{ tooltip: runTargetKeys.join(', ') }}>
+              Targets: <Text strong>{runTargetKeys.join(', ')}</Text>
+            </Text>
+            <Checkbox
+              indeterminate={selectedTasks.length > 0 && selectedTasks.length < defaultTasks.length}
+              checked={selectedTasks.length === defaultTasks.length}
+              onChange={(event) => setSelectedTasks(event.target.checked ? [...defaultTasks] : [])}
+            >
+              All
+            </Checkbox>
+          </Space>
+          <div
+            style={{
+              padding: 12,
+              background: 'var(--vscode-sideBar-background, rgba(0,0,0,0.02))',
+              border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.15))',
+              borderRadius: 6,
+              maxHeight: 260,
+              overflowY: 'auto',
+            }}
+          >
+            <Checkbox.Group
+              style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}
+              value={selectedTasks}
+              onChange={(checkedValues) => setSelectedTasks(checkedValues as string[])}
+            >
+              {defaultTasks.map((taskName) => (
+                <Checkbox key={taskName} value={taskName} style={{ fontFamily: 'monospace', fontSize: 13 }}>
+                  {taskName}
+                </Checkbox>
+              ))}
+            </Checkbox.Group>
+          </div>
+        </Space>
       </Modal>
     </div>
   );
