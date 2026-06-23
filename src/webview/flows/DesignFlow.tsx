@@ -42,6 +42,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
         <Step2ToolConfig
           ref={executionRef}
           moduleKey={selectedModule}
+          onModuleSelect={setSelectedModule}
           onNext={nextStep}
           onPrev={prevStep}
           category={category}

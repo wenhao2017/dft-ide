@@ -35,6 +35,7 @@ const VerificationFlow: React.FC = () => {
           ref={executionRef}
           moduleKeys={executionModuleKeys}
           activeModuleKey={selectedModule}
+          onModuleSelect={setSelectedModule}
           onNext={nextStep}
           onPrev={prevStep}
         />

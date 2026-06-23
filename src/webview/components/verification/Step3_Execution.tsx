@@ -8,6 +8,7 @@ interface Props {
   onPrev: () => void;
   moduleKeys?: string[];
   activeModuleKey?: string;
+  onModuleSelect?: (moduleKey: string) => void;
 }
 
 export interface PipelineExecutionRef {
@@ -20,6 +21,7 @@ const Step3Execution = forwardRef<PipelineExecutionRef, Props>(({
   onPrev,
   moduleKeys = ['top_abc'],
   activeModuleKey,
+  onModuleSelect,
 }, ref) => {
   const overviewRef = useRef<OverviewRef>(null);
 
@@ -40,6 +42,7 @@ const Step3Execution = forwardRef<PipelineExecutionRef, Props>(({
         flowLabel="Lander"
         moduleKeys={moduleKeys}
         activeModuleKey={activeModuleKey}
+        onActiveModuleChange={onModuleSelect}
       />
 
       <Divider style={{ margin: '18px 0 14px' }} />

@@ -10,6 +10,8 @@ import {
   Tooltip,
 } from 'antd';
 import {
+  CaretDownOutlined,
+  CaretRightOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseCircleOutlined,
@@ -39,6 +41,7 @@ interface PipelineExecutionOverviewProps {
   flowLabel: string;
   moduleKeys: string[];
   activeModuleKey?: string;
+  onActiveModuleChange?: (moduleKey: string) => void;
   onRetryStep?: (moduleKey: string, stepIndex: number) => void;
   onRetryFailedStep?: (moduleKey: string, stepIndex: number) => void;
   onRunSingleStep?: (moduleKey: string, stepIndex: number) => void;
@@ -107,7 +110,7 @@ function getStatusColor(status?: string): string {
     return themeStyles.error;
   }
   if (status === 'skipped') {
-    return themeStyles.warning;
+    return themeStyles.idle;
   }
   return themeStyles.idle;
 }
@@ -197,6 +200,18 @@ function getAncestorIds(taskId: string, parentByChild: Map<string, string>): str
   return ancestors;
 }
 
+function getTrackTaskId(run: PipelineRunOverview, parentByChild: Map<string, string>): string | undefined {
+  const activeTask =
+    run.tasks.find((task) => task.status === 'failed') ??
+    run.tasks.find((task) => task.status === 'running') ??
+    run.tasks.find((task) => task.status === 'stopped') ??
+    run.tasks.find((task) => task.status === 'pending');
+  if (!activeTask) {
+    return undefined;
+  }
+  return parentByChild.get(activeTask.id) ?? activeTask.id;
+}
+
 function getTaskDisplayInfo(run: PipelineRunOverview, stoppedSnapshots: Record<string, { taskIndex: number; taskName: string }>) {
   const stepCount = run.tasks.length;
   let currentTaskIndex = -1;
@@ -232,6 +247,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   flowLabel,
   moduleKeys,
   activeModuleKey: externalActiveModuleKey,
+  onActiveModuleChange,
   onRetryStep,
   onRetryFailedStep,
   onRunSingleStep,
@@ -259,6 +275,11 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
 
   const getFlowLabel = useCallback((moduleKey: string) => `${flowLabel} / ${moduleKey}`, [flowLabel]);
 
+  const activateModule = useCallback((moduleKey: string) => {
+    setActiveModuleKey(moduleKey);
+    onActiveModuleChange?.(moduleKey);
+  }, [onActiveModuleChange]);
+
   const ensureRuntimeVisible = useCallback((moduleKey: string) => {
     ensureRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
   }, [ensureRuntime, flowKey, getFlowLabel]);
@@ -272,8 +293,8 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     });
     ensureRuntimeVisible(moduleKey);
     startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
-    setActiveModuleKey(moduleKey);
-  }, [ensureRuntimeVisible, flowKey, getFlowLabel, startRuntime]);
+    activateModule(moduleKey);
+  }, [activateModule, ensureRuntimeVisible, flowKey, getFlowLabel, startRuntime]);
 
   const stopRun = useCallback((moduleKey: string) => {
     const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
@@ -345,7 +366,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   const selectStep = useCallback((run: PipelineRunOverview, taskId: string) => {
     const hierarchy = getTaskHierarchy(run);
     const ancestorIds = getAncestorIds(taskId, hierarchy.parentByChild);
-    setActiveModuleKey(run.moduleKey);
+    activateModule(run.moduleKey);
     setSelectedTaskId(taskId);
     setExpandedTaskIds((prev) => {
       const next = new Set(prev);
@@ -359,7 +380,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     window.requestAnimationFrame(() => {
       taskDetailRefs.current[taskId]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     });
-  }, [flowKey, selectRuntimeTask]);
+  }, [activateModule, flowKey, selectRuntimeTask]);
 
   const toggleExpanded = useCallback((taskId: string) => {
     setExpandedTaskIds((prev) => {
@@ -415,8 +436,10 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     const expanded = expandedTaskIds.has(task.id);
     const isSelected = selectedTaskId === task.id;
     const isRunning = task.status === 'running';
+    const isChild = depth > 0;
     const color = getStatusColor(task.status);
     const latestLog = task.logs[task.logs.length - 1];
+    const relationLabel = hasChildren ? '父步骤' : isChild ? '子步骤' : undefined;
     const action = task.status === 'success'
       ? <Tooltip title="重试该步骤"><Button size="small" type="text" icon={<ReloadOutlined style={{ color: themeStyles.accentText }} />} onClick={() => onRetryStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id))} /></Tooltip>
       : task.status === 'failed'
@@ -426,7 +449,40 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
           : null;
 
     return (
-      <div key={task.id} style={{ marginLeft: depth ? 18 : 0 }}>
+      <div
+        key={task.id}
+        style={{
+          position: 'relative',
+          marginLeft: isChild ? Math.min(depth, 3) * 18 : 0,
+          paddingLeft: isChild ? 16 : 0,
+        }}
+      >
+        {isChild && (
+          <>
+            <span
+              aria-hidden
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: -8,
+                bottom: -8,
+                borderLeft: `1px solid ${themeStyles.border}`,
+                opacity: 0.95,
+              }}
+            />
+            <span
+              aria-hidden
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: 22,
+                width: 12,
+                borderTop: `1px solid ${themeStyles.border}`,
+                opacity: 0.95,
+              }}
+            />
+          </>
+        )}
         <div
           ref={(node) => { taskDetailRefs.current[task.id] = node; }}
           onClick={() => selectStep(activeModuleData, task.id)}
@@ -436,18 +492,44 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             gap: 8,
             padding: '10px 11px',
             border: `1px solid ${isSelected ? themeStyles.accentBorder : isRunning ? themeStyles.accentBorder : themeStyles.borderLight}`,
-            borderLeft: `3px solid ${color}`,
+            borderLeft: `${hasChildren && !isChild ? 4 : 3}px solid ${color}`,
             borderRadius: 5,
             background: isSelected
               ? 'var(--vscode-list-activeSelectionBackground, rgba(127,127,127,0.16))'
               : isRunning
                 ? 'var(--vscode-list-hoverBackground, rgba(127,127,127,0.10))'
-                : themeStyles.panelBg,
+                : hasChildren
+                  ? `linear-gradient(90deg, ${themeStyles.metricBg}, ${themeStyles.panelBg})`
+                  : themeStyles.panelBg,
             boxShadow: isSelected ? `inset 0 0 0 1px ${themeStyles.accentBorder}` : isRunning ? themeStyles.glowCyan : 'none',
             cursor: 'pointer',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {hasChildren ? (
+              <Tooltip title={expanded ? '折叠子任务' : '展开子任务'}>
+                <Button
+                  size="small"
+                  type="text"
+                  aria-label={expanded ? '折叠子任务' : '展开子任务'}
+                  icon={expanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleExpanded(task.id);
+                  }}
+                  style={{
+                    color: themeStyles.accentText,
+                    width: 24,
+                    height: 24,
+                    padding: 0,
+                    border: `1px solid ${themeStyles.borderLight}`,
+                    background: themeStyles.metricBg,
+                  }}
+                />
+              </Tooltip>
+            ) : (
+              <span style={{ width: 24, flex: '0 0 24px' }} />
+            )}
             {task.status === 'success' ? (
               <CheckCircleOutlined style={{ color, fontSize: 16 }} />
             ) : task.status === 'running' ? (
@@ -460,25 +542,17 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             <span style={{ color: themeStyles.textPrimary, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace', fontWeight: isSelected ? 800 : 600 }}>
               {task.name || task.id}
             </span>
-            {hasChildren && (
-              <Button
-                size="small"
-                type="text"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  toggleExpanded(task.id);
-                }}
-                style={{ color: themeStyles.accentText, width: 26, height: 24, padding: 0 }}
-              >
-                {expanded ? '-' : '+'}
-              </Button>
+            {relationLabel && (
+              <Tag style={{ marginRight: 0, color: themeStyles.textSecondary, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontFamily: 'monospace' }}>
+                {relationLabel}
+              </Tag>
             )}
             {hasChildren && (
               <Tag style={{ marginRight: 4, color: themeStyles.textSecondary, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontFamily: 'monospace' }}>
                 {children.length} 子任务
               </Tag>
             )}
-            <Tag style={{ marginRight: 4, color, borderColor: `${color}66`, background: 'rgba(5,10,24,0.62)', fontFamily: 'monospace' }}>
+            <Tag style={{ marginRight: 4, color, borderColor: `${color}66`, background: themeStyles.metricBg, fontFamily: 'monospace' }}>
               {statusText[task.status] ?? task.status}
             </Tag>
             {action}
@@ -500,7 +574,13 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
           )}
         </div>
         {hasChildren && expanded && (
-          <div style={{ marginTop: 8, display: 'grid', gap: 8 }}>
+          <div
+            style={{
+              marginTop: 8,
+              display: 'grid',
+              gap: 8,
+            }}
+          >
             {children.map((child) => renderTaskDetail(child, depth + 1))}
           </div>
         )}
@@ -556,7 +636,25 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
           dataSource={visibleRuns}
           renderItem={(run) => {
             const isSelected = run.moduleKey === activeModuleKey;
-            const { currentTaskIndex, activeTaskName, counterText } = getTaskDisplayInfo(run, stoppedTaskSnapshots);
+            const runHierarchy = getTaskHierarchy(run);
+            const trackTasks = runHierarchy.topLevelTasks.length ? runHierarchy.topLevelTasks : run.tasks;
+            const trackTaskId = getTrackTaskId(run, runHierarchy.parentByChild);
+            const trackTaskIndex = trackTasks.findIndex((task) => task.id === trackTaskId);
+            const { activeTaskName } = getTaskDisplayInfo(run, stoppedTaskSnapshots);
+            const completedTrackTasks = trackTasks.filter((task) =>
+              task.status === 'success' ||
+              task.status === 'failed' ||
+              task.status === 'stopped' ||
+              task.status === 'skipped'
+            ).length;
+            const counterStateText = run.runState === 'running'
+              ? '运行中'
+              : run.runState === 'completed'
+                ? '已完成'
+                : run.runState === 'stopped'
+                  ? '已停止'
+                  : '空闲';
+            const counterText = `${Math.min(Math.max(trackTaskIndex + 1, completedTrackTasks), trackTasks.length)}/${trackTasks.length} ${counterStateText}`;
             const hasEnded = run.runState === 'completed' || run.runState === 'stopped';
             const peak = peakMetrics[run.moduleKey] || { maxCpu: run.cpu, maxMem: run.mem };
             const displayCpu = hasEnded ? peak.maxCpu : run.cpu;
@@ -571,7 +669,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
 
             return (
               <List.Item
-                onClick={() => setActiveModuleKey(run.moduleKey)}
+                onClick={() => activateModule(run.moduleKey)}
                 style={{
                   cursor: 'pointer',
                   padding: 0,
@@ -657,36 +755,27 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                       }}
                     >
                       <span style={{ position: 'absolute', left: 8, right: 8, height: 1, background: `linear-gradient(90deg, transparent, ${themeStyles.border}, transparent)` }} />
-                      {Array.from({ length: Math.max(run.tasks.length, run.total) }).map((_, index) => {
-                        const task = run.tasks[index];
+                      {trackTasks.map((task, index) => {
                         const isRunning = task?.status === 'running';
-                        const circleBg = task
-                          ? getStatusColor(task.status)
-                          : index === currentTaskIndex && run.runState === 'stopped'
-                            ? themeStyles.error
-                            : themeStyles.idle;
-                        const pointSelected = task?.id === selectedTaskId && run.moduleKey === activeModuleKey;
+                        const circleBg = getStatusColor(task.status);
                         return (
-                          <Tooltip key={index} title={`${task?.name || `步骤 ${index + 1}`} [${statusText[task?.status ?? 'pending'] ?? '等待'}]`}>
+                          <Tooltip key={task.id} title={`${task.name || `步骤 ${index + 1}`} [${statusText[task.status] ?? '等待'}]`}>
                             <button
                               type="button"
-                              aria-label={task ? `打开步骤 ${task.name}` : `步骤 ${index + 1}`}
-                              disabled={!task}
+                              aria-label={`打开步骤 ${task.name}`}
                               onClick={(event) => {
                                 event.stopPropagation();
-                                if (task) {
-                                  selectStep(run, task.id);
-                                }
+                                selectStep(run, task.id);
                               }}
                               style={{
                                 position: 'relative',
-                                width: pointSelected ? 14 : 11,
-                                height: pointSelected ? 14 : 11,
+                                width: 11,
+                                height: 11,
                                 borderRadius: '50%',
                                 background: circleBg,
                                 border: '2px solid var(--vscode-editor-background)',
-                                boxShadow: pointSelected ? `0 0 0 3px var(--vscode-focusBorder, rgba(59,130,246,0.28))` : undefined,
-                                cursor: task ? 'pointer' : 'default',
+                                boxShadow: undefined,
+                                cursor: 'pointer',
                                 padding: 0,
                                 transition: 'width 0.14s ease, height 0.14s ease, box-shadow 0.14s ease',
                               }}
