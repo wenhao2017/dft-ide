@@ -45,10 +45,10 @@ const Step3Execution = forwardRef<PipelineExecutionRef, Props>(({
       <Divider style={{ margin: '18px 0 14px' }} />
       <Space style={{ width: '100%', justifyContent: 'flex-end' }} wrap>
         <Button onClick={onPrev} icon={<LeftOutlined />}>
-          Previous
+          上一页
         </Button>
         <Button type="primary" onClick={onNext}>
-          Next
+          下一页
           <RightOutlined />
         </Button>
       </Space>

@@ -60,39 +60,40 @@ interface PipelineRunOverview {
 }
 
 const themeStyles = {
-  shellBg: 'linear-gradient(135deg, rgba(7, 12, 28, 0.98), rgba(18, 8, 35, 0.96) 46%, rgba(4, 20, 32, 0.98))',
-  cardBg: 'linear-gradient(145deg, rgba(9, 18, 39, 0.96), rgba(18, 14, 48, 0.94))',
-  cardBgHover: 'linear-gradient(145deg, rgba(15, 31, 66, 0.98), rgba(32, 16, 72, 0.96))',
-  panelBg: 'rgba(5, 10, 24, 0.92)',
-  border: 'rgba(53, 232, 255, 0.26)',
-  borderLight: 'rgba(255, 62, 210, 0.18)',
-  textPrimary: '#f4fbff',
-  textSecondary: 'rgba(207, 226, 255, 0.72)',
-  textMuted: 'rgba(151, 174, 219, 0.58)',
-  accent: '#27f3ff',
-  accentText: '#7df9ff',
-  accentBorder: 'rgba(39, 243, 255, 0.78)',
-  magenta: '#ff3ed2',
-  amber: '#ffd166',
-  success: '#21f7a6',
-  error: '#ff4d88',
-  warning: '#ffd166',
-  idle: '#5c6b96',
-  glowCyan: '0 0 16px rgba(39, 243, 255, 0.38)',
-  glowMagenta: '0 0 16px rgba(255, 62, 210, 0.28)',
+  shellBg: 'var(--vscode-editor-background)',
+  cardBg: 'var(--vscode-sideBar-background, var(--vscode-editor-background))',
+  cardBgHover: 'var(--vscode-list-hoverBackground, rgba(127,127,127,0.10))',
+  panelBg: 'var(--vscode-input-background, var(--vscode-editor-background))',
+  metricBg: 'var(--vscode-editorWidget-background, var(--vscode-sideBar-background))',
+  border: 'var(--vscode-panel-border, rgba(127,127,127,0.26))',
+  borderLight: 'var(--vscode-widget-border, rgba(127,127,127,0.18))',
+  textPrimary: 'var(--vscode-editor-foreground, var(--vscode-foreground))',
+  textSecondary: 'var(--vscode-descriptionForeground, rgba(100,100,100,0.72))',
+  textMuted: 'var(--vscode-disabledForeground, rgba(100,100,100,0.52))',
+  accent: 'var(--vscode-focusBorder, #3b82f6)',
+  accentText: 'var(--vscode-textLink-foreground, #2563eb)',
+  accentBorder: 'var(--vscode-focusBorder, #3b82f6)',
+  magenta: 'var(--vscode-symbolIcon-operatorForeground, var(--vscode-descriptionForeground))',
+  amber: 'var(--vscode-editorWarning-foreground, #b7791f)',
+  success: 'var(--vscode-testing-iconPassed, #15803d)',
+  error: 'var(--vscode-testing-iconFailed, #c2410c)',
+  warning: 'var(--vscode-testing-iconQueued, #b7791f)',
+  idle: 'var(--vscode-descriptionForeground, #6b7280)',
+  glowCyan: '0 8px 18px rgba(0,0,0,0.10)',
+  glowMagenta: '0 8px 18px rgba(0,0,0,0.08)',
 };
 
 const statusText: Record<string, string> = {
-  idle: 'Idle',
-  pending: 'Pending',
-  waiting: 'Waiting',
-  running: 'Running',
-  success: 'Passed',
-  passed: 'Passed',
-  failed: 'Failed',
-  stopped: 'Stopped',
-  skipped: 'Skipped',
-  completed: 'Completed',
+  idle: '空闲',
+  pending: '等待',
+  waiting: '等待',
+  running: '运行中',
+  success: '成功',
+  passed: '成功',
+  failed: '失败',
+  stopped: '已停止',
+  skipped: '已跳过',
+  completed: '已完成',
 };
 
 function getStatusColor(status?: string): string {
@@ -199,8 +200,8 @@ function getAncestorIds(taskId: string, parentByChild: Map<string, string>): str
 function getTaskDisplayInfo(run: PipelineRunOverview, stoppedSnapshots: Record<string, { taskIndex: number; taskName: string }>) {
   const stepCount = run.tasks.length;
   let currentTaskIndex = -1;
-  let activeTaskName = 'Waiting';
-  let counterText = `0/${stepCount} Idle`;
+  let activeTaskName = '等待中';
+  let counterText = `0/${stepCount} 空闲`;
 
   if (run.runState === 'running') {
     currentTaskIndex = run.tasks.findIndex((task) => task.status === 'running');
@@ -210,17 +211,17 @@ function getTaskDisplayInfo(run: PipelineRunOverview, stoppedSnapshots: Record<s
     if (currentTaskIndex === -1) {
       currentTaskIndex = Math.min(run.completed, Math.max(stepCount - 1, 0));
     }
-    activeTaskName = run.tasks[currentTaskIndex]?.name || 'Running';
-    counterText = `${Math.min(currentTaskIndex + 1, stepCount)}/${stepCount} Running`;
+    activeTaskName = run.tasks[currentTaskIndex]?.name || '运行中';
+    counterText = `${Math.min(currentTaskIndex + 1, stepCount)}/${stepCount} 运行中`;
   } else if (run.runState === 'completed') {
     currentTaskIndex = stepCount - 1;
-    activeTaskName = run.tasks[currentTaskIndex]?.name || 'Completed';
-    counterText = `${stepCount}/${stepCount} Completed`;
+    activeTaskName = run.tasks[currentTaskIndex]?.name || '已完成';
+    counterText = `${stepCount}/${stepCount} 已完成`;
   } else if (run.runState === 'stopped') {
     const snapshot = stoppedSnapshots[run.moduleKey];
     currentTaskIndex = snapshot?.taskIndex ?? Math.max(run.completed - 1, 0);
-    activeTaskName = snapshot?.taskName || run.tasks[currentTaskIndex]?.name || 'Stopped';
-    counterText = `${Math.min(currentTaskIndex + 1, stepCount)}/${stepCount} Stopped`;
+    activeTaskName = snapshot?.taskName || run.tasks[currentTaskIndex]?.name || '已停止';
+    counterText = `${Math.min(currentTaskIndex + 1, stepCount)}/${stepCount} 已停止`;
   }
 
   return { currentTaskIndex, activeTaskName, counterText };
@@ -417,11 +418,11 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     const color = getStatusColor(task.status);
     const latestLog = task.logs[task.logs.length - 1];
     const action = task.status === 'success'
-      ? <Tooltip title="Retry step"><Button size="small" type="text" icon={<ReloadOutlined style={{ color: themeStyles.accentText }} />} onClick={() => onRetryStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id))} /></Tooltip>
+      ? <Tooltip title="重试该步骤"><Button size="small" type="text" icon={<ReloadOutlined style={{ color: themeStyles.accentText }} />} onClick={() => onRetryStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id))} /></Tooltip>
       : task.status === 'failed'
-        ? <Tooltip title="Retry failed step"><Button size="small" type="text" icon={<ReloadOutlined style={{ color: themeStyles.error }} />} onClick={() => onRetryFailedStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id))} /></Tooltip>
+        ? <Tooltip title="重试失败步骤"><Button size="small" type="text" icon={<ReloadOutlined style={{ color: themeStyles.error }} />} onClick={() => onRetryFailedStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id))} /></Tooltip>
         : !isRunning
-          ? <Tooltip title="Run single step"><Button size="small" type="text" icon={<PlayCircleOutlined style={{ color: themeStyles.success }} />} onClick={() => onRunSingleStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id))} /></Tooltip>
+          ? <Tooltip title="单步运行"><Button size="small" type="text" icon={<PlayCircleOutlined style={{ color: themeStyles.success }} />} onClick={() => onRunSingleStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id))} /></Tooltip>
           : null;
 
     return (
@@ -438,11 +439,11 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             borderLeft: `3px solid ${color}`,
             borderRadius: 5,
             background: isSelected
-              ? 'linear-gradient(90deg, rgba(39,243,255,0.20), rgba(255,62,210,0.10), rgba(5,10,24,0.88))'
+              ? 'var(--vscode-list-activeSelectionBackground, rgba(127,127,127,0.16))'
               : isRunning
-                ? 'linear-gradient(90deg, rgba(39,243,255,0.16), rgba(255,62,210,0.08), rgba(5,10,24,0.82))'
+                ? 'var(--vscode-list-hoverBackground, rgba(127,127,127,0.10))'
                 : themeStyles.panelBg,
-            boxShadow: isSelected ? `0 0 0 1px rgba(39,243,255,0.22), ${themeStyles.glowCyan}` : isRunning ? themeStyles.glowCyan : 'inset 0 0 18px rgba(0,0,0,0.18)',
+            boxShadow: isSelected ? `inset 0 0 0 1px ${themeStyles.accentBorder}` : isRunning ? themeStyles.glowCyan : 'none',
             cursor: 'pointer',
           }}
         >
@@ -473,8 +474,8 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
               </Button>
             )}
             {hasChildren && (
-              <Tag style={{ marginRight: 4, color: themeStyles.magenta, borderColor: 'rgba(255,62,210,0.42)', background: 'rgba(255,62,210,0.08)', fontFamily: 'monospace' }}>
-                {children.length} sub
+              <Tag style={{ marginRight: 4, color: themeStyles.textSecondary, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontFamily: 'monospace' }}>
+                {children.length} 子任务
               </Tag>
             )}
             <Tag style={{ marginRight: 4, color, borderColor: `${color}66`, background: 'rgba(5,10,24,0.62)', fontFamily: 'monospace' }}>
@@ -519,7 +520,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
 
   if (!visibleRuns.length) {
     return (
-      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Select execution modules from the left module list." />
+      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请在左侧模块列表中选择执行模块" />
     );
   }
 
@@ -543,9 +544,10 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
           inset: 0,
           pointerEvents: 'none',
           backgroundImage:
-            'linear-gradient(rgba(39,243,255,0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(255,62,210,0.06) 1px, transparent 1px)',
-          backgroundSize: '22px 22px',
-          maskImage: 'linear-gradient(to bottom, rgba(0,0,0,0.55), transparent 82%)',
+            'linear-gradient(var(--vscode-panel-border, rgba(127,127,127,0.10)) 1px, transparent 1px), linear-gradient(90deg, var(--vscode-panel-border, rgba(127,127,127,0.10)) 1px, transparent 1px)',
+          backgroundSize: '28px 28px',
+          opacity: 0.18,
+          maskImage: 'linear-gradient(to bottom, rgba(0,0,0,0.38), transparent 82%)',
         }}
       />
       <Col span={10}>
@@ -577,9 +579,8 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                   borderRadius: 8,
                   border: `1px solid ${isSelected ? themeStyles.accentBorder : themeStyles.border}`,
                   background: isSelected ? themeStyles.cardBgHover : themeStyles.cardBg,
-                  boxShadow: isSelected ? `0 0 0 1px rgba(39,243,255,0.22), ${themeStyles.glowCyan}` : '0 8px 24px rgba(0,0,0,0.22)',
+                  boxShadow: isSelected ? `inset 0 0 0 1px ${themeStyles.accentBorder}` : '0 4px 12px rgba(0,0,0,0.08)',
                   overflow: 'hidden',
-                  clipPath: 'polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%)',
                 }}
               >
                 <div style={{ width: '100%' }}>
@@ -590,22 +591,22 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       gap: 8,
-                      background: 'linear-gradient(90deg, rgba(39,243,255,0.12), rgba(255,62,210,0.08), transparent)',
+                      background: 'var(--vscode-list-hoverBackground, rgba(127,127,127,0.08))',
                     }}
                   >
                     <Space size={8} style={{ minWidth: 0 }}>
-                      <span style={{ width: 9, height: 9, borderRadius: '50%', background: statusColor, boxShadow: `0 0 12px ${statusColor}`, flexShrink: 0 }} />
-                      <span style={{ color: themeStyles.textPrimary, fontFamily: 'monospace', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textShadow: `0 0 10px ${themeStyles.accent}` }}>
+                      <span style={{ width: 9, height: 9, borderRadius: '50%', background: statusColor, flexShrink: 0 }} />
+                      <span style={{ color: themeStyles.textPrimary, fontFamily: 'monospace', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {run.moduleKey}
                       </span>
                     </Space>
                     <Space size={4}>
                       {run.runState === 'running' ? (
-                        <Tooltip title="Stop">
+                        <Tooltip title="停止">
                           <Button type="text" size="small" icon={<StopOutlined style={{ color: themeStyles.error }} />} onClick={(event) => { event.stopPropagation(); stopRun(run.moduleKey); }} />
                         </Tooltip>
                       ) : (
-                        <Tooltip title="Run">
+                        <Tooltip title="运行">
                           <Button type="text" size="small" icon={<PlayCircleOutlined style={{ color: themeStyles.success }} />} onClick={(event) => { event.stopPropagation(); startRun(run.moduleKey); }} />
                         </Tooltip>
                       )}
@@ -613,8 +614,8 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                         style={{
                           margin: 0,
                           color: themeStyles.accentText,
-                          borderColor: 'rgba(39,243,255,0.42)',
-                          background: 'rgba(39,243,255,0.08)',
+                          borderColor: themeStyles.borderLight,
+                          background: themeStyles.metricBg,
                           fontFamily: 'monospace',
                           fontWeight: 700,
                         }}
@@ -629,12 +630,12 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                       padding: '8px 12px',
                       borderTop: `1px solid ${themeStyles.borderLight}`,
                       borderBottom: `1px solid ${themeStyles.borderLight}`,
-                      background: 'rgba(3, 8, 22, 0.48)',
+                      background: 'var(--vscode-editorWidget-background, rgba(127,127,127,0.06))',
                     }}
                   >
                     <Space direction="vertical" size={2} style={{ width: '100%' }}>
-                      <span style={{ fontSize: 10, color: themeStyles.textMuted, fontWeight: 800, letterSpacing: 1 }}>CURRENT STEP</span>
-                      <span style={{ color: run.runState === 'stopped' ? themeStyles.warning : themeStyles.accentText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textShadow: `0 0 10px ${run.runState === 'stopped' ? themeStyles.warning : themeStyles.accent}` }}>
+                      <span style={{ fontSize: 10, color: themeStyles.textMuted, fontWeight: 800, letterSpacing: 1 }}>当前步骤</span>
+                      <span style={{ color: run.runState === 'stopped' ? themeStyles.warning : themeStyles.accentText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {activeTaskName}
                       </span>
                     </Space>
@@ -655,7 +656,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                         padding: '0 3px',
                       }}
                     >
-                      <span style={{ position: 'absolute', left: 8, right: 8, height: 1, background: 'linear-gradient(90deg, transparent, rgba(39,243,255,0.44), rgba(255,62,210,0.4), transparent)' }} />
+                      <span style={{ position: 'absolute', left: 8, right: 8, height: 1, background: `linear-gradient(90deg, transparent, ${themeStyles.border}, transparent)` }} />
                       {Array.from({ length: Math.max(run.tasks.length, run.total) }).map((_, index) => {
                         const task = run.tasks[index];
                         const isRunning = task?.status === 'running';
@@ -666,10 +667,10 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                             : themeStyles.idle;
                         const pointSelected = task?.id === selectedTaskId && run.moduleKey === activeModuleKey;
                         return (
-                          <Tooltip key={index} title={`${task?.name || `Task ${index + 1}`} [${statusText[task?.status ?? 'pending'] ?? 'Pending'}]`}>
+                          <Tooltip key={index} title={`${task?.name || `步骤 ${index + 1}`} [${statusText[task?.status ?? 'pending'] ?? '等待'}]`}>
                             <button
                               type="button"
-                              aria-label={task ? `Open step ${task.name}` : `Step ${index + 1}`}
+                              aria-label={task ? `打开步骤 ${task.name}` : `步骤 ${index + 1}`}
                               disabled={!task}
                               onClick={(event) => {
                                 event.stopPropagation();
@@ -683,12 +684,8 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                                 height: pointSelected ? 14 : 11,
                                 borderRadius: '50%',
                                 background: circleBg,
-                                border: '2px solid rgba(3,8,22,0.95)',
-                                boxShadow: pointSelected
-                                  ? `0 0 0 3px rgba(255,255,255,0.12), 0 0 14px ${circleBg}, 0 0 28px ${circleBg}`
-                                  : isRunning
-                                    ? `0 0 12px ${themeStyles.accent}, 0 0 22px ${themeStyles.accent}`
-                                    : `0 0 8px ${circleBg}`,
+                                border: '2px solid var(--vscode-editor-background)',
+                                boxShadow: pointSelected ? `0 0 0 3px var(--vscode-focusBorder, rgba(59,130,246,0.28))` : undefined,
                                 cursor: task ? 'pointer' : 'default',
                                 padding: 0,
                                 transition: 'width 0.14s ease, height 0.14s ease, box-shadow 0.14s ease',
@@ -711,48 +708,47 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
           <aside
             style={{
               position: 'relative',
-              background: 'linear-gradient(160deg, rgba(6, 14, 32, 0.98), rgba(20, 13, 54, 0.96) 54%, rgba(5, 26, 40, 0.98))',
+              background: themeStyles.cardBg,
               border: `1px solid ${themeStyles.accentBorder}`,
               borderRadius: 8,
               minHeight: 520,
               overflow: 'hidden',
-              boxShadow: `inset 0 0 28px rgba(39,243,255,0.08), ${themeStyles.glowCyan}`,
-              clipPath: 'polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 0 100%)',
+              boxShadow: themeStyles.glowCyan,
             }}
           >
-            <div aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'linear-gradient(180deg, rgba(255,255,255,0.08), transparent 2px)', backgroundSize: '100% 6px', opacity: 0.22 }} />
+            <div aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'linear-gradient(180deg, var(--vscode-panel-border, rgba(127,127,127,0.10)), transparent 1px)', backgroundSize: '100% 8px', opacity: 0.14 }} />
             <div style={{ position: 'relative', padding: 16 }}>
               <Space direction="vertical" size={18} style={{ width: '100%' }}>
                 <div>
-                  <div style={{ fontSize: 10, color: themeStyles.magenta, fontWeight: 800, letterSpacing: 2 }}>MODULE</div>
-                  <h4 style={{ margin: '4px 0 0', color: themeStyles.accentText, fontFamily: 'monospace', fontSize: 18, textShadow: `0 0 14px ${themeStyles.accent}` }}>{activeModuleData.moduleKey}</h4>
+                  <div style={{ fontSize: 10, color: themeStyles.textMuted, fontWeight: 800, letterSpacing: 2 }}>模块</div>
+                  <h4 style={{ margin: '4px 0 0', color: themeStyles.accentText, fontFamily: 'monospace', fontSize: 18 }}>{activeModuleData.moduleKey}</h4>
                 </div>
 
                 <Row gutter={16} style={{ borderTop: `1px solid ${themeStyles.borderLight}`, paddingTop: 12 }}>
                   <Col span={8}>
-                    <div style={{ padding: 10, border: `1px solid ${themeStyles.border}`, background: 'rgba(39,243,255,0.07)', borderRadius: 6 }}>
-                      <strong style={{ color: themeStyles.textPrimary, fontSize: 18, textShadow: `0 0 10px ${themeStyles.accent}` }}>{(peakMetrics[activeModuleData.moduleKey]?.maxCpu || activeModuleData.cpu)}%</strong>
+                    <div style={{ padding: 10, border: `1px solid ${themeStyles.border}`, background: themeStyles.metricBg, borderRadius: 6 }}>
+                      <strong style={{ color: themeStyles.textPrimary, fontSize: 18 }}>{(peakMetrics[activeModuleData.moduleKey]?.maxCpu || activeModuleData.cpu)}%</strong>
                       <div style={{ color: themeStyles.textSecondary, fontSize: 11, letterSpacing: 1 }}>CPU</div>
                     </div>
                   </Col>
                   <Col span={8}>
-                    <div style={{ padding: 10, border: `1px solid ${themeStyles.borderLight}`, background: 'rgba(255,62,210,0.07)', borderRadius: 6 }}>
-                      <strong style={{ color: themeStyles.textPrimary, fontSize: 18, textShadow: `0 0 10px ${themeStyles.magenta}` }}>{(peakMetrics[activeModuleData.moduleKey]?.maxMem || activeModuleData.mem).toFixed(1)}GB</strong>
+                    <div style={{ padding: 10, border: `1px solid ${themeStyles.border}`, background: themeStyles.metricBg, borderRadius: 6 }}>
+                      <strong style={{ color: themeStyles.textPrimary, fontSize: 18 }}>{(peakMetrics[activeModuleData.moduleKey]?.maxMem || activeModuleData.mem).toFixed(1)}GB</strong>
                       <div style={{ color: themeStyles.textSecondary, fontSize: 11, letterSpacing: 1 }}>MEM</div>
                     </div>
                   </Col>
                   <Col span={8}>
-                    <div style={{ padding: 10, border: '1px solid rgba(255,209,102,0.28)', background: 'rgba(255,209,102,0.08)', borderRadius: 6 }}>
-                      <strong style={{ color: themeStyles.amber, fontSize: 18, textShadow: `0 0 10px ${themeStyles.amber}` }}>{formatStartTime(activeModuleData.startedAt)}</strong>
-                      <div style={{ color: themeStyles.textSecondary, fontSize: 11, letterSpacing: 1 }}>START</div>
+                    <div style={{ padding: 10, border: `1px solid ${themeStyles.border}`, background: themeStyles.metricBg, borderRadius: 6 }}>
+                      <strong style={{ color: themeStyles.amber, fontSize: 18 }}>{formatStartTime(activeModuleData.startedAt)}</strong>
+                      <div style={{ color: themeStyles.textSecondary, fontSize: 11, letterSpacing: 1 }}>开始</div>
                     </div>
                   </Col>
                 </Row>
 
                 <div style={{ borderTop: `1px solid ${themeStyles.border}`, paddingTop: 14 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                    <h5 style={{ margin: 0, color: themeStyles.accentText, letterSpacing: 1, textShadow: `0 0 10px ${themeStyles.accent}` }}>
-                      STEP DETAIL ({activeModuleData.tasks.length})
+                    <h5 style={{ margin: 0, color: themeStyles.accentText, letterSpacing: 1 }}>
+                      步骤详情 ({activeModuleData.tasks.length})
                     </h5>
                     {selectedTask && (
                       <Tag
@@ -760,11 +756,11 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                           margin: 0,
                           color: getStatusColor(selectedTask.status),
                           borderColor: `${getStatusColor(selectedTask.status)}66`,
-                          background: 'rgba(5,10,24,0.7)',
+                          background: themeStyles.metricBg,
                           fontFamily: 'monospace',
                         }}
                       >
-                        Focus: {selectedTask.name}
+                        当前：{selectedTask.name}
                       </Tag>
                     )}
                   </div>
@@ -779,7 +775,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
           <aside style={{ background: themeStyles.cardBg, border: `1px solid ${themeStyles.border}`, borderRadius: 8, minHeight: 520, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: themeStyles.glowMagenta }}>
             <Space direction="vertical" align="center">
               <ClockCircleOutlined style={{ color: themeStyles.idle, fontSize: 48 }} />
-              <span style={{ color: themeStyles.textSecondary }}>No module selected</span>
+              <span style={{ color: themeStyles.textSecondary }}>未选择模块</span>
             </Space>
           </aside>
         )}

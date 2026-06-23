@@ -25,11 +25,11 @@ const VerificationFlow: React.FC = () => {
   };
 
   const steps = [
-    { title: 'Common Config', description: 'Environment and output', content: <Step1CommonConfig onNext={nextStep} /> },
-    { title: 'Tool Config', description: 'Simulation toolchain', content: <Step2ToolConfig moduleKey={selectedModule} onNext={nextStep} onPrev={prevStep} /> },
+    { title: '公共配置', description: '环境与出口', content: <Step1CommonConfig onNext={nextStep} /> },
+    { title: '工具配置', description: '仿真工具链', content: <Step2ToolConfig moduleKey={selectedModule} onNext={nextStep} onPrev={prevStep} /> },
     {
-      title: 'Execution',
-      description: 'Cases and commands',
+      title: '执行页',
+      description: '用例与命令',
       content: (
         <Step3Execution
           ref={executionRef}
@@ -40,16 +40,16 @@ const VerificationFlow: React.FC = () => {
         />
       ),
     },
-    { title: 'Results', description: 'Logs and reports', content: <Step4Result onNext={nextStep} onPrev={prevStep} /> },
-    { title: 'Cloud Sync', description: 'Share and reuse', content: <Step5Cloud onPrev={prevStep} /> },
+    { title: '结果页', description: '日志与报告', content: <Step4Result onNext={nextStep} onPrev={prevStep} /> },
+    { title: '端云协同', description: '共享与复用', content: <Step5Cloud onPrev={prevStep} /> },
   ];
 
   return (
     <FlowShell
       accent="#059669"
       eyebrow="Verification Flow"
-      title="Verification Task Loop"
-      description="A stable workflow for verification environment setup, tool configuration, simulation execution, and report review."
+      title="验证任务闭环"
+      description="围绕验证环境、工具配置、仿真执行与报告查看建立稳定闭环。"
       steps={steps}
       current={currentStep}
       onStepChange={setCurrentStep}
