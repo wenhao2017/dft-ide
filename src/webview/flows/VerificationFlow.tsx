@@ -38,7 +38,6 @@ const VerificationFlow: React.FC = () => {
           onModuleSelect={setSelectedModule}
           onNext={nextStep}
           onPrev={prevStep}
-          onCheckedModuleKeysChange={setExecutionModuleKeys}
         />
       ),
     },
@@ -64,7 +63,6 @@ const VerificationFlow: React.FC = () => {
             enableRun={currentStep === 2}
             selectedKey={selectedModule}
             onSelect={setSelectedModule}
-            executionSelectedKeys={executionModuleKeys}
             onExecutionSelectionChange={setExecutionModuleKeys}
             onRun={handleTreeRun}
             onStop={handleTreeStop}

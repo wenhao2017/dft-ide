@@ -47,7 +47,6 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
           onPrev={prevStep}
           category={category}
           moduleKeys={executionModuleKeys}
-          onCheckedModuleKeysChange={setExecutionModuleKeys}
         />
       ),
     },
@@ -94,7 +93,6 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
             enableRun={currentStep === 1}
             selectedKey={selectedModule}
             onSelect={setSelectedModule}
-            executionSelectedKeys={executionModuleKeys}
             onExecutionSelectionChange={setExecutionModuleKeys}
             onRun={handleTreeRun}
             onStop={handleTreeStop}

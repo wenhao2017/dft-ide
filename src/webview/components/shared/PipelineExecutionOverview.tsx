@@ -48,7 +48,6 @@ interface PipelineExecutionOverviewProps {
   onRetryStep?: (moduleKey: string, stepIndex: number) => void;
   onRetryFailedStep?: (moduleKey: string, stepIndex: number) => void;
   onRunSingleStep?: (moduleKey: string, stepIndex: number) => void;
-  onCheckedModuleKeysChange?: (keys: string[]) => void;
 }
 
 interface PipelineRunOverview {
@@ -163,7 +162,7 @@ function getTaskMetrics(task: PipelineTask) {
       mem: `${(Math.random() * 1.2 + 0.4).toFixed(1)}GB`,
     };
   }
-  if (task.status === 'success' || task.status === 'passed' || task.status === 'completed') {
+  if (['success', 'passed', 'completed'].includes(task.status)) {
     const seed = task.name.charCodeAt(0) + task.name.charCodeAt(task.name.length - 1);
     const mockCpu = (seed % 15) + 8;
     const mockMem = ((seed % 10) / 10 + 0.3).toFixed(1);
@@ -308,7 +307,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   onRetryStep,
   onRetryFailedStep,
   onRunSingleStep,
-  onCheckedModuleKeysChange,
 }, ref) => {
   useEffect(() => {
     subscribePipelineRuntimeUpdates();
@@ -352,24 +350,15 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     });
   }, [flowKey, selectedModuleKeys, ensureRuntime, getFlowLabel]);
 
-  const displayedModuleKeys = useMemo(() => {
-    const keys = [...selectedModuleKeys];
-    if (activeModuleKey && !keys.includes(activeModuleKey)) {
-      keys.unshift(activeModuleKey);
-    }
-    return keys;
-  }, [selectedModuleKeys, activeModuleKey]);
-
   const visibleRuns = useMemo(() => (
-    displayedModuleKeys.map((moduleKey) => {
+    selectedModuleKeys.map((moduleKey) => {
       const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
       return summarizeRuntime(moduleKey, flowKey, runtime);
     })
-  ), [flowKey, runtimes, displayedModuleKeys]);
+  ), [flowKey, runtimes, selectedModuleKeys]);
 
   const activeModuleData = visibleRuns.find((run) => run.moduleKey === activeModuleKey);
   const activeHierarchy = activeModuleData ? getTaskHierarchy(activeModuleData) : undefined;
-  const selectedTask = activeModuleData?.tasks.find((task) => task.id === selectedTaskId);
 
 
 
@@ -803,7 +792,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
 
   if (!visibleRuns.length) {
     return (
-      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请在左侧模块列表中选择执行模块" />
+      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先在关注模块中选择要显示的模块" />
     );
   }
 
@@ -834,17 +823,15 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
         }}
       />
 
-      {/* 1. Left Column: Module Panel */}
-      <Col span={7}>
+      <Col span={8}>
         {/* Batch operations toolbar */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, padding: '0 4px', gap: 8 }}>
           <Checkbox
-            indeterminate={checkedModuleKeys.size > 0 && checkedModuleKeys.size < displayedModuleKeys.length}
-            checked={checkedModuleKeys.size === displayedModuleKeys.length && displayedModuleKeys.length > 0}
+            indeterminate={checkedModuleKeys.size > 0 && checkedModuleKeys.size < selectedModuleKeys.length}
+            checked={checkedModuleKeys.size === selectedModuleKeys.length && selectedModuleKeys.length > 0}
             onChange={(e) => {
-              const next = e.target.checked ? new Set(displayedModuleKeys) : new Set<string>();
+              const next = e.target.checked ? new Set(selectedModuleKeys) : new Set<string>();
               setCheckedModuleKeys(next);
-              onCheckedModuleKeysChange?.(Array.from(next));
             }}
             style={{ color: themeStyles.textSecondary, fontSize: 12 }}
           >
@@ -949,7 +936,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                             } else {
                               next.delete(run.moduleKey);
                             }
-                            onCheckedModuleKeysChange?.(Array.from(next));
                             return next;
                           });
                         }}
@@ -1053,8 +1039,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
         />
       </Col>
 
-      {/* 2. Middle Column: Module's Pipeline */}
-      <Col span={9}>
+      <Col span={16}>
         {activeModuleData ? (
           <div
             style={{
@@ -1123,7 +1108,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
               <div><span style={{ color: themeStyles.textSecondary }}>用时:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{getModuleRuntime(activeModuleData)}</span></div>
             </div>
 
-            <div style={{ display: 'grid', gap: 5, flex: 1, overflowY: 'auto', maxHeight: 340, paddingRight: 4 }}>
+            <div style={{ display: 'grid', gap: 6, flex: 1, overflowY: 'auto', maxHeight: 430, paddingRight: 4 }}>
               {(activeHierarchy?.topLevelTasks ?? activeModuleData.tasks).map((task) => renderTaskDetail(task))}
             </div>
           </div>
@@ -1132,116 +1117,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             <Space direction="vertical" align="center">
               <ClockCircleOutlined style={{ color: themeStyles.idle, fontSize: 40 }} />
               <span style={{ color: themeStyles.textSecondary, fontSize: 13 }}>请先选择执行模块</span>
-            </Space>
-          </div>
-        )}
-      </Col>
-
-      {/* 3. Right Column: Pipeline Step Details */}
-      <Col span={8}>
-        {activeModuleData ? (
-          <aside
-            style={{
-              position: 'relative',
-              background: themeStyles.cardBg,
-              border: `1px solid ${themeStyles.border}`,
-              borderRadius: 8,
-              minHeight: 520,
-              display: 'flex',
-              flexDirection: 'column',
-              boxShadow: themeStyles.glowMagenta,
-              overflow: 'hidden',
-            }}
-          >
-            {selectedTask ? (
-              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}>
-                {/* Header */}
-                <div style={{ padding: '12px 14px', borderBottom: `1px solid ${themeStyles.borderLight}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 11, color: themeStyles.textMuted, fontWeight: 800, letterSpacing: 2 }}>步骤详情</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                      <span style={{ color: themeStyles.accentText, fontFamily: 'monospace', fontSize: 16, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {selectedTask.name || selectedTask.id}
-                      </span>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                    <Tag
-                      style={{
-                        margin: 0,
-                        color: getStatusColor(selectedTask.status),
-                        borderColor: `${getStatusColor(selectedTask.status)}66`,
-                        background: themeStyles.metricBg,
-                        fontFamily: 'monospace',
-                        fontWeight: 600,
-                        fontSize: 11,
-                      }}
-                    >
-                      {statusText[selectedTask.status] ?? selectedTask.status}
-                    </Tag>
-                    {selectedTask.status === 'success' ? (
-                      <Tooltip title="重试该步骤">
-                        <Button size="small" type="text" icon={<ReloadOutlined style={{ color: themeStyles.accentText }} />} onClick={() => onRetryStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === selectedTask.id))} />
-                      </Tooltip>
-                    ) : selectedTask.status === 'failed' ? (
-                      <Tooltip title="重试失败步骤">
-                        <Button size="small" type="text" icon={<ReloadOutlined style={{ color: themeStyles.error }} />} onClick={() => onRetryFailedStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === selectedTask.id))} />
-                      </Tooltip>
-                    ) : selectedTask.status !== 'running' ? (
-                      <Tooltip title="单步运行">
-                        <Button size="small" type="text" icon={<PlayCircleOutlined style={{ color: themeStyles.success }} />} onClick={() => onRunSingleStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === selectedTask.id))} />
-                      </Tooltip>
-                    ) : null}
-                  </div>
-                </div>
-
-                {/* Body Details */}
-                <div style={{ padding: 14, flex: 1, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
-                  {selectedTask.description && (
-                    <div style={{ fontSize: 13 }}>
-                      <div style={{ color: themeStyles.textMuted, fontWeight: 700, marginBottom: 4, fontSize: 13 }}>步骤描述</div>
-                      <div style={{ color: themeStyles.textPrimary, lineHeight: '1.4', fontSize: 13 }}>
-                        {selectedTask.description}
-                      </div>
-                    </div>
-                  )}
-
-                  {selectedTask.command && (
-                    <div style={{ fontSize: 13 }}>
-                      <div style={{ color: themeStyles.textMuted, fontWeight: 700, marginBottom: 4, fontSize: 13 }}>执行命令</div>
-                      <div
-                        style={{
-                          background: 'var(--vscode-textCodeBlock-background, rgba(0,0,0,0.2))',
-                          padding: '6px 8px',
-                          borderRadius: 4,
-                          border: `1px solid ${themeStyles.borderLight}`,
-                          fontFamily: 'monospace',
-                          color: themeStyles.accentText,
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-all',
-                          fontSize: 13,
-                        }}
-                      >
-                        {selectedTask.command}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-                <Space direction="vertical" align="center">
-                  <ClockCircleOutlined style={{ color: themeStyles.idle, fontSize: 40 }} />
-                  <span style={{ color: themeStyles.textSecondary, fontSize: 13 }}>选择步骤查看详情与日志</span>
-                </Space>
-              </div>
-            )}
-          </aside>
-        ) : (
-          <div style={{ background: themeStyles.cardBg, border: `1px solid ${themeStyles.border}`, borderRadius: 8, minHeight: 520, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: themeStyles.glowMagenta }}>
-            <Space direction="vertical" align="center">
-              <ClockCircleOutlined style={{ color: themeStyles.idle, fontSize: 40 }} />
-              <span style={{ color: themeStyles.textSecondary, fontSize: 13 }}>未选择模块</span>
             </Space>
           </div>
         )}
