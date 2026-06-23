@@ -76,6 +76,10 @@ const themeStyles = {
   accent: 'var(--vscode-focusBorder, #3b82f6)',
   accentText: 'var(--vscode-textLink-foreground, #2563eb)',
   accentBorder: 'var(--vscode-focusBorder, #3b82f6)',
+  selectedBg: 'var(--vscode-list-inactiveSelectionBackground, color-mix(in srgb, var(--vscode-focusBorder, #2563eb) 14%, var(--vscode-editor-background, #ffffff)))',
+  selectedFg: 'var(--vscode-list-inactiveSelectionForeground, var(--vscode-editor-foreground, var(--vscode-foreground)))',
+  selectedBorder: 'color-mix(in srgb, var(--vscode-focusBorder, #2563eb) 72%, var(--vscode-panel-border, rgba(127,127,127,0.26)))',
+  selectedShadow: '0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder, #2563eb) 28%, transparent), 0 8px 18px rgba(0,0,0,0.10)',
   magenta: 'var(--vscode-symbolIcon-operatorForeground, var(--vscode-descriptionForeground))',
   amber: 'var(--vscode-editorWarning-foreground, #b7791f)',
   success: 'var(--vscode-testing-iconPassed, #15803d)',
@@ -491,17 +495,17 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             flexDirection: 'column',
             gap: 8,
             padding: '10px 11px',
-            border: `1px solid ${isSelected ? themeStyles.accentBorder : isRunning ? themeStyles.accentBorder : themeStyles.borderLight}`,
+            border: `1px solid ${isSelected ? themeStyles.selectedBorder : isRunning ? themeStyles.accentBorder : themeStyles.borderLight}`,
             borderLeft: `${hasChildren && !isChild ? 4 : 3}px solid ${color}`,
             borderRadius: 5,
             background: isSelected
-              ? 'var(--vscode-list-activeSelectionBackground, rgba(127,127,127,0.16))'
+              ? themeStyles.selectedBg
               : isRunning
                 ? 'var(--vscode-list-hoverBackground, rgba(127,127,127,0.10))'
                 : hasChildren
                   ? `linear-gradient(90deg, ${themeStyles.metricBg}, ${themeStyles.panelBg})`
                   : themeStyles.panelBg,
-            boxShadow: isSelected ? `inset 0 0 0 1px ${themeStyles.accentBorder}` : isRunning ? themeStyles.glowCyan : 'none',
+            boxShadow: isSelected ? themeStyles.selectedShadow : isRunning ? themeStyles.glowCyan : 'none',
             cursor: 'pointer',
           }}
         >
@@ -518,7 +522,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                     toggleExpanded(task.id);
                   }}
                   style={{
-                    color: themeStyles.accentText,
+                    color: isSelected ? themeStyles.selectedFg : themeStyles.accentText,
                     width: 24,
                     height: 24,
                     padding: 0,
@@ -539,7 +543,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             ) : (
               <ClockCircleOutlined style={{ color, fontSize: 16 }} />
             )}
-            <span style={{ color: themeStyles.textPrimary, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace', fontWeight: isSelected ? 800 : 600 }}>
+            <span style={{ color: isSelected ? themeStyles.selectedFg : themeStyles.textPrimary, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace', fontWeight: isSelected ? 800 : 600 }}>
               {task.name || task.id}
             </span>
             {relationLabel && (
@@ -675,9 +679,9 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                   padding: 0,
                   marginBottom: 10,
                   borderRadius: 8,
-                  border: `1px solid ${isSelected ? themeStyles.accentBorder : themeStyles.border}`,
-                  background: isSelected ? themeStyles.cardBgHover : themeStyles.cardBg,
-                  boxShadow: isSelected ? `inset 0 0 0 1px ${themeStyles.accentBorder}` : '0 4px 12px rgba(0,0,0,0.08)',
+                  border: `1px solid ${isSelected ? themeStyles.selectedBorder : themeStyles.border}`,
+                  background: isSelected ? themeStyles.selectedBg : themeStyles.cardBg,
+                  boxShadow: isSelected ? themeStyles.selectedShadow : '0 4px 12px rgba(0,0,0,0.08)',
                   overflow: 'hidden',
                 }}
               >
@@ -694,7 +698,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                   >
                     <Space size={8} style={{ minWidth: 0 }}>
                       <span style={{ width: 9, height: 9, borderRadius: '50%', background: statusColor, flexShrink: 0 }} />
-                      <span style={{ color: themeStyles.textPrimary, fontFamily: 'monospace', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ color: isSelected ? themeStyles.selectedFg : themeStyles.textPrimary, fontFamily: 'monospace', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {run.moduleKey}
                       </span>
                     </Space>
