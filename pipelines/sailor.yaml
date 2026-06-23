@@ -1,0 +1,48 @@
+# DFT IDE Pipeline Configuration for SAILOR
+# Modify this file to customize the steps and commands of the pipeline.
+
+- id: create_branch
+  name: create_branch
+  command: "sailor branch -create feat_dft_scan"
+  description: 创建或切换 feature 分支
+
+- id: gen_cfg
+  name: gen_cfg
+  command: "sailor gen_cfg -spec norm_input.xlsx"
+  description: 根据归一化表格生成 sailor cfg
+
+- id: user_hook_before_gen_dcg_env
+  name: user_hook_before_gen_dcg_env
+  command: "run_flow_sailor hook --before gen_dcg_env"
+  description: 执行 DCG 生成前置 ECO 钩子
+
+- id: gen_dcg_env
+  name: gen_dcg_env
+  command: "sailor gen_dcg_env -cfg sailor.cfg"
+  description: 生成 DCG 扫描链环境
+
+- id: user_hook_after_gen_cfg
+  name: user_hook_after_gen_cfg
+  command: "run_flow_sailor hook --after gen_cfg"
+  description: 执行生成后置 ECO 校验钩子
+
+- id: run_scan
+  name: run_scan
+  command: "sailor run_scan -cfg sailor.cfg"
+  description: 执行 scan 链插入与缝合
+
+- id: gen_analysis_env
+  name: gen_analysis_env
+  command: "sailor gen_analysis_env -cfg sailor.cfg"
+  description: 生成 scan 分析与 DRC 环境
+
+- id: run_analysis
+  name: run_analysis
+  command: "sailor run_analysis -cfg sailor.cfg"
+  description: 执行 scan 检查与 DRC 分析
+
+- id: commit_result
+  name: commit_result
+  command: "sailor commit -files "cfg,scripts,reports""
+  description: 提交配置文件、脚本与报告
+
