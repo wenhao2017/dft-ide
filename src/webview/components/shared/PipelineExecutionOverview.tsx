@@ -1,9 +1,11 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   Button,
+  Checkbox,
   Col,
   Empty,
   List,
+  Modal,
   Row,
   Space,
   Tag,
@@ -27,7 +29,8 @@ import usePipelineRuntimeStore, {
   getPipelineRuntimeKey,
   subscribePipelineRuntimeUpdates,
 } from '../../store/pipelineRuntimeStore';
-import { PipelineLink, PipelineTask } from './pipelineMockData';
+import { PipelineLink, PipelineTask, pipelineFlowConfigs } from './pipelineMockData';
+import { openExecutionTerminal } from '../../utils/ipc';
 
 type OverviewRunState = 'idle' | 'running' | 'completed' | 'stopped';
 
@@ -132,13 +135,72 @@ function formatStartTime(time?: number): string {
     .join(':');
 }
 
+function makeTask(
+  id: string,
+  name: string,
+  command: string,
+  description: string,
+  status: 'pending' | 'running' | 'success' | 'failed' | 'stopped' | 'skipped' = 'pending',
+): PipelineTask {
+  return {
+    id,
+    name,
+    command,
+    status,
+    attempts: 1,
+    description,
+    logs: [],
+  };
+}
+
+function getInitialTasks(flowKey: PipelineFlowKey): PipelineTask[] {
+  const config = pipelineFlowConfigs[flowKey];
+  if (!config) return [];
+  return config.getInitialTasks(makeTask);
+}
+
+function getInitialLinks(flowKey: PipelineFlowKey): PipelineLink[] {
+  const config = pipelineFlowConfigs[flowKey];
+  if (!config) return [];
+  return config.getInitialLinks();
+}
+
+function getTaskMetrics(task: PipelineTask) {
+  if (task.status === 'running') {
+    return {
+      cpu: `${Math.floor(Math.random() * 15) + 10}%`,
+      mem: `${(Math.random() * 1.2 + 0.4).toFixed(1)}GB`,
+    };
+  }
+  if (task.status === 'success' || task.status === 'passed' || task.status === 'completed') {
+    const seed = task.name.charCodeAt(0) + task.name.charCodeAt(task.name.length - 1);
+    const mockCpu = (seed % 15) + 8;
+    const mockMem = ((seed % 10) / 10 + 0.3).toFixed(1);
+    return {
+      cpu: `${mockCpu}%`,
+      mem: `${mockMem}GB`,
+    };
+  }
+  return { cpu: '--', mem: '--' };
+}
+
+function getModuleRuntime(run: PipelineRunOverview) {
+  if (!run.startedAt) return '--';
+  const end = run.finishedAt || Date.now();
+  const diffMs = end - run.startedAt;
+  if (diffMs < 0) return '0.0s';
+  return (diffMs / 1000).toFixed(1) + 's';
+}
+
 function summarizeRuntime(
   moduleKey: string,
   flowKey: PipelineFlowKey,
   runtime?: PipelineRuntimeSnapshot,
 ): PipelineRunOverview {
   const total = runtime?.tasks.length || getInitialTaskCount(flowKey);
-  const tasks = runtime?.tasks ?? [];
+  const tasks = runtime?.tasks && runtime.tasks.length ? runtime.tasks : getInitialTasks(flowKey);
+  const links = runtime?.links && runtime.links.length ? runtime.links : getInitialLinks(flowKey);
+
   const completed = tasks.filter((task) =>
     task.status === 'success' ||
     task.status === 'failed' ||
@@ -159,7 +221,7 @@ function summarizeRuntime(
     finishedAt: runtime?.finishedAt,
     logs: runtime?.logs.length ? runtime.logs : [`${moduleKey} is queued and waiting to start.`],
     tasks,
-    links: runtime?.links ?? [],
+    links,
     cpu,
     mem,
   };
@@ -277,6 +339,12 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     return Array.from(new Set(cleanKeys));
   }, [moduleKeys]);
 
+  const [checkedModuleKeys, setCheckedModuleKeys] = useState<Set<string>>(() => new Set(selectedModuleKeys));
+
+  useEffect(() => {
+    setCheckedModuleKeys(new Set(selectedModuleKeys));
+  }, [selectedModuleKeys]);
+
   const getFlowLabel = useCallback((moduleKey: string) => `${flowLabel} / ${moduleKey}`, [flowLabel]);
 
   const activateModule = useCallback((moduleKey: string) => {
@@ -317,6 +385,71 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     ensureRuntimeVisible(moduleKey);
     stopRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
   }, [ensureRuntimeVisible, flowKey, getFlowLabel, runtimes, stopRuntime]);
+
+  const handleSingleRunClick = useCallback((moduleKey: string) => {
+    const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
+    if (runtime?.runState === 'running') {
+      Modal.confirm({
+        title: '确认重新运行',
+        content: `模块 ${moduleKey} 当前正在运行，是否要结束当前运行并重新开始？`,
+        okText: '确定并重新开始',
+        cancelText: '取消',
+        okButtonProps: { danger: true },
+        onOk: () => {
+          stopRun(moduleKey);
+          setTimeout(() => {
+            startRun(moduleKey);
+          }, 150);
+        },
+      });
+    } else {
+      startRun(moduleKey);
+    }
+  }, [runtimes, flowKey, startRun, stopRun]);
+
+  const handleBatchRun = useCallback(() => {
+    const keysToRun = Array.from(checkedModuleKeys);
+    if (keysToRun.length === 0) return;
+
+    const runningKeys = keysToRun.filter((key) => {
+      const runtime = runtimes[getPipelineRuntimeKey(flowKey, key)];
+      return runtime?.runState === 'running';
+    });
+
+    const proceedRun = (keys: string[]) => {
+      keys.forEach((key) => {
+        startRun(key);
+      });
+    };
+
+    if (runningKeys.length > 0) {
+      Modal.confirm({
+        title: '确认批量重新运行',
+        content: `模块 ${runningKeys.join(', ')} 正在运行中，是否结束运行并重新开始？`,
+        okText: '确定并重新开始',
+        cancelText: '取消',
+        okButtonProps: { danger: true },
+        onOk: () => {
+          runningKeys.forEach((key) => stopRun(key));
+          setTimeout(() => {
+            proceedRun(keysToRun);
+          }, 150);
+        },
+      });
+    } else {
+      proceedRun(keysToRun);
+    }
+  }, [checkedModuleKeys, runtimes, flowKey, startRun, stopRun]);
+
+  const handleBatchStop = useCallback(() => {
+    const keysToStop = Array.from(checkedModuleKeys);
+    keysToStop.forEach((key) => {
+      const runtime = runtimes[getPipelineRuntimeKey(flowKey, key)];
+      if (runtime?.runState === 'running') {
+        stopRun(key);
+      }
+    });
+  }, [checkedModuleKeys, runtimes, flowKey, stopRun]);
 
   useImperativeHandle(ref, () => ({
     handleExternalRun(keys: string[]) {
@@ -381,6 +514,15 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
       return next;
     });
     selectRuntimeTask(flowKey, run.moduleKey, taskId);
+
+    const task = run.tasks.find((t) => t.id === taskId);
+    if (task && task.command) {
+      void openExecutionTerminal({
+        title: `${run.moduleKey} - ${task.name || task.id}`,
+        command: task.command,
+      });
+    }
+
     window.requestAnimationFrame(() => {
       taskDetailRefs.current[taskId]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     });
@@ -445,11 +587,11 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     const latestLog = task.logs[task.logs.length - 1];
     const relationLabel = hasChildren ? '父步骤' : isChild ? '子步骤' : undefined;
     const action = task.status === 'success'
-      ? <Tooltip title="重试该步骤"><Button size="small" type="text" icon={<ReloadOutlined style={{ color: themeStyles.accentText }} />} onClick={() => onRetryStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id))} /></Tooltip>
+      ? <Tooltip title="重试该步骤"><Button size="small" type="text" icon={<ReloadOutlined style={{ color: themeStyles.accentText }} />} onClick={(e) => { e.stopPropagation(); onRetryStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id)); }} /></Tooltip>
       : task.status === 'failed'
-        ? <Tooltip title="重试失败步骤"><Button size="small" type="text" icon={<ReloadOutlined style={{ color: themeStyles.error }} />} onClick={() => onRetryFailedStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id))} /></Tooltip>
+        ? <Tooltip title="重试失败步骤"><Button size="small" type="text" icon={<ReloadOutlined style={{ color: themeStyles.error }} />} onClick={(e) => { e.stopPropagation(); onRetryFailedStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id)); }} /></Tooltip>
         : !isRunning
-          ? <Tooltip title="单步运行"><Button size="small" type="text" icon={<PlayCircleOutlined style={{ color: themeStyles.success }} />} onClick={() => onRunSingleStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id))} /></Tooltip>
+          ? <Tooltip title="单步运行"><Button size="small" type="text" icon={<PlayCircleOutlined style={{ color: themeStyles.success }} />} onClick={(e) => { e.stopPropagation(); onRunSingleStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id)); }} /></Tooltip>
           : null;
 
     return (
@@ -457,8 +599,8 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
         key={task.id}
         style={{
           position: 'relative',
-          marginLeft: isChild ? Math.min(depth, 3) * 18 : 0,
-          paddingLeft: isChild ? 16 : 0,
+          marginLeft: isChild ? Math.min(depth, 3) * 12 : 0,
+          paddingLeft: isChild ? 10 : 0,
         }}
       >
         {isChild && (
@@ -479,8 +621,8 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
               style={{
                 position: 'absolute',
                 left: 0,
-                top: 22,
-                width: 12,
+                top: 16,
+                width: 8,
                 borderTop: `1px solid ${themeStyles.border}`,
                 opacity: 0.95,
               }}
@@ -492,12 +634,13 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
           onClick={() => selectStep(activeModuleData, task.id)}
           style={{
             display: 'flex',
-            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'space-between',
             gap: 8,
-            padding: '10px 11px',
+            padding: '4px 8px',
             border: `1px solid ${isSelected ? themeStyles.selectedBorder : isRunning ? themeStyles.accentBorder : themeStyles.borderLight}`,
             borderLeft: `${hasChildren && !isChild ? 4 : 3}px solid ${color}`,
-            borderRadius: 5,
+            borderRadius: 4,
             background: isSelected
               ? themeStyles.selectedBg
               : isRunning
@@ -507,82 +650,81 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                   : themeStyles.panelBg,
             boxShadow: isSelected ? themeStyles.selectedShadow : isRunning ? themeStyles.glowCyan : 'none',
             cursor: 'pointer',
+            transition: 'all 0.12s ease',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
             {hasChildren ? (
-              <Tooltip title={expanded ? '折叠子任务' : '展开子任务'}>
-                <Button
-                  size="small"
-                  type="text"
-                  aria-label={expanded ? '折叠子任务' : '展开子任务'}
-                  icon={expanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    toggleExpanded(task.id);
-                  }}
-                  style={{
-                    color: isSelected ? themeStyles.selectedFg : themeStyles.accentText,
-                    width: 24,
-                    height: 24,
-                    padding: 0,
-                    border: `1px solid ${themeStyles.borderLight}`,
-                    background: themeStyles.metricBg,
-                  }}
-                />
-              </Tooltip>
+              <Button
+                size="small"
+                type="text"
+                aria-label={expanded ? '折叠子任务' : '展开子任务'}
+                icon={expanded ? <CaretDownOutlined style={{ fontSize: 9 }} /> : <CaretRightOutlined style={{ fontSize: 9 }} />}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleExpanded(task.id);
+                }}
+                style={{
+                  color: isSelected ? themeStyles.selectedFg : themeStyles.accentText,
+                  width: 16,
+                  height: 16,
+                  padding: 0,
+                  border: `1px solid ${themeStyles.borderLight}`,
+                  background: themeStyles.metricBg,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              />
             ) : (
-              <span style={{ width: 24, flex: '0 0 24px' }} />
+              <span style={{ width: 16, flex: '0 0 16px' }} />
             )}
             {task.status === 'success' ? (
-              <CheckCircleOutlined style={{ color, fontSize: 16 }} />
+              <CheckCircleOutlined style={{ color, fontSize: 13 }} />
             ) : task.status === 'running' ? (
-              <SyncOutlined spin style={{ color, fontSize: 16 }} />
+              <SyncOutlined spin style={{ color, fontSize: 13 }} />
             ) : task.status === 'failed' || task.status === 'stopped' ? (
-              <CloseCircleOutlined style={{ color, fontSize: 16 }} />
+              <CloseCircleOutlined style={{ color, fontSize: 13 }} />
             ) : (
-              <ClockCircleOutlined style={{ color, fontSize: 16 }} />
+              <ClockCircleOutlined style={{ color, fontSize: 13 }} />
             )}
-            <span style={{ color: isSelected ? themeStyles.selectedFg : themeStyles.textPrimary, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace', fontWeight: isSelected ? 800 : 600 }}>
-              {task.name || task.id}
-            </span>
+            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+              <span style={{ color: isSelected ? themeStyles.selectedFg : themeStyles.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace', fontWeight: isSelected ? 700 : 500, fontSize: 12 }}>
+                {task.name || task.id}
+              </span>
+              {(task.status === 'running' || task.status === 'success' || task.status === 'failed') && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 8px', fontSize: 10, color: isSelected ? themeStyles.selectedFg : themeStyles.textSecondary, marginTop: 2, opacity: 0.85, fontFamily: 'monospace' }}>
+                  <span>CPU: {getTaskMetrics(task).cpu}</span>
+                  <span>MEM: {getTaskMetrics(task).mem}</span>
+                  {task.startedAt && <span>开始: {task.startedAt}</span>}
+                  {task.duration && <span>用时: {task.duration}</span>}
+                </div>
+              )}
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
             {relationLabel && (
-              <Tag style={{ marginRight: 0, color: themeStyles.textSecondary, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontFamily: 'monospace' }}>
+              <Tag style={{ margin: 0, color: themeStyles.textSecondary, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontFamily: 'monospace', fontSize: 9, padding: '0 2px', height: 16, lineHeight: '14px' }}>
                 {relationLabel}
               </Tag>
             )}
             {hasChildren && (
-              <Tag style={{ marginRight: 4, color: themeStyles.textSecondary, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontFamily: 'monospace' }}>
-                {children.length} 子任务
+              <Tag style={{ margin: 0, color: themeStyles.textSecondary, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontFamily: 'monospace', fontSize: 9, padding: '0 2px', height: 16, lineHeight: '14px' }}>
+                {children.length}子项
               </Tag>
             )}
-            <Tag style={{ marginRight: 4, color, borderColor: `${color}66`, background: themeStyles.metricBg, fontFamily: 'monospace' }}>
+            <Tag style={{ margin: 0, color, borderColor: `${color}66`, background: themeStyles.metricBg, fontFamily: 'monospace', fontSize: 9, padding: '0 2px', height: 16, lineHeight: '14px' }}>
               {statusText[task.status] ?? task.status}
             </Tag>
             {action}
           </div>
-          {(task.command || task.description || latestLog) && (
-            <div style={{ display: 'grid', gap: 4, color: themeStyles.textSecondary, fontSize: 12 }}>
-              {task.command && (
-                <span style={{ color: themeStyles.accentText, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  $ {task.command}
-                </span>
-              )}
-              {task.description && <span>{task.description}</span>}
-              {latestLog && (
-                <span style={{ color: task.status === 'failed' ? themeStyles.error : themeStyles.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {latestLog}
-                </span>
-              )}
-            </div>
-          )}
         </div>
         {hasChildren && expanded && (
           <div
             style={{
-              marginTop: 8,
+              marginTop: 5,
               display: 'grid',
-              gap: 8,
+              gap: 5,
             }}
           >
             {children.map((child) => renderTaskDetail(child, depth + 1))}
@@ -610,10 +752,10 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
 
   return (
     <Row
-      gutter={16}
+      gutter={12}
       style={{
         position: 'relative',
-        padding: 14,
+        padding: 10,
         borderRadius: 8,
         border: `1px solid ${themeStyles.border}`,
         background: themeStyles.shellBg,
@@ -634,7 +776,49 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
           maskImage: 'linear-gradient(to bottom, rgba(0,0,0,0.38), transparent 82%)',
         }}
       />
-      <Col span={10}>
+
+      {/* 1. Left Column: Module Panel */}
+      <Col span={7}>
+        {/* Batch operations toolbar */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, padding: '0 4px', gap: 8 }}>
+          <Checkbox
+            indeterminate={checkedModuleKeys.size > 0 && checkedModuleKeys.size < selectedModuleKeys.length}
+            checked={checkedModuleKeys.size === selectedModuleKeys.length}
+            onChange={(e) => {
+              if (e.target.checked) {
+                setCheckedModuleKeys(new Set(selectedModuleKeys));
+              } else {
+                setCheckedModuleKeys(new Set());
+              }
+            }}
+            style={{ color: themeStyles.textSecondary, fontSize: 12 }}
+          >
+            全选
+          </Checkbox>
+          <Space size={4}>
+            <Button
+              type="primary"
+              size="small"
+              icon={<PlayCircleOutlined />}
+              disabled={checkedModuleKeys.size === 0}
+              onClick={handleBatchRun}
+              style={{ fontSize: 11, height: 22, padding: '0 8px' }}
+            >
+              运行已选
+            </Button>
+            <Button
+              size="small"
+              danger
+              icon={<StopOutlined />}
+              disabled={checkedModuleKeys.size === 0}
+              onClick={handleBatchStop}
+              style={{ fontSize: 11, height: 22, padding: '0 8px' }}
+            >
+              停止已选
+            </Button>
+          </Space>
+        </div>
+
         <List
           size="small"
           dataSource={visibleRuns}
@@ -671,13 +855,15 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                   ? themeStyles.warning
                   : themeStyles.idle;
 
+            const isChecked = checkedModuleKeys.has(run.moduleKey);
+
             return (
               <List.Item
                 onClick={() => activateModule(run.moduleKey)}
                 style={{
                   cursor: 'pointer',
                   padding: 0,
-                  marginBottom: 10,
+                  marginBottom: 8,
                   borderRadius: 8,
                   border: `1px solid ${isSelected ? themeStyles.selectedBorder : themeStyles.border}`,
                   background: isSelected ? themeStyles.selectedBg : themeStyles.cardBg,
@@ -688,7 +874,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                 <div style={{ width: '100%' }}>
                   <div
                     style={{
-                      padding: '10px 12px',
+                      padding: '8px 12px',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
@@ -696,22 +882,37 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                       background: 'var(--vscode-list-hoverBackground, rgba(127,127,127,0.08))',
                     }}
                   >
-                    <Space size={8} style={{ minWidth: 0 }}>
-                      <span style={{ width: 9, height: 9, borderRadius: '50%', background: statusColor, flexShrink: 0 }} />
-                      <span style={{ color: isSelected ? themeStyles.selectedFg : themeStyles.textPrimary, fontFamily: 'monospace', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <Space size={6} style={{ minWidth: 0 }}>
+                      <Checkbox
+                        checked={isChecked}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          setCheckedModuleKeys((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) {
+                              next.add(run.moduleKey);
+                            } else {
+                              next.delete(run.moduleKey);
+                            }
+                            return next;
+                          });
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor, flexShrink: 0 }} />
+                      <span style={{ color: isSelected ? themeStyles.selectedFg : themeStyles.textPrimary, fontFamily: 'monospace', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>
                         {run.moduleKey}
                       </span>
                     </Space>
                     <Space size={4}>
-                      {run.runState === 'running' ? (
+                      {run.runState === 'running' && (
                         <Tooltip title="停止">
                           <Button type="text" size="small" icon={<StopOutlined style={{ color: themeStyles.error }} />} onClick={(event) => { event.stopPropagation(); stopRun(run.moduleKey); }} />
                         </Tooltip>
-                      ) : (
-                        <Tooltip title="运行">
-                          <Button type="text" size="small" icon={<PlayCircleOutlined style={{ color: themeStyles.success }} />} onClick={(event) => { event.stopPropagation(); startRun(run.moduleKey); }} />
-                        </Tooltip>
                       )}
+                      <Tooltip title={run.runState === 'running' ? "重新运行" : "运行"}>
+                        <Button type="text" size="small" icon={<PlayCircleOutlined style={{ color: themeStyles.success }} />} onClick={(event) => { event.stopPropagation(); handleSingleRunClick(run.moduleKey); }} />
+                      </Tooltip>
                       <Tag
                         style={{
                           margin: 0,
@@ -720,6 +921,8 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                           background: themeStyles.metricBg,
                           fontFamily: 'monospace',
                           fontWeight: 700,
+                          fontSize: 10,
+                          padding: '0 4px',
                         }}
                       >
                         {counterText}
@@ -729,26 +932,26 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
 
                   <div
                     style={{
-                      padding: '8px 12px',
+                      padding: '6px 12px',
                       borderTop: `1px solid ${themeStyles.borderLight}`,
                       borderBottom: `1px solid ${themeStyles.borderLight}`,
                       background: 'var(--vscode-editorWidget-background, rgba(127,127,127,0.06))',
                     }}
                   >
                     <Space direction="vertical" size={2} style={{ width: '100%' }}>
-                      <span style={{ fontSize: 10, color: themeStyles.textMuted, fontWeight: 800, letterSpacing: 1 }}>当前步骤</span>
-                      <span style={{ color: run.runState === 'stopped' ? themeStyles.warning : themeStyles.accentText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: 9, color: themeStyles.textMuted, fontWeight: 800, letterSpacing: 1 }}>当前步骤</span>
+                      <span style={{ color: run.runState === 'stopped' ? themeStyles.warning : themeStyles.accentText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>
                         {activeTaskName}
                       </span>
                     </Space>
-                    <Space size={16} style={{ marginTop: 8 }}>
-                      <span style={{ color: themeStyles.textSecondary, fontSize: 12 }}>CPU {displayCpu}%</span>
-                      <span style={{ color: themeStyles.textSecondary, fontSize: 12 }}>MEM {displayMem.toFixed(1)}GB</span>
-                      <span style={{ color: themeStyles.textSecondary, fontSize: 12 }}>{formatStartTime(run.startedAt)}</span>
+                    <Space size={12} style={{ marginTop: 4 }}>
+                      <span style={{ color: themeStyles.textSecondary, fontSize: 11 }}>CPU {displayCpu}%</span>
+                      <span style={{ color: themeStyles.textSecondary, fontSize: 11 }}>MEM {displayMem.toFixed(1)}GB</span>
+                      <span style={{ color: themeStyles.textSecondary, fontSize: 11 }}>{formatStartTime(run.startedAt)}</span>
                     </Space>
                   </div>
 
-                  <div style={{ padding: '8px 12px 10px' }}>
+                  <div style={{ padding: '6px 12px 8px' }}>
                     <div
                       style={{
                         position: 'relative',
@@ -760,7 +963,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                     >
                       <span style={{ position: 'absolute', left: 8, right: 8, height: 1, background: `linear-gradient(90deg, transparent, ${themeStyles.border}, transparent)` }} />
                       {trackTasks.map((task, index) => {
-                        const isRunning = task?.status === 'running';
                         const circleBg = getStatusColor(task.status);
                         return (
                           <Tooltip key={task.id} title={`${task.name || `步骤 ${index + 1}`} [${statusText[task.status] ?? '等待'}]`}>
@@ -773,12 +975,11 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                               }}
                               style={{
                                 position: 'relative',
-                                width: 11,
-                                height: 11,
+                                width: 10,
+                                height: 10,
                                 borderRadius: '50%',
                                 background: circleBg,
                                 border: '2px solid var(--vscode-editor-background)',
-                                boxShadow: undefined,
                                 cursor: 'pointer',
                                 padding: 0,
                                 transition: 'width 0.14s ease, height 0.14s ease, box-shadow 0.14s ease',
@@ -796,81 +997,191 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
         />
       </Col>
 
-      <Col span={14}>
+      {/* 2. Middle Column: Module's Pipeline */}
+      <Col span={9}>
+        {activeModuleData ? (
+          <div
+            style={{
+              position: 'relative',
+              background: themeStyles.cardBg,
+              border: `1px solid ${themeStyles.border}`,
+              borderRadius: 8,
+              minHeight: 520,
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: themeStyles.glowCyan,
+              padding: 12,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 10, color: themeStyles.textMuted, fontWeight: 800, letterSpacing: 2 }}>模块流水线</div>
+                <h5 style={{ margin: '2px 0 0', color: themeStyles.accentText, fontWeight: 700, fontSize: 15, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {activeModuleData.moduleKey}
+                </h5>
+              </div>
+              <Tag
+                style={{
+                  margin: 0,
+                  color: themeStyles.textSecondary,
+                  borderColor: themeStyles.borderLight,
+                  background: themeStyles.metricBg,
+                  fontFamily: 'monospace',
+                }}
+              >
+                共 {activeModuleData.tasks.length} 个步骤
+              </Tag>
+            </div>
+
+            {/* Module Metrics (CPU, MEM, Start Time, Run Time) displayed in the middle column header */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', background: 'var(--vscode-list-hoverBackground, rgba(127,127,127,0.04))', padding: '6px 10px', borderRadius: 6, border: `1px solid ${themeStyles.borderLight}`, fontSize: 11, marginBottom: 10 }}>
+              <div><span style={{ color: themeStyles.textSecondary }}>CPU:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{(peakMetrics[activeModuleData.moduleKey]?.maxCpu || activeModuleData.cpu)}%</span></div>
+              <div><span style={{ color: themeStyles.textSecondary }}>内存:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{(peakMetrics[activeModuleData.moduleKey]?.maxMem || activeModuleData.mem).toFixed(1)}GB</span></div>
+              <div><span style={{ color: themeStyles.textSecondary }}>开始:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{formatStartTime(activeModuleData.startedAt)}</span></div>
+              <div><span style={{ color: themeStyles.textSecondary }}>用时:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{getModuleRuntime(activeModuleData)}</span></div>
+            </div>
+
+            <div style={{ display: 'grid', gap: 5, flex: 1, overflowY: 'auto', maxHeight: 420, paddingRight: 4 }}>
+              {(activeHierarchy?.topLevelTasks ?? activeModuleData.tasks).map((task) => renderTaskDetail(task))}
+            </div>
+          </div>
+        ) : (
+          <div style={{ background: themeStyles.cardBg, border: `1px solid ${themeStyles.border}`, borderRadius: 8, minHeight: 520, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: themeStyles.glowCyan }}>
+            <Space direction="vertical" align="center">
+              <ClockCircleOutlined style={{ color: themeStyles.idle, fontSize: 40 }} />
+              <span style={{ color: themeStyles.textSecondary, fontSize: 13 }}>请先选择执行模块</span>
+            </Space>
+          </div>
+        )}
+      </Col>
+
+      {/* 3. Right Column: Pipeline Step Details */}
+      <Col span={8}>
         {activeModuleData ? (
           <aside
             style={{
               position: 'relative',
               background: themeStyles.cardBg,
-              border: `1px solid ${themeStyles.accentBorder}`,
+              border: `1px solid ${themeStyles.border}`,
               borderRadius: 8,
               minHeight: 520,
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: themeStyles.glowMagenta,
               overflow: 'hidden',
-              boxShadow: themeStyles.glowCyan,
             }}
           >
-            <div aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'linear-gradient(180deg, var(--vscode-panel-border, rgba(127,127,127,0.10)), transparent 1px)', backgroundSize: '100% 8px', opacity: 0.14 }} />
-            <div style={{ position: 'relative', padding: 16 }}>
-              <Space direction="vertical" size={18} style={{ width: '100%' }}>
-                <div>
-                  <div style={{ fontSize: 10, color: themeStyles.textMuted, fontWeight: 800, letterSpacing: 2 }}>模块</div>
-                  <h4 style={{ margin: '4px 0 0', color: themeStyles.accentText, fontFamily: 'monospace', fontSize: 18 }}>{activeModuleData.moduleKey}</h4>
+            {selectedTask ? (
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}>
+                {/* Header */}
+                <div style={{ padding: '12px 14px', borderBottom: `1px solid ${themeStyles.borderLight}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 10, color: themeStyles.textMuted, fontWeight: 800, letterSpacing: 2 }}>步骤详情</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                      <span style={{ color: themeStyles.accentText, fontFamily: 'monospace', fontSize: 15, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {selectedTask.name || selectedTask.id}
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                    <Tag
+                      style={{
+                        margin: 0,
+                        color: getStatusColor(selectedTask.status),
+                        borderColor: `${getStatusColor(selectedTask.status)}66`,
+                        background: themeStyles.metricBg,
+                        fontFamily: 'monospace',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {statusText[selectedTask.status] ?? selectedTask.status}
+                    </Tag>
+                    {selectedTask.status === 'success' ? (
+                      <Tooltip title="重试该步骤">
+                        <Button size="small" type="text" icon={<ReloadOutlined style={{ color: themeStyles.accentText }} />} onClick={() => onRetryStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === selectedTask.id))} />
+                      </Tooltip>
+                    ) : selectedTask.status === 'failed' ? (
+                      <Tooltip title="重试失败步骤">
+                        <Button size="small" type="text" icon={<ReloadOutlined style={{ color: themeStyles.error }} />} onClick={() => onRetryFailedStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === selectedTask.id))} />
+                      </Tooltip>
+                    ) : selectedTask.status !== 'running' ? (
+                      <Tooltip title="单步运行">
+                        <Button size="small" type="text" icon={<PlayCircleOutlined style={{ color: themeStyles.success }} />} onClick={() => onRunSingleStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === selectedTask.id))} />
+                      </Tooltip>
+                    ) : null}
+                  </div>
                 </div>
 
-                <Row gutter={16} style={{ borderTop: `1px solid ${themeStyles.borderLight}`, paddingTop: 12 }}>
-                  <Col span={8}>
-                    <div style={{ padding: 10, border: `1px solid ${themeStyles.border}`, background: themeStyles.metricBg, borderRadius: 6 }}>
-                      <strong style={{ color: themeStyles.textPrimary, fontSize: 18 }}>{(peakMetrics[activeModuleData.moduleKey]?.maxCpu || activeModuleData.cpu)}%</strong>
-                      <div style={{ color: themeStyles.textSecondary, fontSize: 11, letterSpacing: 1 }}>CPU</div>
-                    </div>
-                  </Col>
-                  <Col span={8}>
-                    <div style={{ padding: 10, border: `1px solid ${themeStyles.border}`, background: themeStyles.metricBg, borderRadius: 6 }}>
-                      <strong style={{ color: themeStyles.textPrimary, fontSize: 18 }}>{(peakMetrics[activeModuleData.moduleKey]?.maxMem || activeModuleData.mem).toFixed(1)}GB</strong>
-                      <div style={{ color: themeStyles.textSecondary, fontSize: 11, letterSpacing: 1 }}>MEM</div>
-                    </div>
-                  </Col>
-                  <Col span={8}>
-                    <div style={{ padding: 10, border: `1px solid ${themeStyles.border}`, background: themeStyles.metricBg, borderRadius: 6 }}>
-                      <strong style={{ color: themeStyles.amber, fontSize: 18 }}>{formatStartTime(activeModuleData.startedAt)}</strong>
-                      <div style={{ color: themeStyles.textSecondary, fontSize: 11, letterSpacing: 1 }}>开始</div>
-                    </div>
-                  </Col>
-                </Row>
-
-                <div style={{ borderTop: `1px solid ${themeStyles.border}`, paddingTop: 14 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                    <h5 style={{ margin: 0, color: themeStyles.accentText, letterSpacing: 1 }}>
-                      步骤详情 ({activeModuleData.tasks.length})
-                    </h5>
-                    {selectedTask && (
-                      <Tag
+                {/* Body Details */}
+                <div style={{ padding: 14, flex: 1, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
+                  {selectedTask.command && (
+                    <div style={{ fontSize: 12 }}>
+                      <div style={{ color: themeStyles.textMuted, fontWeight: 700, marginBottom: 4 }}>执行命令</div>
+                      <div
                         style={{
-                          margin: 0,
-                          color: getStatusColor(selectedTask.status),
-                          borderColor: `${getStatusColor(selectedTask.status)}66`,
-                          background: themeStyles.metricBg,
+                          background: 'var(--vscode-textCodeBlock-background, rgba(0,0,0,0.2))',
+                          padding: '6px 8px',
+                          borderRadius: 4,
+                          border: `1px solid ${themeStyles.borderLight}`,
                           fontFamily: 'monospace',
+                          color: themeStyles.accentText,
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-all',
                         }}
                       >
-                        当前：{selectedTask.name}
-                      </Tag>
-                    )}
-                  </div>
-                  <div style={{ display: 'grid', gap: 8, maxHeight: 392, overflowY: 'auto', paddingRight: 4 }}>
-                    {(activeHierarchy?.topLevelTasks ?? activeModuleData.tasks).map((task) => renderTaskDetail(task))}
+                        {selectedTask.command}
+                      </div>
+                    </div>
+                  )}
+
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: 10,
+                      borderRadius: 6,
+                      background: 'var(--vscode-list-hoverBackground, rgba(127,127,127,0.04))',
+                      border: `1px solid ${themeStyles.borderLight}`,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ fontSize: 12, color: themeStyles.textSecondary, lineHeight: '1.4' }}>
+                      该步骤的执行日志和实时输出已重定向到 VS Code 终端。点击步骤时会自动开启，若不慎关闭，可点击下方按钮重新打开终端查看：
+                    </div>
+                    <Button
+                      type="primary"
+                      size="small"
+                      icon={<PlayCircleOutlined />}
+                      onClick={() => {
+                        void openExecutionTerminal({
+                          title: `${activeModuleData.moduleKey} - ${selectedTask.name || selectedTask.id}`,
+                          command: selectedTask.command,
+                        });
+                      }}
+                      style={{ alignSelf: 'flex-start' }}
+                    >
+                      打开 VS Code 终端
+                    </Button>
                   </div>
                 </div>
-              </Space>
-            </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                <Space direction="vertical" align="center">
+                  <ClockCircleOutlined style={{ color: themeStyles.idle, fontSize: 40 }} />
+                  <span style={{ color: themeStyles.textSecondary, fontSize: 13 }}>选择步骤查看详情与日志</span>
+                </Space>
+              </div>
+            )}
           </aside>
         ) : (
-          <aside style={{ background: themeStyles.cardBg, border: `1px solid ${themeStyles.border}`, borderRadius: 8, minHeight: 520, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: themeStyles.glowMagenta }}>
+          <div style={{ background: themeStyles.cardBg, border: `1px solid ${themeStyles.border}`, borderRadius: 8, minHeight: 520, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: themeStyles.glowMagenta }}>
             <Space direction="vertical" align="center">
-              <ClockCircleOutlined style={{ color: themeStyles.idle, fontSize: 48 }} />
-              <span style={{ color: themeStyles.textSecondary }}>未选择模块</span>
+              <ClockCircleOutlined style={{ color: themeStyles.idle, fontSize: 40 }} />
+              <span style={{ color: themeStyles.textSecondary, fontSize: 13 }}>未选择模块</span>
             </Space>
-          </aside>
+          </div>
         )}
       </Col>
     </Row>

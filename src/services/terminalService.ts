@@ -59,14 +59,21 @@ export async function openExecutionTerminal(options: {
   const command = typeof options.command === 'string' ? options.command.trim() : '';
   const requestedCwd = typeof options.cwd === 'string' && options.cwd.trim() ? options.cwd.trim() : undefined;
   const terminalCwd = requestedCwd ?? resolveExecutionCwd(title, command);
-  const terminal = vscode.window.createTerminal({
-    name: title,
-    cwd: terminalCwd,
-  });
 
-  terminal.show();
-  if (command) {
-    terminal.sendText(command);
+  let terminal = vscode.window.terminals.find((t) => t.name === title);
+  const isNew = !terminal;
+
+  if (isNew) {
+    terminal = vscode.window.createTerminal({
+      name: title,
+      cwd: terminalCwd,
+    });
+  }
+
+  terminal!.show();
+
+  if (isNew && command) {
+    terminal!.sendText(command);
   }
 
   vscode.window.showInformationMessage(`DFT IDE terminal opened: ${title}`);
