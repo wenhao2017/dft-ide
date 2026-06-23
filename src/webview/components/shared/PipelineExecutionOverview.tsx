@@ -368,6 +368,11 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
 
   const activateModule = useCallback((moduleKey: string) => {
     setActiveModuleKey(moduleKey);
+    setCheckedModuleKeys((prev) => {
+      const next = new Set(prev);
+      next.add(moduleKey);
+      return next;
+    });
     onActiveModuleChange?.(moduleKey);
   }, [onActiveModuleChange]);
 
@@ -604,6 +609,10 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
           ? <Tooltip title="单步运行"><Button size="small" type="text" icon={<PlayCircleOutlined style={{ color: themeStyles.success }} />} onClick={(e) => { e.stopPropagation(); onRunSingleStep?.(activeModuleData.moduleKey, activeModuleData.tasks.findIndex((item) => item.id === task.id)); }} /></Tooltip>
           : null;
 
+    const taskIndex = activeModuleData.tasks.findIndex((item) => item.id === task.id);
+    const isExcluded = activeModuleData.runState === 'idle' && taskIndex !== -1 && (taskIndex < stepRange[0] || taskIndex > stepRange[1]);
+    const opacity = (isExcluded || task.status === 'skipped') ? 0.55 : 1;
+
     return (
       <div
         key={task.id}
@@ -649,7 +658,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             gap: 8,
             padding: '4px 8px',
             border: `1px solid ${isSelected ? themeStyles.selectedBorder : isRunning ? themeStyles.accentBorder : themeStyles.borderLight}`,
-            borderLeft: `${hasChildren && !isChild ? 4 : 3}px solid ${color}`,
+            borderLeft: `${hasChildren && !isChild ? 4 : 3}px solid ${isExcluded ? themeStyles.idle : color}`,
             borderRadius: 4,
             background: isSelected
               ? themeStyles.selectedBg
@@ -661,6 +670,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             boxShadow: isSelected ? themeStyles.selectedShadow : isRunning ? themeStyles.glowCyan : 'none',
             cursor: 'pointer',
             transition: 'all 0.12s ease',
+            opacity,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
@@ -696,7 +706,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             ) : task.status === 'failed' || task.status === 'stopped' ? (
               <CloseCircleOutlined style={{ color, fontSize: 13 }} />
             ) : (
-              <ClockCircleOutlined style={{ color, fontSize: 13 }} />
+              <ClockCircleOutlined style={{ color: isExcluded ? themeStyles.idle : color, fontSize: 13 }} />
             )}
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
               <span style={{ color: isSelected ? themeStyles.selectedFg : themeStyles.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace', fontWeight: isSelected ? 700 : 500, fontSize: 12 }}>
@@ -723,8 +733,8 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                 {children.length}子项
               </Tag>
             )}
-            <Tag style={{ margin: 0, color, borderColor: `${color}66`, background: themeStyles.metricBg, fontFamily: 'monospace', fontSize: 9, padding: '0 2px', height: 16, lineHeight: '14px' }}>
-              {statusText[task.status] ?? task.status}
+            <Tag style={{ margin: 0, color: isExcluded ? themeStyles.idle : color, borderColor: isExcluded ? themeStyles.borderLight : `${color}66`, background: themeStyles.metricBg, fontFamily: 'monospace', fontSize: 9, padding: '0 2px', height: 16, lineHeight: '14px' }}>
+              {isExcluded ? '排除' : (statusText[task.status] ?? task.status)}
             </Tag>
             {action}
           </div>
@@ -1024,23 +1034,49 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <div style={{ minWidth: 0 }}>
+              <div style={{ minWidth: 0, flex: 1, marginRight: 8 }}>
                 <div style={{ fontSize: 10, color: themeStyles.textMuted, fontWeight: 800, letterSpacing: 2 }}>模块流水线</div>
                 <h5 style={{ margin: '2px 0 0', color: themeStyles.accentText, fontWeight: 700, fontSize: 15, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {activeModuleData.moduleKey}
                 </h5>
               </div>
-              <Tag
-                style={{
-                  margin: 0,
-                  color: themeStyles.textSecondary,
-                  borderColor: themeStyles.borderLight,
-                  background: themeStyles.metricBg,
-                  fontFamily: 'monospace',
-                }}
-              >
-                共 {activeModuleData.tasks.length} 个步骤
-              </Tag>
+              <Space size={6} style={{ flexShrink: 0 }}>
+                {activeModuleData.runState === 'running' ? (
+                  <Button
+                    type="primary"
+                    danger
+                    size="small"
+                    icon={<StopOutlined />}
+                    onClick={() => stopRun(activeModuleData.moduleKey)}
+                    style={{ fontSize: 11, height: 22 }}
+                  >
+                    停止运行
+                  </Button>
+                ) : (
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<PlayCircleOutlined />}
+                    onClick={() => handleSingleRunClick(activeModuleData.moduleKey)}
+                    style={{ fontSize: 11, height: 22 }}
+                  >
+                    开始运行
+                  </Button>
+                )}
+                <Tag
+                  style={{
+                    margin: 0,
+                    color: themeStyles.textSecondary,
+                    borderColor: themeStyles.borderLight,
+                    background: themeStyles.metricBg,
+                    fontFamily: 'monospace',
+                    height: 22,
+                    lineHeight: '20px',
+                  }}
+                >
+                  共 {activeModuleData.tasks.length} 步
+                </Tag>
+              </Space>
             </div>
 
             {/* Module Metrics (CPU, MEM, Start Time, Run Time) displayed in the middle column header */}
@@ -1052,7 +1088,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             </div>
 
             {/* Step Selection Range Slider */}
-            {activeModuleData.tasks.length > 0 && (
+            {activeModuleData.tasks.length > 1 && (
               <div
                 style={{
                   background: 'var(--vscode-list-hoverBackground, rgba(127,127,127,0.02))',
@@ -1063,13 +1099,16 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <span style={{ fontSize: 11, color: themeStyles.textSecondary, fontWeight: 700 }}>运行步骤范围选择:</span>
+                  <span style={{ fontSize: 11, color: themeStyles.textSecondary, fontWeight: 700 }}>
+                    运行步骤范围选择 {activeModuleData.runState === 'running' && <span style={{ color: themeStyles.amber, fontWeight: 500 }}>(运行中不可修改)</span>}:
+                  </span>
                   <span style={{ fontSize: 11, color: themeStyles.accentText, fontWeight: 700, fontFamily: 'monospace' }}>
                     {activeModuleData.tasks[stepRange[0]]?.name} ➔ {activeModuleData.tasks[stepRange[1]]?.name}
                   </span>
                 </div>
                 <Slider
                   range
+                  disabled={activeModuleData.runState === 'running'}
                   min={0}
                   max={activeModuleData.tasks.length - 1}
                   value={stepRange}
