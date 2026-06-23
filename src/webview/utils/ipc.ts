@@ -541,6 +541,7 @@ export async function startPipelineRuntime(options: {
   flowKey: 'hibist' | 'sailor' | 'verification';
   moduleKey: string;
   flowLabel: string;
+  selectedTaskIds?: string[];
 }): Promise<{ success: boolean; error?: string }> {
   const res = await ipcRequest('startPipelineRuntime', options);
   return res as { success: boolean; error?: string };

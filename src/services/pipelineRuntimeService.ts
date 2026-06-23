@@ -127,6 +127,44 @@ function parseYamlTasks(content: string): PipelineTask[] {
   return tasks;
 }
 
+const DEFAULT_PIPELINE_TASKS: Record<PipelineFlowKey, Array<{ id: string; name: string; command: string; description: string }>> = {
+  hibist: [
+    { id: 'gen_analysis_env', name: 'gen_analysis_env', command: 'dftm gen_analysis_env -cfg cpu_top.cfg', description: '生成 analysis 阶段分析环境' },
+    { id: 'run_analysis', name: 'run_analysis', command: 'dftm run_analysis -cfg cpu_top.cfg', description: '执行 design rule check 与 DFT 分析' },
+    { id: 'gen_insert_env', name: 'gen_insert_env', command: 'dftm gen_insert_env -cfg cpu_top.cfg', description: '生成 insert 阶段 MBIST 插入环境' },
+    { id: 'run_insert', name: 'run_insert', command: 'dftm run_insert -cfg cpu_top.cfg', description: '执行 wrapper generation 与 MBIST 插入' },
+    { id: 'gen_build_env', name: 'gen_build_env', command: 'dftm gen_build_env -cfg cpu_top.cfg', description: '生成 build 阶段环境' },
+    { id: 'run_build', name: 'run_build', command: 'dftm run_build -cfg cpu_top.cfg', description: '构建 post-MBIST RTL 与结构描述' },
+    { id: 'gen_syn_env', name: 'gen_syn_env', command: 'dftm gen_syn_env -cfg cpu_top.cfg', description: '生成 synthesis 综合环境' },
+    { id: 'run_syn', name: 'run_syn', command: 'dftm run_syn -cfg cpu_top.cfg', description: '执行 top-link check 与逻辑综合' },
+    { id: 'gen_fml_env', name: 'gen_fml_env', command: 'dftm gen_fml_env -cfg cpu_top.cfg', description: '生成 Formality 验证环境' },
+    { id: 'run_fml', name: 'run_fml', command: 'dftm run_fml -cfg cpu_top.cfg', description: '执行 Formality 形式等价性验证' },
+    { id: 'gen_sim_env', name: 'gen_sim_env', command: 'dftm gen_sim_env -cfg cpu_top.cfg', description: '生成仿真环境与 testbench' },
+    { id: 'run_sim', name: 'run_sim', command: 'dftm run_sim -cfg cpu_top.cfg', description: '运行 MBIST 并行/串行等多类型仿真' },
+    { id: 'release', name: 'release', command: 'dftm release -cfg cpu_top.cfg -version 0.1.0', description: '打包交付 release 介质及报告' },
+  ],
+  sailor: [
+    { id: 'create_branch', name: 'create_branch', command: 'sailor branch -create feat_dft_scan', description: '创建或切换 feature 分支' },
+    { id: 'gen_cfg', name: 'gen_cfg', command: 'sailor gen_cfg -spec norm_input.xlsx', description: '根据归一化表格生成 sailor cfg' },
+    { id: 'user_hook_before_gen_dcg_env', name: 'user_hook_before_gen_dcg_env', command: 'run_flow_sailor hook --before gen_dcg_env', description: '执行 DCG 生成前置 ECO 钩子' },
+    { id: 'gen_dcg_env', name: 'gen_dcg_env', command: 'sailor gen_dcg_env -cfg sailor.cfg', description: '生成 DCG 扫描链环境' },
+    { id: 'user_hook_after_gen_cfg', name: 'user_hook_after_gen_cfg', command: 'run_flow_sailor hook --after gen_cfg', description: '执行生成后置 ECO 校验钩子' },
+    { id: 'run_scan', name: 'run_scan', command: 'sailor run_scan -cfg sailor.cfg', description: '执行 scan 链插入与缝合' },
+    { id: 'gen_analysis_env', name: 'gen_analysis_env', command: 'sailor gen_analysis_env -cfg sailor.cfg', description: '生成 scan 分析与 DRC 环境' },
+    { id: 'run_analysis', name: 'run_analysis', command: 'sailor run_analysis -cfg sailor.cfg', description: '执行 scan 检查与 DRC 分析' },
+    { id: 'commit_result', name: 'commit_result', command: 'sailor commit -files "cfg,scripts,reports"', description: '提交配置文件、脚本与报告' },
+  ],
+  verification: [
+    { id: 'prepare_workspace', name: 'prepare_workspace', command: 'lander prepare_workspace --dir ./verify_run', description: '准备 verification workspace' },
+    { id: 'load_config', name: 'load_config', command: 'lander load_config --file lander_verify.cfg', description: '加载 lander 配置' },
+    { id: 'check_env', name: 'check_env', command: 'run_flow_lander check_env --tools', description: '检查仿真环境、filelist 和工具版本' },
+    { id: 'submit_mode', name: 'submit_mode', command: 'lander submit_mode --mode scan_test', description: '提交仿真 mode 任务' },
+    { id: 'collect_result', name: 'collect_result', command: 'lander collect_result --dir ./verify_run', description: '收集仿真结果' },
+    { id: 'parse_report', name: 'parse_report', command: 'lander parse_report --out report.json', description: '解析 pass / fail / error 报告' },
+    { id: 'publish_dashboard', name: 'publish_dashboard', command: 'lander publish_dashboard --server ide-board', description: '发布结果到 IDE 看板' },
+  ]
+};
+
 function getYamlFileName(flowKey: PipelineFlowKey): string {
   if (flowKey === 'verification') return 'lander.yaml';
   return `${flowKey}.yaml`;
@@ -139,33 +177,32 @@ function getYamlPath(flowKey: PipelineFlowKey): string | undefined {
 }
 
 function getDefaultYamlContent(flowKey: PipelineFlowKey): string {
-  const config = pipelineFlowConfigs[flowKey];
-  if (!config) return '';
-  
   let content = `# DFT IDE Pipeline Configuration for ${flowKey.toUpperCase()}\n`;
   content += `# Modify this file to customize the steps and commands of the pipeline.\n\n`;
-  
-  const makeDummyTask = (id: string, name: string, command: string, description: string) => {
-    return { id, name, command, description };
-  };
-  const tasks = config.getInitialTasks((id, name, command, description) => makeDummyTask(id, name, command, description) as any);
-  
+
+  const tasks = DEFAULT_PIPELINE_TASKS[flowKey] || [];
   tasks.forEach((task) => {
     content += `- id: ${task.id}\n`;
     content += `  name: ${task.name}\n`;
     content += `  command: "${task.command}"\n`;
     content += `  description: ${task.description}\n\n`;
   });
-  
+
   return content;
 }
 
 function loadPipelineConfig(flowKey: PipelineFlowKey): { tasks: PipelineTask[]; links: PipelineLink[] } {
   const yamlPath = getYamlPath(flowKey);
-  
-  // Default values
-  const defaultTasks = pipelineFlowConfigs[flowKey].getInitialTasks((id, name, command, description) => makeTask(id, name, command, description));
-  const defaultLinks = pipelineFlowConfigs[flowKey].getInitialLinks();
+  const defaultTasks = (DEFAULT_PIPELINE_TASKS[flowKey] || []).map((t) => makeTask(t.id, t.name, t.command, t.description));
+
+  const generateLinks = (tasks: PipelineTask[]) => {
+    const links: PipelineLink[] = [];
+    for (let i = 0; i < tasks.length - 1; i++) {
+      links.push({ source: tasks[i].id, target: tasks[i + 1].id });
+    }
+    return links;
+  };
+  const defaultLinks = generateLinks(defaultTasks);
 
   if (!yamlPath) {
     return { tasks: defaultTasks, links: defaultLinks };
@@ -176,7 +213,7 @@ function loadPipelineConfig(flowKey: PipelineFlowKey): { tasks: PipelineTask[]; 
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    
+
     if (!fs.existsSync(yamlPath)) {
       const defaultContent = getDefaultYamlContent(flowKey);
       fs.writeFileSync(yamlPath, defaultContent, 'utf-8');
@@ -185,17 +222,12 @@ function loadPipelineConfig(flowKey: PipelineFlowKey): { tasks: PipelineTask[]; 
 
     const content = fs.readFileSync(yamlPath, 'utf-8');
     const parsedTasks = parseYamlTasks(content);
-    
+
     if (parsedTasks.length === 0) {
       return { tasks: defaultTasks, links: defaultLinks };
     }
 
-    // Auto-generate sequential links
-    const links: PipelineLink[] = [];
-    for (let i = 0; i < parsedTasks.length - 1; i++) {
-      links.push({ source: parsedTasks[i].id, target: parsedTasks[i + 1].id });
-    }
-
+    const links = generateLinks(parsedTasks);
     return { tasks: parsedTasks, links };
   } catch (error) {
     console.error(`Error loading pipeline config for ${flowKey}:`, error);
@@ -317,7 +349,12 @@ export class PipelineRuntimeService {
     return runtime;
   }
 
-  startRuntime(flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string): PipelineRuntimeSnapshot {
+  startRuntime(
+    flowKey: PipelineFlowKey,
+    moduleKey: string,
+    flowLabel: string,
+    selectedTaskIds?: string[],
+  ): PipelineRuntimeSnapshot {
     const key = getPipelineRuntimeKey(flowKey, moduleKey);
     const config = pipelineFlowConfigs[flowKey];
     const runId = `pipeline_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
@@ -327,12 +364,24 @@ export class PipelineRuntimeService {
 
     const { tasks: parsedTasks, links: parsedLinks } = loadPipelineConfig(flowKey);
 
-    const initialTasks = parsedTasks.map((t, idx) => ({
-      ...t,
-      status: idx === 0 ? 'running' as TaskStatus : 'pending' as TaskStatus,
-      startedAt: idx === 0 ? nowText() : undefined,
-      logs: [`[${nowText()}] ${config.logPrefix} ${t.name} 已创建，初始状态：${idx === 0 ? 'running' : 'pending'}。`],
-    }));
+    const initialTasks = parsedTasks.map((t, idx) => {
+      const isSelected = !selectedTaskIds || selectedTaskIds.includes(t.id);
+      const isFirstSelected = isSelected && (
+        selectedTaskIds
+          ? t.id === selectedTaskIds[0]
+          : idx === 0
+      );
+      return {
+        ...t,
+        status: isSelected
+          ? (isFirstSelected ? 'running' as TaskStatus : 'pending' as TaskStatus)
+          : 'skipped' as TaskStatus,
+        startedAt: isFirstSelected ? nowText() : undefined,
+        logs: isSelected
+          ? [`[${nowText()}] ${config.logPrefix} ${t.name} 已创建，初始状态：${isFirstSelected ? 'running' : 'pending'}。`]
+          : [`[${nowText()}] ${config.logPrefix} ${t.name} 已跳过。`],
+      };
+    });
 
     const runtime: PipelineRuntimeSnapshot = {
       runId,
@@ -342,7 +391,7 @@ export class PipelineRuntimeService {
       tasks: initialTasks,
       links: parsedLinks,
       logs: [`[${nowText()}] ${config.logPrefix} 流水线已启动。`],
-      selectedTaskId: initialTasks[0]?.id,
+      selectedTaskId: initialTasks.find((t) => t.status === 'running')?.id || initialTasks[0]?.id,
       runState: 'running',
       startedAt: nowStamp(),
       updatedAt: nowStamp(),
@@ -350,50 +399,22 @@ export class PipelineRuntimeService {
     this.runtimes.set(key, runtime);
     this.notify(key);
 
-    // Decide if we run default simulation or custom sequential simulation
-    const defaultTasks = config.getInitialTasks((id) => ({ id } as any));
-    const isDefault = defaultTasks.length === parsedTasks.length && defaultTasks.every((t, i) => t.id === parsedTasks[i].id);
+    const selectedTasksToRun = initialTasks.filter((t) => t.status !== 'skipped');
 
-    if (isDefault) {
-      config.timeline.forEach((event) => {
-        scheduleRuntime(key, event.delay, () => {
-          event.action({
-            appendLog: (msg) => this.appendLog(key, config.logPrefix, msg),
-            addTasks: (newTasks, newLinks) => {
-              this.updateRuntime(key, (current) => ({
-                ...current,
-                tasks: [...current.tasks, ...newTasks],
-                links: [...current.links, ...newLinks],
-              }));
-            },
-            patchTask: (id, patch) => this.patchTask(key, id, patch),
-            setRunState: (runState) => {
-              this.updateRuntime(key, (current) => ({
-                ...current,
-                runState,
-                finishedAt: runState === 'completed' || runState === 'stopped' ? nowStamp() : current.finishedAt,
-              }));
-            },
-            getNow: nowText,
-          });
-        });
-      });
-    } else {
-      runSequentialSimulation(
-        key,
-        initialTasks,
-        config.logPrefix,
-        (id, patch) => this.patchTask(key, id, patch),
-        (msg) => this.appendLog(key, config.logPrefix, msg),
-        (runState) => {
-          this.updateRuntime(key, (current) => ({
-            ...current,
-            runState,
-            finishedAt: runState === 'completed' || runState === 'stopped' ? nowStamp() : current.finishedAt,
-          }));
-        }
-      );
-    }
+    runSequentialSimulation(
+      key,
+      selectedTasksToRun,
+      config.logPrefix,
+      (id, patch) => this.patchTask(key, id, patch),
+      (msg) => this.appendLog(key, config.logPrefix, msg),
+      (runState) => {
+        this.updateRuntime(key, (current) => ({
+          ...current,
+          runState,
+          finishedAt: runState === 'completed' || runState === 'stopped' ? nowStamp() : current.finishedAt,
+        }));
+      }
+    );
 
     return runtime;
   }
@@ -466,47 +487,21 @@ export class PipelineRuntimeService {
     const key = getPipelineRuntimeKey(flowKey, moduleKey);
     const config = pipelineFlowConfigs[flowKey];
 
-    const { tasks: parsedTasks } = loadPipelineConfig(flowKey);
-    const defaultTasks = config.getInitialTasks((id) => ({ id } as any));
-    const isDefault = defaultTasks.length === parsedTasks.length && defaultTasks.every((t, i) => t.id === parsedTasks[i].id);
+    this.patchTask(key, taskId, {
+      status: 'running',
+      startedAt: nowText(),
+      finishedAt: undefined,
+    });
+    this.appendLog(key, config.logPrefix, `手动重跑任务 ${taskId}...`);
 
-    if (isDefault) {
-      config.onRerun(taskId, {
-        appendLog: (msg) => this.appendLog(key, config.logPrefix, msg),
-        patchTask: (id, patch) => this.patchTask(key, id, patch),
-        setRunState: (runState) => {
-          this.updateRuntime(key, (runtime) => ({
-            ...runtime,
-            runState,
-            finishedAt: runState === 'completed' || runState === 'stopped' ? nowStamp() : runtime.finishedAt,
-          }));
-        },
-        getNow: nowText,
-        schedule: (delay, action) => scheduleRuntime(key, delay, action),
-        setRuntime: (next) => {
-          this.updateRuntime(key, (runtime) => (
-            typeof next === 'function' ? next(runtime) : next
-          ));
-        },
-      });
-    } else {
-      // Generic rerun
+    scheduleRuntime(key, 1200, () => {
       this.patchTask(key, taskId, {
-        status: 'running',
-        startedAt: nowText(),
-        finishedAt: undefined,
+        status: 'success',
+        finishedAt: nowText(),
+        duration: '1.2s',
       });
-      this.appendLog(key, config.logPrefix, `手动重跑任务 ${taskId}...`);
-
-      scheduleRuntime(key, 1200, () => {
-        this.patchTask(key, taskId, {
-          status: 'success',
-          finishedAt: nowText(),
-          duration: '1.2s',
-        });
-        this.appendLog(key, config.logPrefix, `任务 ${taskId} 重跑成功。`);
-      });
-    }
+      this.appendLog(key, config.logPrefix, `任务 ${taskId} 重跑成功。`);
+    });
   }
 
   private appendLog(key: string, prefix: string, msg: string): void {

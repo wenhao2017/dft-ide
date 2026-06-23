@@ -7,6 +7,7 @@ import {
   List,
   Modal,
   Row,
+  Slider,
   Space,
   Tag,
   Tooltip,
@@ -25,7 +26,6 @@ import {
 import usePipelineRuntimeStore, {
   PipelineFlowKey,
   PipelineRuntimeSnapshot,
-  getInitialTaskCount,
   getPipelineRuntimeKey,
   subscribePipelineRuntimeUpdates,
 } from '../../store/pipelineRuntimeStore';
@@ -153,17 +153,7 @@ function makeTask(
   };
 }
 
-function getInitialTasks(flowKey: PipelineFlowKey): PipelineTask[] {
-  const config = pipelineFlowConfigs[flowKey];
-  if (!config) return [];
-  return config.getInitialTasks(makeTask);
-}
-
-function getInitialLinks(flowKey: PipelineFlowKey): PipelineLink[] {
-  const config = pipelineFlowConfigs[flowKey];
-  if (!config) return [];
-  return config.getInitialLinks();
-}
+// Initial tasks and links fallback functions removed, configurations now load dynamically from workspace YAML files via runtime snapshots.
 
 function getTaskMetrics(task: PipelineTask) {
   if (task.status === 'running') {
@@ -197,9 +187,9 @@ function summarizeRuntime(
   flowKey: PipelineFlowKey,
   runtime?: PipelineRuntimeSnapshot,
 ): PipelineRunOverview {
-  const total = runtime?.tasks.length || getInitialTaskCount(flowKey);
-  const tasks = runtime?.tasks && runtime.tasks.length ? runtime.tasks : getInitialTasks(flowKey);
-  const links = runtime?.links && runtime.links.length ? runtime.links : getInitialLinks(flowKey);
+  const total = runtime?.tasks.length || 0;
+  const tasks = runtime?.tasks || [];
+  const links = runtime?.links || [];
 
   const completed = tasks.filter((task) =>
     task.status === 'success' ||
@@ -332,6 +322,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(() => new Set());
   const [peakMetrics, setPeakMetrics] = useState<Record<string, { maxCpu: number; maxMem: number }>>({});
   const [stoppedTaskSnapshots, setStoppedTaskSnapshots] = useState<Record<string, { taskIndex: number; taskName: string }>>({});
+  const [stepRange, setStepRange] = useState<[number, number]>([0, 0]);
   const taskDetailRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const selectedModuleKeys = useMemo(() => {
@@ -347,14 +338,38 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
 
   const getFlowLabel = useCallback((moduleKey: string) => `${flowLabel} / ${moduleKey}`, [flowLabel]);
 
+  const ensureRuntimeVisible = useCallback((moduleKey: string) => {
+    ensureRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
+  }, [ensureRuntime, flowKey, getFlowLabel]);
+
+  useEffect(() => {
+    selectedModuleKeys.forEach((moduleKey) => {
+      ensureRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
+    });
+  }, [flowKey, selectedModuleKeys, ensureRuntime, getFlowLabel]);
+
+  const visibleRuns = useMemo(() => (
+    selectedModuleKeys.map((moduleKey) => {
+      const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
+      return summarizeRuntime(moduleKey, flowKey, runtime);
+    })
+  ), [flowKey, runtimes, selectedModuleKeys]);
+
+  const activeModuleData = visibleRuns.find((run) => run.moduleKey === activeModuleKey);
+  const activeHierarchy = activeModuleData ? getTaskHierarchy(activeModuleData) : undefined;
+  const selectedTask = activeModuleData?.tasks.find((task) => task.id === selectedTaskId);
+
+  const taskCount = activeModuleData?.tasks.length || 0;
+  useEffect(() => {
+    if (taskCount > 0) {
+      setStepRange([0, taskCount - 1]);
+    }
+  }, [taskCount]);
+
   const activateModule = useCallback((moduleKey: string) => {
     setActiveModuleKey(moduleKey);
     onActiveModuleChange?.(moduleKey);
   }, [onActiveModuleChange]);
-
-  const ensureRuntimeVisible = useCallback((moduleKey: string) => {
-    ensureRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
-  }, [ensureRuntime, flowKey, getFlowLabel]);
 
   const startRun = useCallback((moduleKey: string) => {
     setPeakMetrics((prev) => ({ ...prev, [moduleKey]: { maxCpu: 0, maxMem: 0 } }));
@@ -364,9 +379,13 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
       return next;
     });
     ensureRuntimeVisible(moduleKey);
-    startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
+
+    const targetTasks = activeModuleData?.tasks.slice(stepRange[0], stepRange[1] + 1) || [];
+    const selectedTaskIds = targetTasks.length > 0 ? targetTasks.map((t) => t.id) : undefined;
+
+    startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), selectedTaskIds);
     activateModule(moduleKey);
-  }, [activateModule, ensureRuntimeVisible, flowKey, getFlowLabel, startRuntime]);
+  }, [activateModule, ensureRuntimeVisible, flowKey, getFlowLabel, startRuntime, activeModuleData, stepRange]);
 
   const stopRun = useCallback((moduleKey: string) => {
     const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
@@ -460,12 +479,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     },
   }), [startRun, stopRun]);
 
-  const visibleRuns = useMemo(() => (
-    selectedModuleKeys.map((moduleKey) => {
-      const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
-      return summarizeRuntime(moduleKey, flowKey, runtime);
-    })
-  ), [flowKey, runtimes, selectedModuleKeys]);
 
   useEffect(() => {
     if (externalActiveModuleKey) {
@@ -496,9 +509,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     });
   }, [visibleRuns]);
 
-  const activeModuleData = visibleRuns.find((run) => run.moduleKey === activeModuleKey);
-  const activeHierarchy = activeModuleData ? getTaskHierarchy(activeModuleData) : undefined;
-  const selectedTask = activeModuleData?.tasks.find((task) => task.id === selectedTaskId);
 
   const selectStep = useCallback((run: PipelineRunOverview, taskId: string) => {
     const hierarchy = getTaskHierarchy(run);
@@ -1041,7 +1051,51 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
               <div><span style={{ color: themeStyles.textSecondary }}>用时:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{getModuleRuntime(activeModuleData)}</span></div>
             </div>
 
-            <div style={{ display: 'grid', gap: 5, flex: 1, overflowY: 'auto', maxHeight: 420, paddingRight: 4 }}>
+            {/* Step Selection Range Slider */}
+            {activeModuleData.tasks.length > 0 && (
+              <div
+                style={{
+                  background: 'var(--vscode-list-hoverBackground, rgba(127,127,127,0.02))',
+                  padding: '6px 10px 10px',
+                  borderRadius: 6,
+                  border: `1px solid ${themeStyles.borderLight}`,
+                  marginBottom: 10,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontSize: 11, color: themeStyles.textSecondary, fontWeight: 700 }}>运行步骤范围选择:</span>
+                  <span style={{ fontSize: 11, color: themeStyles.accentText, fontWeight: 700, fontFamily: 'monospace' }}>
+                    {activeModuleData.tasks[stepRange[0]]?.name} ➔ {activeModuleData.tasks[stepRange[1]]?.name}
+                  </span>
+                </div>
+                <Slider
+                  range
+                  min={0}
+                  max={activeModuleData.tasks.length - 1}
+                  value={stepRange}
+                  onChange={(val) => setStepRange(val as [number, number])}
+                  tooltip={{
+                    formatter: (val) => {
+                      if (val === undefined) return '';
+                      const task = activeModuleData.tasks[val];
+                      return task ? `${val + 1}. ${task.name}` : '';
+                    }
+                  }}
+                  styles={{
+                    track: {
+                      background: themeStyles.accent,
+                    },
+                    handle: {
+                      borderColor: themeStyles.accent,
+                      backgroundColor: 'var(--vscode-editor-background)',
+                    }
+                  }}
+                  style={{ margin: '8px 6px 4px' }}
+                />
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gap: 5, flex: 1, overflowY: 'auto', maxHeight: 340, paddingRight: 4 }}>
               {(activeHierarchy?.topLevelTasks ?? activeModuleData.tasks).map((task) => renderTaskDetail(task))}
             </div>
           </div>

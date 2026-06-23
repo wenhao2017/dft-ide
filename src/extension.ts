@@ -476,7 +476,8 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           if (msg.command === 'ensurePipelineRuntime') {
             pipelineRuntimeService.ensureRuntime(flowKey, moduleKey, flowLabel);
           } else if (msg.command === 'startPipelineRuntime') {
-            pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel);
+            const selectedTaskIds = Array.isArray(msg.selectedTaskIds) ? msg.selectedTaskIds : undefined;
+            pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel, selectedTaskIds);
           } else if (msg.command === 'stopPipelineRuntime') {
             pipelineRuntimeService.stopRuntime(flowKey, moduleKey, flowLabel);
           } else if (msg.command === 'selectPipelineTask') {
