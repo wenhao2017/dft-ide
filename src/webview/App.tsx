@@ -26,7 +26,7 @@ import { toggleZenMode as ipcToggleZenMode } from './utils/ipc';
 import type { DftProject } from './services/projectService';
 
 const { Content } = Layout;
-const { Text, Title } = Typography;
+const { Title } = Typography;
 
 type InitialView = { command: 'showWelcome' } | { command: 'loadFlow'; category: string };
 
@@ -337,16 +337,12 @@ const App: React.FC = () => {
 
           @media (max-width: 760px) {
             .dft-shell-header {
-              padding: 10px 12px !important;
+              padding: 6px 10px !important;
             }
 
             .dft-shell-title {
-              font-size: 18px !important;
-              margin-top: 4px !important;
-            }
-
-            .dft-shell-subtitle {
-              display: none;
+              font-size: 14px !important;
+              margin-top: 0 !important;
             }
 
             .dft-shell-body {
@@ -507,37 +503,41 @@ const App: React.FC = () => {
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  gap: 16,
-                  padding: '12px 14px',
+                  gap: 12,
+                  padding: '8px 14px',
                   borderBottom: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
                   background: activeMeta
-                    ? `linear-gradient(135deg, ${activeMeta.accent}1f, transparent 58%)`
+                    ? `linear-gradient(135deg, ${activeMeta.accent}0a, transparent 70%)`
                     : undefined,
                 }}
               >
-                <div style={{ minWidth: 0 }}>
-                  <Tag color={activeMeta?.accent ?? 'blue'} icon={<ThunderboltOutlined />}>
+                <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Title
+                    className="dft-shell-title"
+                    level={4}
+                    style={{ margin: 0, fontSize: 16, display: 'inline-flex', alignItems: 'center' }}
+                  >
+                    {activeMeta?.title ?? `${flowContext.category} 工作流配置`}
+                  </Title>
+                  <Tag color={activeMeta?.accent ?? 'blue'} icon={<ThunderboltOutlined />} style={{ margin: 0 }}>
                     DFT IDE
                   </Tag>
                   {activeProject && (
-                    <Tag color="green" style={{ marginLeft: 8 }}>
+                    <Tag color="green" style={{ margin: 0 }}>
                       {activeProject.name}
                     </Tag>
                   )}
                   {/* 优化1：未保存变更提示 */}
                   {dirtyFlows.has(flowContext.category) && (
-                    <Tag color="warning" style={{ marginLeft: 8 }}>
+                    <Tag color="warning" style={{ margin: 0 }}>
                       ● 有未保存的更改
                     </Tag>
                   )}
-                  <Title className="dft-shell-title" level={2} style={{ margin: '6px 0 0', fontSize: 21 }}>
-                    {activeMeta?.title ?? `${flowContext.category} 工作流配置`}
-                  </Title>
-                  <Text className="dft-shell-subtitle" type="secondary">{activeMeta?.subtitle}</Text>
                 </div>
                 <Button
                   icon={<HomeOutlined />}
                   onClick={() => navigateToFlow('HOME')}
+                  size="small"
                   style={{ flex: '0 0 auto' }}
                 >
                   返回首页
