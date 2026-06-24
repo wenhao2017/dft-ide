@@ -313,7 +313,16 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
     () => ({ onSelect: selectTask, onRerun: rerunTask, onStop: stopTask }),
     [rerunTask, selectTask, stopTask],
   );
-  // 1. Calculate Dagre node positions ONLY when tasks or links structure changes
+  const layoutTaskSignature = useMemo(
+    () => runtime.tasks.map((task) => task.id).join('\u001f'),
+    [runtime.tasks],
+  );
+  const layoutLinkSignature = useMemo(
+    () => runtime.links.map((link) => `${link.source}\u001f${link.target}`).join('\u001e'),
+    [runtime.links],
+  );
+
+  // Calculate Dagre node positions only when task/link topology changes.
   const layoutPositions = useMemo(() => {
     const graph = new dagre.graphlib.Graph();
     graph.setDefaultEdgeLabel(() => ({}));
@@ -331,9 +340,8 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
       }
     });
     return positions;
-  }, [runtime.tasks, runtime.links]);
+  }, [layoutLinkSignature, layoutTaskSignature]);
 
-  // 2. Map positions to ReactFlow nodes and edges (very fast, runs on selection or handlers updates)
   const { nodes, edges } = useMemo(() => {
     const nodes: Node<PipelineNodeData>[] = runtime.tasks.map((task) => {
       const pos = layoutPositions[task.id] ?? { x: 0, y: 0 };

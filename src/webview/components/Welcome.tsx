@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Col, Input, Progress, Row, Spin, Tag, Tooltip, message, Form, Modal } from "antd";
 import Card from "antd/es/card";
 import Empty from "antd/es/empty";
@@ -31,6 +31,7 @@ import {
   WorkspaceProjectInfo,
 } from '../utils/ipc';
 import useWizardStore from '../store/wizardStore';
+import { useShallow } from 'zustand/react/shallow';
 import {
   DftProject,
   fetchProjectDashboard,
@@ -298,7 +299,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
     });
   }, [setActiveProject, workspaceProject, workspaceProjectInfo]);
 
-  const chooseProjectsRootRef = useRef<(project: DftProject, doEnter?: boolean) => Promise<void>>(null as any);
+  const chooseProjectsRootRef = useRef<((project: DftProject, doEnter?: boolean) => Promise<void>) | null>(null);
 
   const enterProject = useCallback(async (project: DftProject, rootPath?: string) => {
     setWorkingProjectId(project.id);
