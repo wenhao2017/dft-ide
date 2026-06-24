@@ -742,7 +742,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
         }}
       />
 
-      <Col span={8}>
+      <Col span={10}>
         <List
           size="small"
           dataSource={visibleRuns}
@@ -893,7 +893,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
         />
       </Col>
 
-      <Col span={16}>
+      <Col span={14}>
         {activeModuleData ? (
           <div
             style={{
