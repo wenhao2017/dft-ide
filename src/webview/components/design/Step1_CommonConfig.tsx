@@ -55,7 +55,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
   const flowKey = category.toLowerCase();
   const project = useVscodePath();
   const workPath = useVscodePath();
-  // const sailorCfg = useVscodePath();
   const [domainCfg, setDomainCfg] = useState<number>(1);
 
   const [currentBranch, setCurrentBranch] = useState<string>('');
@@ -86,7 +85,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
     const source = (savedData.step1 as Record<string, unknown> | undefined) ?? savedData;
     if (source.project) project.setValue(String(source.project));
     if (source.workPath) workPath.setValue(String(source.workPath));
-    // if (source.sailorCfg) sailorCfg.setValue(String(source.sailorCfg));
     if (source.domainCfg) setDomainCfg(Number(source.domainCfg))
 
     if (Array.isArray(source.normalizeCfgs)) {
@@ -115,7 +113,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
     project: project.value,
     workPath: workPath.value,
     domainCfg,
-    // sailorCfg: sailorCfg.value,
     normalizeCfgs,
     normalizeIndex,
   });
@@ -168,7 +165,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
         message.error(result.error ?? '生成默认配置失败');
         return;
       }
-      message.success(`已生成 ${result.created} 个默认 cfg，目录：${result.configsDir ?? 'configs'}`);
+      message.success('生成默认配置完成');
     } finally {
       // setGenerating(false);
     }
@@ -259,9 +256,11 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
                   </Col> */}
                 </Row>
               ))}
-              <Button type="dashed" onClick={() => addNormalizeCfg()} block icon={<PlusOutlined />}>
-                添加
-              </Button>
+              <div style={{ textAlign: 'center' }}>
+                <Button style={{ minWidth: 200 }} type="dashed" onClick={() => addNormalizeCfg()} icon={<PlusOutlined />}>
+                  添加
+                </Button>
+              </div>
             </CollapsibleSection>
           </Card>
 

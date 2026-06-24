@@ -41,6 +41,7 @@ import {
 } from '../services/projectService';
 import dayjs from 'dayjs';
 import {openExternalUrl} from '../utils/ipc';
+import {getGitlabHost} from '../../services/gitlabService';
 
 const { Text, Title } = Typography;
 
@@ -129,20 +130,20 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
     form.setFieldValue('employeeIds', values);
     if (!values || values.length === 0) return;
 
-    const firstNotInUsers = values.slice().reverse().find(value => {
+    const lastNotInUsers = values.slice().reverse().find(value => {
       return !users.some(user => user.username.toLowerCase() === value.toLowerCase());
     });
-    if (firstNotInUsers) {
-      const user = await fetchSingleUser(firstNotInUsers);
+    if (lastNotInUsers) {
+      const user = await fetchSingleUser(lastNotInUsers);
       if (user) {
         if (user.locked) {
-          message.warning(`Gitlab 用户 ${firstNotInUsers} 已被锁定, 请联系管理员进行解锁`);
+          message.warning(`Gitlab 用户 ${lastNotInUsers} 已被锁定, 请联系管理员进行解锁`);
         } else if (user.state !== 'active') {
           if(user.state === 'deactivated'){
             message.warning(
               <span>
-                Gitlab 用户 {firstNotInUsers} 的状态为 {user.state}(已停用), 可能是长时间未登录导致.<br />
-                请登录个人主页{' '}
+                Gitlab 用户 {lastNotInUsers} 的状态为 {user.state}(已停用), 可能是长时间未登录导致.<br />
+                请用户登录个人主页{' '}
                 <a href={user.web_url} target="_blank" rel="noopener noreferrer">
                   {user.web_url}
                 </a>{' '}
@@ -150,13 +151,24 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
               </span>
             );
           }else{
-            message.warning(`Gitlab 用户 ${firstNotInUsers} 的状态为 ${user.state}, 请联系管理员进行恢复`);
+            message.warning(`Gitlab 用户 ${lastNotInUsers} 的状态为 ${user.state}, 请联系管理员进行恢复`);
           }
         } else {
           setUsers((items) => [...items, user]);
         }
       } else {
-        message.warning(`Gitlab 用户 ${firstNotInUsers} 不存在`);
+        const webUrl = getGitlabHost();
+        message.error(
+          <span>
+            Gitlab 用户 {lastNotInUsers} 不存在.
+            请用户登录 Gitlab 网址{' '}
+            <a href={webUrl} target="_blank" rel="noopener noreferrer">
+              {webUrl}
+            </a>{' '}
+            后重试或联系管理员进行添加
+          </span>
+        );
+        form.setFieldValue('employeeIds', values.filter(value => value !== lastNotInUsers));
       }
     }
   };
@@ -189,23 +201,25 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
         setMembers((items) => items.map((item) => item.employeeId === editingMember.employeeId ? updated : item));
         message.success('成员已更新');
       } else {
-        for (const employeeId of value.employeeIds){
+        let count = 0;
+        for (const employeeId of value.employeeIds) {
           const isExists = members.some(member => member.employeeId === employeeId.trim());
           if (isExists) {
             message.info(`成员 ${employeeId} 已存在`);
-            continue;
+          } else {
+            const created = await addProjectMember(project.id, {
+              employeeId: employeeId.trim(),
+              role: value.role,
+              ctmp: value.ctmp,
+            });
+            setMembers((items) => [...items, created]);
+            count += 1;
           }
-
-          const created = await addProjectMember(project.id, {
-            employeeId: employeeId.trim(),
-            role: value.role,
-            ctmp: value.ctmp,
-          });
-
-          setMembers((items) => [...items, created]);
           form.setFieldValue('employeeIds', value.employeeIds.filter(id => id !== employeeId));
         }
-        message.success('成员已添加');
+        if (count > 0) {
+          message.success('成员已添加');
+        }
       }
       closeModal();
     } catch (err) {

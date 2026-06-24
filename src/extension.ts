@@ -1640,33 +1640,29 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           const platform = process.platform;
           const urlToOpen = /^https?:\/\//i.test(url) ? url : `https://${url}`;
 
-          try {
-            switch (platform) {
-              case 'win32':
-                await execFileAsync('cmd', ['/c', 'start', '', urlToOpen]);
+          switch (platform) {
+            case 'win32':
+              await execFileAsync('cmd', ['/c', 'start', '', urlToOpen]);
+              return true;
+            case 'darwin':
+              await execFileAsync('open', [urlToOpen]);
+              return true;
+            default:
+              try {
+                await execFileAsync('xdg-open', [urlToOpen]);
                 return true;
-              case 'darwin':
-                await execFileAsync('open', [urlToOpen]);
-                return true;
-              default:
-                try {
-                  await execFileAsync('xdg-open', [urlToOpen]);
-                  return true;
-                } catch {
-                  const browsers = ['chromium', 'chrome', 'google-chrome', 'firefox', 'brave', 'epiphany', 'vivaldi'];
-                  for (const browser of browsers) {
-                    try {
-                      await execFileAsync(browser, [urlToOpen]);
-                      return true;
-                    } catch {
-                      // Try the next browser candidate.
-                    }
+              } catch {
+                const browsers = ['chromium', 'chrome', 'google-chrome', 'firefox', 'brave', 'epiphany', 'vivaldi'];
+                for (const browser of browsers) {
+                  try {
+                    await execFileAsync(browser, [urlToOpen]);
+                    return true;
+                  } catch {
+                    // Try the next browser candidate.
                   }
-                  return false;
                 }
-            }
-          } catch {
-            return false;
+                throw new Error('Could not find an executable to open the URL');
+              }
           }
         };
 

@@ -18,6 +18,10 @@ export function getWebviewHtml(
     process.env.DFT_IDE_API_BASE ??
     vscode.workspace.getConfiguration('dftIde').get<string>('apiBase', '');
 
+  const gitlabHost =
+    process.env.GITLAB_HOST ??
+    vscode.workspace.getConfiguration('dftIde').get<string>('gitlabHost', '');
+
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -37,6 +41,7 @@ export function getWebviewHtml(
   <script nonce="${nonce}">
     window.DFT_IDE_API_BASE = ${JSON.stringify(apiBase)};
     window.DFT_IDE_INITIAL_VIEW = ${JSON.stringify(initialView)};
+    window.DFT_IDE_GITLAB_HOST = ${JSON.stringify(gitlabHost)};
   </script>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

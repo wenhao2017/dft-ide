@@ -42,6 +42,7 @@ import { useFlowConfig } from '../hooks/useFlowConfig';
 import PathInput from '../components/shared/PathInput';
 import useWizardStore from '../store/wizardStore';
 import ObsViewer from '../components/shared/ObsViewer';
+import {getGitlabHost} from '../../services/gitlabService';
 import {
   getProjectRepoGitInfo,
   openSourceControl,
@@ -55,6 +56,7 @@ import {
   applyCommonArtifactSync,
   getRepoGitInfo,
   getBranches,
+  openExternalUrl
 } from '../utils/ipc';
 import {
   accentPanelStyle,
@@ -377,7 +379,8 @@ const CommonFlow: React.FC = () => {
       return;
     }
 
-    const result = await openGitlabHost(repoGitName);
+    const webUrl = getGitlabHost();
+    const result = await openExternalUrl(`${webUrl}/${repoGitName}`);
     if (!result.success) {
       message.error(result.error ?? '无法打开浏览器，请检查系统默认设置!');
     }
