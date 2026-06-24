@@ -1,4 +1,4 @@
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import React, { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Col,
@@ -26,7 +26,7 @@ import usePipelineRuntimeStore, {
   getPipelineRuntimeKey,
   subscribePipelineRuntimeUpdates,
 } from '../../store/pipelineRuntimeStore';
-import { PipelineLink, PipelineTask, pipelineFlowConfigs } from './pipelineMockData';
+import { PipelineLink, PipelineTask } from './pipelineMockData';
 import { openExecutionTerminal } from '../../utils/ipc';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -133,24 +133,6 @@ function formatStartTime(time?: number): string {
     .join(':');
 }
 
-function makeTask(
-  id: string,
-  name: string,
-  command: string,
-  description: string,
-  status: 'pending' | 'running' | 'success' | 'failed' | 'stopped' | 'skipped' = 'pending',
-): PipelineTask {
-  return {
-    id,
-    name,
-    command,
-    status,
-    attempts: 1,
-    description,
-    logs: [],
-  };
-}
-
 // Initial tasks and links fallback functions removed, configurations now load dynamically from workspace YAML files via runtime snapshots.
 
 function getTaskMetrics(task: PipelineTask) {
@@ -190,13 +172,21 @@ function summarizeRuntime(
   const tasks = runtime?.tasks || [];
   const links = runtime?.links || [];
 
-  const completed = tasks.filter((task) =>
-    task.status === 'success' ||
-    task.status === 'failed' ||
-    task.status === 'stopped' ||
-    task.status === 'skipped'
-  ).length;
-  const failed = tasks.filter((task) => task.status === 'failed').length;
+  let completed = 0;
+  let failed = 0;
+  tasks.forEach((task) => {
+    if (
+      task.status === 'success' ||
+      task.status === 'failed' ||
+      task.status === 'stopped' ||
+      task.status === 'skipped'
+    ) {
+      completed += 1;
+    }
+    if (task.status === 'failed') {
+      failed += 1;
+    }
+  });
   const cpu = runtime?.runState === 'running' ? Math.floor(Math.random() * 40) + 30 : 0;
   const mem = runtime?.runState === 'running' ? Number((Math.random() * 4 + 2).toFixed(1)) : 0;
 
@@ -219,7 +209,8 @@ function summarizeRuntime(
 }
 
 function getTaskHierarchy(run: PipelineRunOverview) {
-  const taskIds = new Set(run.tasks.map((task) => task.id));
+  const taskById = new Map(run.tasks.map((task) => [task.id, task]));
+  const taskIds = new Set(taskById.keys());
   const outgoingCount = run.links.reduce<Record<string, number>>((acc, link) => {
     if (taskIds.has(link.source) && taskIds.has(link.target)) {
       acc[link.source] = (acc[link.source] ?? 0) + 1;
@@ -233,7 +224,7 @@ function getTaskHierarchy(run: PipelineRunOverview) {
     if (!taskIds.has(link.source) || !taskIds.has(link.target) || (outgoingCount[link.source] ?? 0) < 2) {
       return;
     }
-    const child = run.tasks.find((task) => task.id === link.target);
+    const child = taskById.get(link.target);
     if (!child || parentByChild.has(child.id)) {
       return;
     }
@@ -262,11 +253,22 @@ function getStepTerminalTitle(flowLabel: string, moduleKey: string, task: Pipeli
 }
 
 function getTrackTaskId(run: PipelineRunOverview, parentByChild: Map<string, string>): string | undefined {
-  const activeTask =
-    run.tasks.find((task) => task.status === 'failed') ??
-    run.tasks.find((task) => task.status === 'running') ??
-    run.tasks.find((task) => task.status === 'stopped') ??
-    run.tasks.find((task) => task.status === 'pending');
+  let runningTask: PipelineTask | undefined;
+  let stoppedTask: PipelineTask | undefined;
+  let pendingTask: PipelineTask | undefined;
+  for (const task of run.tasks) {
+    if (task.status === 'failed') {
+      return parentByChild.get(task.id) ?? task.id;
+    }
+    if (!runningTask && task.status === 'running') {
+      runningTask = task;
+    } else if (!stoppedTask && task.status === 'stopped') {
+      stoppedTask = task;
+    } else if (!pendingTask && task.status === 'pending') {
+      pendingTask = task;
+    }
+  }
+  const activeTask = runningTask ?? stoppedTask ?? pendingTask;
   if (!activeTask) {
     return undefined;
   }
@@ -340,10 +342,30 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   }, [activeModuleData]);
 
   const visibleRunsWithHierarchies = useMemo(() => {
-    return visibleRuns.map((run) => ({
-      run,
-      hierarchy: getTaskHierarchy(run),
-    }));
+    return visibleRuns.map((run) => {
+      const hierarchy = getTaskHierarchy(run);
+      const trackTasks = hierarchy.topLevelTasks.length ? hierarchy.topLevelTasks : run.tasks;
+      const trackTaskId = getTrackTaskId(run, hierarchy.parentByChild);
+      let trackTaskIndex = -1;
+      let completedTrackTasks = 0;
+
+      trackTasks.forEach((task, index) => {
+        if (task.id === trackTaskId) {
+          trackTaskIndex = index;
+        }
+        if (
+          task.status === 'success' ||
+          task.status === 'failed' ||
+          task.status === 'stopped' ||
+          task.status === 'skipped'
+        ) {
+          completedTrackTasks += 1;
+        }
+      });
+
+      const counterText = `${Math.min(Math.max(trackTaskIndex + 1, completedTrackTasks), trackTasks.length)}/${trackTasks.length}`;
+      return { counterText, hierarchy, run, trackTasks };
+    });
   }, [visibleRuns]);
 
 
@@ -488,25 +510,32 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
       setSelectedTaskId(undefined);
       return;
     }
-    const preferredTask =
-      activeModuleData.tasks.find((task) => task.status === 'failed') ??
-      activeModuleData.tasks.find((task) => task.status === 'running') ??
-      activeModuleData.tasks.find((task) => task.id === activeModuleData.tasks[0]?.id);
+    let runningTask: PipelineTask | undefined;
+    let preferredTask = activeModuleData.tasks[0];
+    for (const task of activeModuleData.tasks) {
+      if (task.status === 'failed') {
+        preferredTask = task;
+        break;
+      }
+      if (!runningTask && task.status === 'running') {
+        runningTask = task;
+      }
+    }
+    preferredTask = preferredTask?.status === 'failed' ? preferredTask : runningTask ?? preferredTask;
     if (!selectedTaskId || !activeModuleData.tasks.some((task) => task.id === selectedTaskId)) {
       setSelectedTaskId(preferredTask?.id);
     }
   }, [activeModuleData, selectedTaskId]);
 
   useEffect(() => {
-    if (!activeModuleData) {
+    if (!activeModuleData || !activeHierarchy) {
       return;
     }
-    const hierarchy = getTaskHierarchy(activeModuleData);
     const autoExpanded = new Set<string>();
     activeModuleData.tasks.forEach((task) => {
       if (task.status === 'running' || task.status === 'failed') {
-        getAncestorIds(task.id, hierarchy.parentByChild).forEach((id) => autoExpanded.add(id));
-        if ((hierarchy.childrenByParent.get(task.id)?.length ?? 0) > 0) {
+        getAncestorIds(task.id, activeHierarchy.parentByChild).forEach((id) => autoExpanded.add(id));
+        if ((activeHierarchy.childrenByParent.get(task.id)?.length ?? 0) > 0) {
           autoExpanded.add(task.id);
         }
       }
@@ -514,7 +543,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     if (autoExpanded.size) {
       setExpandedTaskIds((prev) => new Set([...prev, ...autoExpanded]));
     }
-  }, [activeModuleData]);
+  }, [activeHierarchy, activeModuleData]);
 
   const renderTaskDetail = useCallback((task: PipelineTask, depth = 0): React.ReactNode => {
     if (!activeModuleData || !activeHierarchy) {
@@ -527,7 +556,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     const isRunning = task.status === 'running';
     const isChild = depth > 0;
     const color = getStatusColor(task.status);
-    const latestLog = task.logs[task.logs.length - 1];
+    const metrics = getTaskMetrics(task);
     const relationLabel = hasChildren ? '父步骤' : isChild ? '子步骤' : undefined;
     const isExcluded = false;
     const opacity = task.status === 'skipped' ? 0.55 : 1;
@@ -633,8 +662,8 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
               </span>
               {(task.status === 'running' || task.status === 'success' || task.status === 'failed') && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 8px', fontSize: 11, color: isSelected ? themeStyles.selectedFg : themeStyles.textSecondary, marginTop: 2, opacity: 0.85, fontFamily: 'monospace' }}>
-                  <span>CPU: {getTaskMetrics(task).cpu}</span>
-                  <span>MEM: {getTaskMetrics(task).mem}</span>
+                  <span>CPU: {metrics.cpu}</span>
+                  <span>MEM: {metrics.mem}</span>
                   {task.startedAt && <span>开始: {task.startedAt}</span>}
                   {task.duration && <span>用时: {task.duration}</span>}
                 </div>
@@ -737,18 +766,8 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
         <List
           size="small"
           dataSource={visibleRunsWithHierarchies}
-          renderItem={({ run, hierarchy: runHierarchy }) => {
+          renderItem={({ run, counterText, trackTasks }) => {
             const isSelected = run.moduleKey === activeModuleKey;
-            const trackTasks = runHierarchy.topLevelTasks.length ? runHierarchy.topLevelTasks : run.tasks;
-            const trackTaskId = getTrackTaskId(run, runHierarchy.parentByChild);
-            const trackTaskIndex = trackTasks.findIndex((task) => task.id === trackTaskId);
-            const completedTrackTasks = trackTasks.filter((task) =>
-              task.status === 'success' ||
-              task.status === 'failed' ||
-              task.status === 'stopped' ||
-              task.status === 'skipped'
-            ).length;
-            const counterText = `${Math.min(Math.max(trackTaskIndex + 1, completedTrackTasks), trackTasks.length)}/${trackTasks.length}`;
             const statusColor = run.runState === 'running'
               ? themeStyles.accent
               : run.runState === 'completed'
@@ -991,4 +1010,4 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
 
 PipelineExecutionOverview.displayName = 'PipelineExecutionOverview';
 
-export default PipelineExecutionOverview;
+export default memo(PipelineExecutionOverview);

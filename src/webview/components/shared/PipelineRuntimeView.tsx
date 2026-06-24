@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { memo, useCallback, useEffect, useMemo } from 'react';
 import {
   Background,
   Edge,
@@ -33,7 +33,6 @@ const { Text, Title } = Typography;
 import {
   TaskStatus,
   PipelineTask,
-  PipelineLink,
   pipelineFlowConfigs,
 } from './pipelineMockData';
 import usePipelineRuntimeStore, {
@@ -82,7 +81,7 @@ const statusMeta: Record<TaskStatus, { label: string; color: string; tone: strin
   skipped: { label: '已跳过', color: 'default', tone: '#8c8c8c' },
 };
 
-function PipelineTaskNode({ data }: NodeProps<Node<PipelineNodeData>>) {
+const PipelineTaskNode = memo(function PipelineTaskNode({ data }: NodeProps<Node<PipelineNodeData>>) {
   const { task, selected, onSelect, onRerun, onStop } = data;
   const meta = statusMeta[task.status];
 
@@ -148,55 +147,16 @@ function PipelineTaskNode({ data }: NodeProps<Node<PipelineNodeData>>) {
       <Handle type="source" position={Position.Bottom} />
     </div>
   );
-}
+});
 
 const nodeTypes = { pipelineTask: PipelineTaskNode };
-
-function layoutGraph(
-  tasks: PipelineTask[],
-  links: PipelineLink[],
-  handlers: Pick<PipelineNodeData, 'onSelect' | 'onRerun' | 'onStop'>,
-  selectedTaskId?: string,
-) {
-  const graph = new dagre.graphlib.Graph();
-  graph.setDefaultEdgeLabel(() => ({}));
-  graph.setGraph({ rankdir: 'TB', nodesep: 38, ranksep: 58 });
-
-  tasks.forEach((task) => graph.setNode(task.id, { width: 154, height: 96 }));
-  links.forEach((link) => graph.setEdge(link.source, link.target));
-  dagre.layout(graph);
-
-  const nodes: Node<PipelineNodeData>[] = tasks.map((task) => {
-    const point = graph.node(task.id) as { x: number; y: number };
-    return {
-      id: task.id,
-      type: 'pipelineTask',
-      position: { x: point.x - 77, y: point.y - 48 },
-      sourcePosition: Position.Bottom,
-      targetPosition: Position.Top,
-      data: {
-        task,
-        selected: task.id === selectedTaskId,
-        ...handlers,
-      },
-      draggable: false,
-    };
-  });
-
-  const edges: Edge[] = links.map((link) => ({
-    id: `${link.source}-${link.target}`,
-    source: link.source,
-    target: link.target,
-    animated: tasks.find((task) => task.id === link.source)?.status === 'running',
-    markerEnd: { type: MarkerType.ArrowClosed },
-    style: {
-      stroke: 'var(--vscode-focusBorder, #1677ff)',
-      strokeWidth: 1.7,
-    },
-  }));
-
-  return { nodes, edges };
-}
+const reactFlowProOptions = { hideAttribution: true };
+const reactFlowFitViewOptions = { padding: 0.52 };
+const pipelineEdgeMarkerEnd = { type: MarkerType.ArrowClosed };
+const pipelineEdgeStyle = {
+  stroke: 'var(--vscode-focusBorder, #1677ff)',
+  strokeWidth: 1.7,
+};
 
 const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   flowLabel = 'DFT',
@@ -342,6 +302,32 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
     return positions;
   }, [layoutLinkSignature, layoutTaskSignature]);
 
+  const taskMeta = useMemo(() => {
+    const statusById = new Map<string, TaskStatus>();
+    let selectedTask: PipelineTask | undefined;
+    let failedCount = 0;
+    let runningCount = 0;
+    let hasStoppableTask = false;
+
+    runtime.tasks.forEach((task) => {
+      statusById.set(task.id, task.status);
+      if (task.id === runtime.selectedTaskId) {
+        selectedTask = task;
+      }
+      if (task.status === 'failed') {
+        failedCount += 1;
+      }
+      if (task.status === 'running') {
+        runningCount += 1;
+        hasStoppableTask = true;
+      } else if (task.status === 'pending') {
+        hasStoppableTask = true;
+      }
+    });
+
+    return { failedCount, hasStoppableTask, runningCount, selectedTask, statusById };
+  }, [runtime.selectedTaskId, runtime.tasks]);
+
   const { nodes, edges } = useMemo(() => {
     const nodes: Node<PipelineNodeData>[] = runtime.tasks.map((task) => {
       const pos = layoutPositions[task.id] ?? { x: 0, y: 0 };
@@ -364,20 +350,17 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
       id: `${link.source}-${link.target}`,
       source: link.source,
       target: link.target,
-      animated: runtime.tasks.find((task) => task.id === link.source)?.status === 'running',
-      markerEnd: { type: MarkerType.ArrowClosed },
-      style: {
-        stroke: 'var(--vscode-focusBorder, #1677ff)',
-        strokeWidth: 1.7,
-      },
+      animated: taskMeta.statusById.get(link.source) === 'running',
+      markerEnd: pipelineEdgeMarkerEnd,
+      style: pipelineEdgeStyle,
     }));
 
     return { nodes, edges };
-  }, [layoutPositions, runtime.tasks, runtime.links, runtime.selectedTaskId, handlers]);
-  const selectedTask = runtime.tasks.find((task) => task.id === runtime.selectedTaskId);
-  const failedCount = runtime.tasks.filter((task) => task.status === 'failed').length;
-  const runningCount = runtime.tasks.filter((task) => task.status === 'running').length;
-  const canStopAll = !readOnly && runtime.tasks.some((task) => task.status === 'running' || task.status === 'pending');
+  }, [layoutPositions, runtime.tasks, runtime.links, runtime.selectedTaskId, handlers, taskMeta.statusById]);
+  const selectedTask = taskMeta.selectedTask;
+  const failedCount = taskMeta.failedCount;
+  const runningCount = taskMeta.runningCount;
+  const canStopAll = !readOnly && taskMeta.hasStoppableTask;
 
   if (!visible) {
     return null;
@@ -670,9 +653,9 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
               nodes={nodes}
               edges={edges}
               nodeTypes={nodeTypes}
-              proOptions={{ hideAttribution: true }}
+              proOptions={reactFlowProOptions}
               fitView
-              fitViewOptions={{ padding: 0.52 }}
+              fitViewOptions={reactFlowFitViewOptions}
               minZoom={0.15}
               maxZoom={1.5}
               nodesDraggable={false}
