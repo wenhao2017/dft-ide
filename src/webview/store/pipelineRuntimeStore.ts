@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { z } from 'zod';
 import {
   ensurePipelineRuntime,
   getPipelineRuntimes,
@@ -47,6 +48,51 @@ interface PipelineRuntimeStore {
 
 let subscribed = false;
 
+const taskStatusSchema = z.enum(['pending', 'running', 'success', 'failed', 'stopped', 'skipped']);
+const pipelineFlowKeySchema = z.enum(['hibist', 'sailor', 'verification']);
+const pipelineRunStateSchema = z.enum(['idle', 'running', 'completed', 'stopped']);
+const pipelineTaskSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  command: z.string(),
+  status: taskStatusSchema,
+  startedAt: z.string().optional(),
+  finishedAt: z.string().optional(),
+  duration: z.string().optional(),
+  attempts: z.number(),
+  description: z.string(),
+  logs: z.array(z.string()),
+});
+const pipelineLinkSchema = z.object({
+  source: z.string(),
+  target: z.string(),
+});
+const pipelineRuntimeSnapshotSchema = z.object({
+  runId: z.string().optional(),
+  flowKey: pipelineFlowKeySchema,
+  moduleKey: z.string(),
+  flowLabel: z.string(),
+  tasks: z.array(pipelineTaskSchema),
+  links: z.array(pipelineLinkSchema),
+  logs: z.array(z.string()),
+  selectedTaskId: z.string().optional(),
+  runState: pipelineRunStateSchema,
+  startedAt: z.number().optional(),
+  finishedAt: z.number().optional(),
+  updatedAt: z.number(),
+});
+
+function parseRuntimeSnapshot(value: unknown): PipelineRuntimeSnapshot | null {
+  const result = pipelineRuntimeSnapshotSchema.safeParse(value);
+  return result.success ? result.data : null;
+}
+
+function parseRuntimeSnapshots(values: unknown[]): PipelineRuntimeSnapshot[] {
+  return values
+    .map(parseRuntimeSnapshot)
+    .filter((snapshot): snapshot is PipelineRuntimeSnapshot => Boolean(snapshot));
+}
+
 export function getPipelineRuntimeKey(flowKey: PipelineFlowKey, moduleKey: string): string {
   return `${flowKey}:${moduleKey}`;
 }
@@ -77,17 +123,20 @@ export function subscribePipelineRuntimeUpdates(): void {
 
   window.addEventListener('message', (event: MessageEvent) => {
     const msg = event.data as { command?: string; snapshot?: unknown; snapshots?: unknown[] };
-    if (msg.command === 'pipelineRuntimeUpdated' && isRuntimeSnapshot(msg.snapshot)) {
-      usePipelineRuntimeStore.getState().applyRuntime(msg.snapshot);
+    if (msg.command === 'pipelineRuntimeUpdated') {
+      const snapshot = parseRuntimeSnapshot(msg.snapshot);
+      if (snapshot) {
+        usePipelineRuntimeStore.getState().applyRuntime(snapshot);
+      }
     }
     if (msg.command === 'pipelineRuntimesUpdated' && Array.isArray(msg.snapshots)) {
-      usePipelineRuntimeStore.getState().applyRuntimes(msg.snapshots.filter(isRuntimeSnapshot));
+      usePipelineRuntimeStore.getState().applyRuntimes(parseRuntimeSnapshots(msg.snapshots));
     }
   });
 
   void getPipelineRuntimes().then((res) => {
     if (res.success) {
-      usePipelineRuntimeStore.getState().applyRuntimes(res.snapshots.filter(isRuntimeSnapshot));
+      usePipelineRuntimeStore.getState().applyRuntimes(parseRuntimeSnapshots(res.snapshots));
     }
   });
 }
@@ -108,18 +157,6 @@ function makeTask(
     description,
     logs: [],
   };
-}
-
-function isRuntimeSnapshot(value: unknown): value is PipelineRuntimeSnapshot {
-  const candidate = value as Partial<PipelineRuntimeSnapshot> | undefined;
-  return !!candidate
-    && (candidate.flowKey === 'hibist' || candidate.flowKey === 'sailor' || candidate.flowKey === 'verification')
-    && typeof candidate.moduleKey === 'string'
-    && typeof candidate.flowLabel === 'string'
-    && Array.isArray(candidate.tasks)
-    && Array.isArray(candidate.links)
-    && Array.isArray(candidate.logs)
-    && (candidate.runState === 'idle' || candidate.runState === 'running' || candidate.runState === 'completed' || candidate.runState === 'stopped');
 }
 
 function applySnapshot(

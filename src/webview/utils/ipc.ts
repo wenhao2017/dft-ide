@@ -8,6 +8,7 @@
 
 import vscode from './vscode';
 import { DftProject } from '../services/projectService';
+import { z } from 'zod';
 
 let _reqId = 0;
 /** 等待响应的 Promise 回调池：key = `{command}Response:{requestId}` */
@@ -378,14 +379,38 @@ export interface WorkspaceProjectInfo {
   error?: string;
 }
 
+const localConfigInfoSchema = z.object({
+  configuredPath: z.string().default(''),
+  effectivePath: z.string().nullable().default(null),
+  defaultPath: z.string().nullable().default(null),
+  isDefault: z.boolean().default(true),
+  error: z.string().optional(),
+  lastSelectedProject: z.string().optional(),
+});
+
+const workspaceProjectInfoSchema = z.object({
+  success: z.boolean().default(false),
+  projectRoot: z.string().nullable().default(null),
+  projectName: z.string().nullable().default(null),
+  workspaceName: z.string().nullable().default(null),
+  folders: z.array(z.object({ name: z.string(), path: z.string() })).default([]),
+  error: z.string().optional(),
+});
+
 export async function getLocalConfigInfo(): Promise<LocalConfigInfo> {
   const res = await ipcRequest('getLocalConfigInfo');
-  return res as unknown as LocalConfigInfo;
+  const parsed = localConfigInfoSchema.safeParse(res);
+  return parsed.success
+    ? parsed.data
+    : { configuredPath: '', effectivePath: null, defaultPath: null, isDefault: true, error: 'Invalid local config response' };
 }
 
 export async function getWorkspaceProjectInfo(): Promise<WorkspaceProjectInfo> {
   const res = await ipcRequest('getWorkspaceProjectInfo');
-  return res as unknown as WorkspaceProjectInfo;
+  const parsed = workspaceProjectInfoSchema.safeParse(res);
+  return parsed.success
+    ? parsed.data
+    : { success: false, projectRoot: null, projectName: null, workspaceName: null, folders: [], error: 'Invalid workspace response' };
 }
 
 export async function setLocalConfigPath(
@@ -503,6 +528,24 @@ export interface ExecutionHistoryRecord {
   runtimeSnapshot?: unknown;
 }
 
+const executionHistoryRecordSchema = z.object({
+  id: z.string(),
+  flow: z.string(),
+  status: z.enum(['success', 'error', 'cancelled']),
+  logs: z.array(z.string()).default([]),
+  executedAt: z.number(),
+  flowKey: z.enum(['hibist', 'sailor', 'verification']).optional(),
+  moduleKey: z.string().optional(),
+  flowLabel: z.string().optional(),
+  runtimeSnapshot: z.unknown().optional(),
+});
+
+const executionHistoryResponseSchema = z.object({
+  success: z.boolean(),
+  history: z.array(executionHistoryRecordSchema).default([]),
+  error: z.string().optional(),
+});
+
 /**
  * 保存执行记录到本地 .dft-ide/local-state/history。
  */
@@ -521,7 +564,8 @@ export async function getExecutionHistory(
   flow: string
 ): Promise<{ success: boolean; history: ExecutionHistoryRecord[]; error?: string }> {
   const res = await ipcRequest('getExecutionHistory', { flow });
-  return res as { success: boolean; history: ExecutionHistoryRecord[]; error?: string };
+  const parsed = executionHistoryResponseSchema.safeParse(res);
+  return parsed.success ? parsed.data : { success: false, history: [], error: 'Invalid execution history response' };
 }
 
 export async function getPipelineRuntimes(): Promise<{ success: boolean; snapshots: unknown[]; error?: string }> {

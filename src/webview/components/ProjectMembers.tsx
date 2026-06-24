@@ -25,6 +25,7 @@ import {
   TeamOutlined,
   GitlabOutlined,
 } from '@ant-design/icons';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import {
   addProjectMember,
@@ -71,6 +72,16 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
   const [editingMember, setEditingMember] = useState<ProjectMember | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm<MemberFormValue>();
+  const queryClient = useQueryClient();
+  const {
+    data: membersData,
+    error: membersError,
+    isFetching: membersFetching,
+    refetch: refetchMembers,
+  } = useQuery({
+    queryKey: ['projectMembers', project.id],
+    queryFn: () => fetchProjectMembers(project.id),
+  });
 
   const cardBorder = 'var(--vscode-panel-border, rgba(127,127,127,0.22))';
   const panelBg = isDark
@@ -78,7 +89,11 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
     : 'color-mix(in srgb, var(--vscode-editor-background, #fff) 92%, transparent)';
 
   const loadUsers = async () => {
-    const data = await fetchUsers();
+    const data = await queryClient.fetchQuery({
+      queryKey: ['gitlabUsers'],
+      queryFn: fetchUsers,
+      staleTime: 5 * 60_000,
+    });
     const users = data.filter(user =>
       /^[a-z]+[0-9]+$/.test(user.username)
     );
@@ -88,8 +103,16 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
   const loadMembers = async () => {
     setLoading(true);
     try {
-      const data = await fetchProjectMembers(project.id);
+      const result = await refetchMembers();
+      if (result.error) {
+        throw result.error;
+      }
+      const data = result.data;
+      if (!data) {
+        return;
+      }
       setMembers(data.members);
+      setCanManage(data.canManage ?? canManageProjectMembers(project));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : '成员列表加载失败');
@@ -99,8 +122,20 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
   };
 
   useEffect(() => {
-    void loadMembers();
-  }, [project.id]);
+    if (!membersData) return;
+    setMembers(membersData.members);
+    setCanManage(membersData.canManage ?? canManageProjectMembers(project));
+    setError(null);
+  }, [membersData, project]);
+
+  useEffect(() => {
+    if (!membersError) return;
+    setError(membersError instanceof Error ? membersError.message : '鎴愬憳鍒楄〃鍔犺浇澶辫触');
+  }, [membersError]);
+
+  useEffect(() => {
+    setLoading(membersFetching && !membersData);
+  }, [membersData, membersFetching]);
 
   const openAddModal = () => {
     loadUsers();
@@ -222,6 +257,7 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
         }
       }
       closeModal();
+      void queryClient.invalidateQueries({ queryKey: ['projectMembers', project.id] });
     } catch (err) {
       message.error(err instanceof Error ? err.message : '成员保存失败');
     } finally {
@@ -233,6 +269,7 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
     try {
       await deleteProjectMember(project.id, member.employeeId);
       setMembers((items) => items.filter((item) => item.employeeId !== member.employeeId));
+      void queryClient.invalidateQueries({ queryKey: ['projectMembers', project.id] });
       message.success('成员已删除');
     } catch (err) {
       message.error(err instanceof Error ? err.message : '成员删除失败');

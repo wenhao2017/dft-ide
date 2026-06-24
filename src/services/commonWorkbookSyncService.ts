@@ -1,4 +1,3 @@
-import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
@@ -212,6 +211,15 @@ export function buildWorkbookDiffItems(artifact: CommonSyncArtifact): CommonSync
   return items;
 }
 
+export function copyWorkbookArtifactIfChanged(artifact: CommonSyncArtifact): boolean {
+  if (areSpreadsheetFilesIdentical(artifact.source, artifact.target)) {
+    return false;
+  }
+  fs.mkdirSync(path.dirname(artifact.target), { recursive: true });
+  fs.copyFileSync(artifact.source, artifact.target);
+  return true;
+}
+
 export async function mergeWorkbookArtifact(
   artifact: CommonSyncArtifact,
   strategy: string,
@@ -222,9 +230,7 @@ export async function mergeWorkbookArtifact(
   }
 
   if (!fs.existsSync(artifact.target)) {
-    fs.mkdirSync(path.dirname(artifact.target), { recursive: true });
-    await vscode.workspace.fs.copy(vscode.Uri.file(artifact.source), vscode.Uri.file(artifact.target), { overwrite: true });
-    return true;
+    return copyWorkbookArtifactIfChanged(artifact);
   }
 
   const sourceBook = readWorkbookFile(artifact.source);

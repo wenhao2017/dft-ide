@@ -1,7 +1,14 @@
 import React from 'react';
-import { Button, Drawer, Empty, List, Tag, Typography } from 'antd';
-import { CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, FullscreenOutlined, RightOutlined } from '@ant-design/icons';
+import { Button, Drawer, Empty, Tag, Typography } from 'antd';
+import {
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  CloseCircleOutlined,
+  FullscreenOutlined,
+  RightOutlined,
+} from '@ant-design/icons';
 import { ExecutionHistoryRecord } from '../../utils/ipc';
+import VirtualList from './VirtualList';
 
 const { Text } = Typography;
 
@@ -43,25 +50,41 @@ const ExecutionHistoryList: React.FC<Props> = ({ open, onClose, history, onSelec
     {history.length === 0 ? (
       <Empty description="暂无历史执行记录" style={{ marginTop: 60 }} />
     ) : (
-      <List
-        itemLayout="horizontal"
-        rowKey="id"
-        dataSource={history}
+      <VirtualList
+        items={history}
+        estimateSize={94}
+        height="100%"
+        getKey={(item) => item.id}
         renderItem={(item) => {
           const meta = statusMeta[item.status] ?? statusMeta.error;
           return (
-            <List.Item
-              style={{ padding: '16px 24px', cursor: 'pointer', transition: 'background 0.2s' }}
+            <div
+              style={{
+                borderBottom: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
+                cursor: 'pointer',
+                padding: '16px 24px',
+                transition: 'background 0.2s',
+              }}
               onMouseEnter={(event) => (event.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
               onMouseLeave={(event) => (event.currentTarget.style.background = 'transparent')}
               onClick={() => {
                 onSelect(item);
                 onClose();
               }}
-              actions={[
-                item.runtimeSnapshot && onOpenPipeline ? (
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ flex: '0 0 auto' }}>{meta.icon}</div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                    <Text strong>{new Date(item.executedAt).toLocaleString()}</Text>
+                    <Tag color={meta.color}>{meta.label}</Tag>
+                  </div>
+                  <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', color: '#888', fontSize: 12 }}>
+                    <ClockCircleOutlined style={{ marginRight: 4 }} /> 包含 {item.logs?.length || 0} 条日志
+                  </div>
+                </div>
+                {item.runtimeSnapshot && onOpenPipeline ? (
                   <Button
-                    key="pipeline"
                     size="small"
                     type="text"
                     icon={<FullscreenOutlined />}
@@ -73,25 +96,10 @@ const ExecutionHistoryList: React.FC<Props> = ({ open, onClose, history, onSelec
                   >
                     打开流水线
                   </Button>
-                ) : null,
-                <RightOutlined key="open" style={{ color: '#888' }} />,
-              ]}
-            >
-              <List.Item.Meta
-                avatar={meta.icon}
-                title={
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                    <Text strong>{new Date(item.executedAt).toLocaleString()}</Text>
-                    <Tag color={meta.color}>{meta.label}</Tag>
-                  </div>
-                }
-                description={
-                  <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', color: '#888', fontSize: 12 }}>
-                    <ClockCircleOutlined style={{ marginRight: 4 }} /> 包含 {item.logs?.length || 0} 条日志
-                  </div>
-                }
-              />
-            </List.Item>
+                ) : null}
+                <RightOutlined style={{ color: '#888' }} />
+              </div>
+            </div>
           );
         }}
       />

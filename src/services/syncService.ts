@@ -8,16 +8,17 @@ import {
   getProjectRepoRoot,
   normalizeProjectRepo,
   resolveProjectRoot,
-  ensureLocalConfigDirectory,
 } from './workspaceService';
 import { mergeConfigFile } from './configService';
 import { resolveDesignTreeFilePath } from './designTreeService';
 import {
   buildCommonSyncArtifacts,
-  buildWorkbookDiffItems,
-  areSpreadsheetFilesIdentical,
-  mergeWorkbookArtifact,
 } from './commonWorkbookSyncService';
+import {
+  buildWorkbookDiffItemsInWorker,
+  copyWorkbookArtifactIfChangedInWorker,
+  mergeWorkbookArtifactInWorker,
+} from './commonWorkbookWorkerClient';
 
 const repoLabels: Record<'hibist' | 'sailor' | 'data' | 'verification', string> = {
   hibist: 'Hibist 仓库',
@@ -317,7 +318,7 @@ export async function prepareCommonArtifactSyncToRepo(options: SyncPrecheckOptio
   const design = artifacts.find((item) => item.key === 'designTree');
   const norm = artifacts.find((item) => item.key === 'normTable');
   const diffGroups = await Promise.all(
-    artifacts.map(async (artifact) => buildWorkbookDiffItems(artifact))
+    artifacts.map(async (artifact) => buildWorkbookDiffItemsInWorker(artifact))
   );
   const diffItems = diffGroups.flat();
   const designDiffCount = diffItems.filter((item) => item.fileType === 'designTree').length;
@@ -387,11 +388,10 @@ export async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
 
   if (strategy === 'overwrite') {
     for (const artifact of artifacts) {
-      if (areSpreadsheetFilesIdentical(artifact.source, artifact.target)) {
+      const changed = await copyWorkbookArtifactIfChangedInWorker(artifact);
+      if (!changed) {
         continue;
       }
-      await ensureLocalConfigDirectory(path.dirname(artifact.target));
-      await vscode.workspace.fs.copy(vscode.Uri.file(artifact.source), vscode.Uri.file(artifact.target), { overwrite: true });
       changedFiles.push({
         label: artifact.label,
         path: artifact.target,
@@ -400,7 +400,7 @@ export async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
     }
   } else {
     for (const artifact of artifacts) {
-      const changed = await mergeWorkbookArtifact(artifact, strategy, decisions);
+      const changed = await mergeWorkbookArtifactInWorker(artifact, strategy, decisions);
       if (!changed) {
         continue;
       }

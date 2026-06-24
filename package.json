@@ -168,12 +168,14 @@
   },
   "scripts": {
     "build:ext": "esbuild src/extension.ts --bundle --outfile=out/extension.js --format=cjs --platform=node --external:vscode --sourcemap",
+    "build:worker": "esbuild src/services/commonWorkbookWorker.ts --bundle --outfile=out/commonWorkbookWorker.js --format=cjs --platform=node --sourcemap",
     "build:webview": "esbuild src/webview/main.tsx --bundle --outfile=out/webview.js --format=iife --platform=browser --sourcemap --loader:.tsx=tsx --loader:.ts=tsx",
-    "compile": "npm-run-all --parallel build:ext build:webview",
+    "compile": "npm-run-all --parallel build:ext build:webview build:worker",
     "check": "tsc --noEmit",
     "watch:ext": "esbuild src/extension.ts --bundle --outfile=out/extension.js --format=cjs --platform=node --external:vscode --sourcemap --watch",
+    "watch:worker": "esbuild src/services/commonWorkbookWorker.ts --bundle --outfile=out/commonWorkbookWorker.js --format=cjs --platform=node --sourcemap --watch",
     "watch:webview": "esbuild src/webview/main.tsx --bundle --outfile=out/webview.js --format=iife --platform=browser --sourcemap --loader:.tsx=tsx --loader:.ts=tsx --watch",
-    "watch": "npm-run-all --parallel watch:ext watch:webview",
+    "watch": "npm-run-all --parallel watch:ext watch:webview watch:worker",
     "vscode:prepublish": "npm run compile"
   },
   "dependencies": {
@@ -182,6 +184,7 @@
     "@hookform/resolvers": "^5.0.1",
     "@tanstack/react-query": "^5.75.5",
     "@tanstack/react-table": "^8.21.3",
+    "@tanstack/react-virtual": "^3.14.3",
     "@xyflow/react": "^12.10.2",
     "antd": "^5.25.1",
     "dagre": "^0.8.5",
