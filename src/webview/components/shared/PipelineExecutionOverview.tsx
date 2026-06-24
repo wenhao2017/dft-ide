@@ -47,6 +47,7 @@ interface PipelineExecutionOverviewProps {
 
 interface PipelineRunOverview {
   runId?: string;
+  flowLabel: string;
   moduleKey: string;
   runState: OverviewRunState;
   total: number;
@@ -181,6 +182,7 @@ function getModuleRuntime(run: PipelineRunOverview) {
 function summarizeRuntime(
   moduleKey: string,
   flowKey: PipelineFlowKey,
+  flowLabel: string,
   runtime?: PipelineRuntimeSnapshot,
 ): PipelineRunOverview {
   const total = runtime?.tasks.length || 0;
@@ -199,6 +201,7 @@ function summarizeRuntime(
 
   return {
     runId: runtime?.runId,
+    flowLabel: runtime?.flowLabel ?? flowLabel,
     moduleKey,
     runState: runtime?.runState ?? 'idle',
     total,
@@ -269,36 +272,6 @@ function getTrackTaskId(run: PipelineRunOverview, parentByChild: Map<string, str
   return parentByChild.get(activeTask.id) ?? activeTask.id;
 }
 
-function getTaskDisplayInfo(run: PipelineRunOverview, stoppedSnapshots: Record<string, { taskIndex: number; taskName: string }>) {
-  const stepCount = run.tasks.length;
-  let currentTaskIndex = -1;
-  let activeTaskName = '等待中';
-  let counterText = `0/${stepCount} 空闲`;
-
-  if (run.runState === 'running') {
-    currentTaskIndex = run.tasks.findIndex((task) => task.status === 'running');
-    if (currentTaskIndex === -1) {
-      currentTaskIndex = run.tasks.findIndex((task) => task.status === 'pending');
-    }
-    if (currentTaskIndex === -1) {
-      currentTaskIndex = Math.min(run.completed, Math.max(stepCount - 1, 0));
-    }
-    activeTaskName = run.tasks[currentTaskIndex]?.name || '运行中';
-    counterText = `${Math.min(currentTaskIndex + 1, stepCount)}/${stepCount} 运行中`;
-  } else if (run.runState === 'completed') {
-    currentTaskIndex = stepCount - 1;
-    activeTaskName = run.tasks[currentTaskIndex]?.name || '已完成';
-    counterText = `${stepCount}/${stepCount} 已完成`;
-  } else if (run.runState === 'stopped') {
-    const snapshot = stoppedSnapshots[run.moduleKey];
-    currentTaskIndex = snapshot?.taskIndex ?? Math.max(run.completed - 1, 0);
-    activeTaskName = snapshot?.taskName || run.tasks[currentTaskIndex]?.name || '已停止';
-    counterText = `${Math.min(currentTaskIndex + 1, stepCount)}/${stepCount} 已停止`;
-  }
-
-  return { currentTaskIndex, activeTaskName, counterText };
-}
-
 const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecutionOverviewProps>(({
   flowKey,
   flowLabel,
@@ -320,7 +293,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(() => new Set());
   const [peakMetrics, setPeakMetrics] = useState<Record<string, { maxCpu: number; maxMem: number }>>({});
-  const [stoppedTaskSnapshots, setStoppedTaskSnapshots] = useState<Record<string, { taskIndex: number; taskName: string }>>({});
   const [runModalOpen, setRunModalOpen] = useState(false);
   const [runModalTargets, setRunModalTargets] = useState<string[]>([]);
   const [runModalRange, setRunModalRange] = useState<[number, number]>([0, 0]);
@@ -346,9 +318,9 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   const visibleRuns = useMemo(() => (
     selectedModuleKeys.map((moduleKey) => {
       const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
-      return summarizeRuntime(moduleKey, flowKey, runtime);
+      return summarizeRuntime(moduleKey, flowKey, getFlowLabel(moduleKey), runtime);
     })
-  ), [flowKey, runtimes, selectedModuleKeys]);
+  ), [flowKey, getFlowLabel, runtimes, selectedModuleKeys]);
 
   const activeModuleData = visibleRuns.find((run) => run.moduleKey === activeModuleKey);
   const activeHierarchy = activeModuleData ? getTaskHierarchy(activeModuleData) : undefined;
@@ -382,11 +354,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
 
     runModalTargets.forEach((moduleKey) => {
       setPeakMetrics((prev) => ({ ...prev, [moduleKey]: { maxCpu: 0, maxMem: 0 } }));
-      setStoppedTaskSnapshots((prev) => {
-        const next = { ...prev };
-        delete next[moduleKey];
-        return next;
-      });
       ensureRuntimeVisible(moduleKey);
       startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), selectedTaskIds, moduleWorkDirs?.[moduleKey]);
     });
@@ -398,22 +365,9 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   }, [runModalTargets, runModalRange, runtimes, flowKey, activeModuleData, ensureRuntimeVisible, getFlowLabel, startRuntime, activateModule, moduleWorkDirs]);
 
   const stopRun = useCallback((moduleKey: string) => {
-    const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
-    const tasks = runtime?.tasks ?? [];
-    let runningIndex = tasks.findIndex((task) => task.status === 'running');
-    if (runningIndex === -1) {
-      runningIndex = Math.max(tasks.findIndex((task) => task.status === 'pending'), 0);
-    }
-    setStoppedTaskSnapshots((prev) => ({
-      ...prev,
-      [moduleKey]: {
-        taskIndex: runningIndex,
-        taskName: tasks[runningIndex]?.name || `Task ${runningIndex + 1}`,
-      },
-    }));
     ensureRuntimeVisible(moduleKey);
     stopRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
-  }, [ensureRuntimeVisible, flowKey, getFlowLabel, runtimes, stopRuntime]);
+  }, [ensureRuntimeVisible, flowKey, getFlowLabel, stopRuntime]);
 
   useImperativeHandle(ref, () => ({
     handleExternalRun(keys: string[], selectedTaskIds?: string[]) {
@@ -421,11 +375,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
       if (selectedTaskIds && selectedTaskIds.length > 0) {
         cleanKeys.forEach((moduleKey) => {
           setPeakMetrics((prev) => ({ ...prev, [moduleKey]: { maxCpu: 0, maxMem: 0 } }));
-          setStoppedTaskSnapshots((prev) => {
-            const next = { ...prev };
-            delete next[moduleKey];
-            return next;
-          });
           ensureRuntimeVisible(moduleKey);
           startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), selectedTaskIds, moduleWorkDirs?.[moduleKey]);
         });
@@ -490,7 +439,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     const task = run.tasks.find((t) => t.id === taskId);
     if (task && task.status !== 'pending' && task.status !== 'skipped') {
       void openExecutionTerminal({
-        title: getStepTerminalTitle(flowLabel, run.moduleKey, task),
+        title: getStepTerminalTitle(run.flowLabel, run.moduleKey, task),
         command: task.command,
         cwd: moduleWorkDirs?.[run.moduleKey],
       });
@@ -499,7 +448,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     window.requestAnimationFrame(() => {
       taskDetailRefs.current[taskId]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     });
-  }, [activateModule, flowKey, flowLabel, moduleWorkDirs, selectRuntimeTask]);
+  }, [activateModule, flowKey, moduleWorkDirs, selectRuntimeTask]);
 
   const toggleExpanded = useCallback((taskId: string) => {
     setExpandedTaskIds((prev) => {
@@ -716,7 +665,28 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   }
 
   return (
-    <Row
+    <>
+      <style>
+        {`
+          @keyframes dftPipelineStepPulse {
+            0%, 100% {
+              transform: scale(1);
+              box-shadow: 0 0 0 0 rgba(35, 134, 54, 0.32);
+            }
+            50% {
+              transform: scale(1.18);
+              box-shadow: 0 0 0 5px rgba(35, 134, 54, 0);
+            }
+          }
+          .dft-pipeline-step-dot:hover,
+          .dft-pipeline-step-dot:focus-visible {
+            transform: scale(1.18);
+            box-shadow: 0 0 0 3px rgba(30, 144, 255, 0.22);
+            outline: none;
+          }
+        `}
+      </style>
+      <Row
       gutter={12}
       style={{
         position: 'relative',
@@ -752,25 +722,13 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
             const trackTasks = runHierarchy.topLevelTasks.length ? runHierarchy.topLevelTasks : run.tasks;
             const trackTaskId = getTrackTaskId(run, runHierarchy.parentByChild);
             const trackTaskIndex = trackTasks.findIndex((task) => task.id === trackTaskId);
-            const { activeTaskName } = getTaskDisplayInfo(run, stoppedTaskSnapshots);
             const completedTrackTasks = trackTasks.filter((task) =>
               task.status === 'success' ||
               task.status === 'failed' ||
               task.status === 'stopped' ||
               task.status === 'skipped'
             ).length;
-            const counterStateText = run.runState === 'running'
-              ? '运行中'
-              : run.runState === 'completed'
-                ? '已完成'
-                : run.runState === 'stopped'
-                  ? '已停止'
-                  : '空闲';
-            const counterText = `${Math.min(Math.max(trackTaskIndex + 1, completedTrackTasks), trackTasks.length)}/${trackTasks.length} ${counterStateText}`;
-            const hasEnded = run.runState === 'completed' || run.runState === 'stopped';
-            const peak = peakMetrics[run.moduleKey] || { maxCpu: run.cpu, maxMem: run.mem };
-            const displayCpu = hasEnded ? peak.maxCpu : run.cpu;
-            const displayMem = hasEnded ? peak.maxMem : run.mem;
+            const counterText = `${Math.min(Math.max(trackTaskIndex + 1, completedTrackTasks), trackTasks.length)}/${trackTasks.length}`;
             const statusColor = run.runState === 'running'
               ? themeStyles.accent
               : run.runState === 'completed'
@@ -785,7 +743,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                 style={{
                   cursor: 'pointer',
                   padding: 0,
-                  marginBottom: 8,
+                  marginBottom: 6,
                   borderRadius: 8,
                   border: `1px solid ${isSelected ? themeStyles.selectedBorder : themeStyles.border}`,
                   background: isSelected ? themeStyles.selectedBg : themeStyles.cardBg,
@@ -796,7 +754,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                 <div style={{ width: '100%' }}>
                   <div
                     style={{
-                      padding: '8px 12px',
+                      padding: '6px 10px',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
@@ -826,28 +784,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                     </Tag>
                   </div>
 
-                  <div
-                    style={{
-                      padding: '6px 12px',
-                      borderTop: `1px solid ${themeStyles.borderLight}`,
-                      borderBottom: `1px solid ${themeStyles.borderLight}`,
-                      background: 'var(--vscode-editorWidget-background, rgba(127,127,127,0.06))',
-                    }}
-                  >
-                    <Space direction="vertical" size={2} style={{ width: '100%' }}>
-                      <span style={{ fontSize: 9, color: themeStyles.textMuted, fontWeight: 800, letterSpacing: 1 }}>当前步骤</span>
-                      <span style={{ color: run.runState === 'stopped' ? themeStyles.warning : themeStyles.accentText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>
-                        {activeTaskName}
-                      </span>
-                    </Space>
-                    <Space size={12} style={{ marginTop: 4 }}>
-                      <span style={{ color: themeStyles.textSecondary, fontSize: 11 }}>CPU {displayCpu}%</span>
-                      <span style={{ color: themeStyles.textSecondary, fontSize: 11 }}>MEM {displayMem.toFixed(1)}GB</span>
-                      <span style={{ color: themeStyles.textSecondary, fontSize: 11 }}>{formatStartTime(run.startedAt)}</span>
-                    </Space>
-                  </div>
-
-                  <div style={{ padding: '6px 12px 8px' }}>
+                  <div style={{ padding: '5px 10px 7px', borderTop: `1px solid ${themeStyles.borderLight}` }}>
                     <div
                       style={{
                         position: 'relative',
@@ -864,6 +801,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                           <Tooltip key={task.id} title={`${task.name || `步骤 ${index + 1}`} [${statusText[task.status] ?? '等待'}]`}>
                             <button
                               type="button"
+                              className="dft-pipeline-step-dot"
                               aria-label={`打开步骤 ${task.name}`}
                               onClick={(event) => {
                                 event.stopPropagation();
@@ -871,14 +809,16 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                               }}
                               style={{
                                 position: 'relative',
-                                width: 10,
-                                height: 10,
+                                width: 12,
+                                height: 12,
                                 borderRadius: '50%',
                                 background: circleBg,
                                 border: '2px solid var(--vscode-editor-background)',
                                 cursor: 'pointer',
                                 padding: 0,
-                                transition: 'width 0.14s ease, height 0.14s ease, box-shadow 0.14s ease',
+                                zIndex: 1,
+                                transition: 'transform 0.14s ease, box-shadow 0.14s ease',
+                                animation: task.status === 'running' ? 'dftPipelineStepPulse 1.35s ease-in-out infinite' : undefined,
                               }}
                             />
                           </Tooltip>
@@ -1024,7 +964,8 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
           })()}
         </Space>
       </Modal>
-    </Row>
+      </Row>
+    </>
   );
 });
 
