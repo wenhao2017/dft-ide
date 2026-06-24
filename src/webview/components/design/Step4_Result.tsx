@@ -27,7 +27,7 @@ interface Props {
 
 const Step4Result: React.FC<Props> = ({ onNext, onPrev, category }) => {
   const flowKey = category.toLowerCase();
-  const { activeProject } = useWizardStore();
+  const activeProject = useWizardStore((s) => s.activeProject);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRecords, setHistoryRecords] = useState<ExecutionHistoryRecord[]>([]);
   const [activeRecord, setActiveRecord] = useState<ExecutionHistoryRecord | null>(null);

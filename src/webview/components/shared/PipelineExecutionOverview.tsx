@@ -28,6 +28,7 @@ import usePipelineRuntimeStore, {
 } from '../../store/pipelineRuntimeStore';
 import { PipelineLink, PipelineTask, pipelineFlowConfigs } from './pipelineMockData';
 import { openExecutionTerminal } from '../../utils/ipc';
+import { useShallow } from 'zustand/react/shallow';
 
 type OverviewRunState = 'idle' | 'running' | 'completed' | 'stopped';
 
@@ -284,7 +285,23 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     subscribePipelineRuntimeUpdates();
   }, []);
 
-  const runtimes = usePipelineRuntimeStore((state) => state.runtimes);
+  const selectedModuleKeys = useMemo(() => {
+    const cleanKeys = moduleKeys.map((key) => key.trim()).filter(Boolean);
+    return Array.from(new Set(cleanKeys));
+  }, [moduleKeys]);
+
+  const runtimes = usePipelineRuntimeStore(
+    useShallow((state) => {
+      const subset: Record<string, PipelineRuntimeSnapshot> = {};
+      selectedModuleKeys.forEach((moduleKey) => {
+        const key = getPipelineRuntimeKey(flowKey, moduleKey);
+        if (state.runtimes[key]) {
+          subset[key] = state.runtimes[key];
+        }
+      });
+      return subset;
+    })
+  );
   const ensureRuntime = usePipelineRuntimeStore((state) => state.ensureRuntime);
   const startRuntime = usePipelineRuntimeStore((state) => state.startRuntime);
   const stopRuntime = usePipelineRuntimeStore((state) => state.stopRuntime);
@@ -297,11 +314,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   const [runModalTargets, setRunModalTargets] = useState<string[]>([]);
   const [runModalRange, setRunModalRange] = useState<[number, number]>([0, 0]);
   const taskDetailRefs = useRef<Record<string, HTMLDivElement | null>>({});
-
-  const selectedModuleKeys = useMemo(() => {
-    const cleanKeys = moduleKeys.map((key) => key.trim()).filter(Boolean);
-    return Array.from(new Set(cleanKeys));
-  }, [moduleKeys]);
 
   const getFlowLabel = useCallback((moduleKey: string) => `${flowLabel} / ${moduleKey}`, [flowLabel]);
 
@@ -323,7 +335,16 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   ), [flowKey, getFlowLabel, runtimes, selectedModuleKeys]);
 
   const activeModuleData = visibleRuns.find((run) => run.moduleKey === activeModuleKey);
-  const activeHierarchy = activeModuleData ? getTaskHierarchy(activeModuleData) : undefined;
+  const activeHierarchy = useMemo(() => {
+    return activeModuleData ? getTaskHierarchy(activeModuleData) : undefined;
+  }, [activeModuleData]);
+
+  const visibleRunsWithHierarchies = useMemo(() => {
+    return visibleRuns.map((run) => ({
+      run,
+      hierarchy: getTaskHierarchy(run),
+    }));
+  }, [visibleRuns]);
 
 
 
@@ -715,10 +736,9 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
       <Col span={16}>
         <List
           size="small"
-          dataSource={visibleRuns}
-          renderItem={(run) => {
+          dataSource={visibleRunsWithHierarchies}
+          renderItem={({ run, hierarchy: runHierarchy }) => {
             const isSelected = run.moduleKey === activeModuleKey;
-            const runHierarchy = getTaskHierarchy(run);
             const trackTasks = runHierarchy.topLevelTasks.length ? runHierarchy.topLevelTasks : run.tasks;
             const trackTaskId = getTrackTaskId(run, runHierarchy.parentByChild);
             const trackTaskIndex = trackTasks.findIndex((task) => task.id === trackTaskId);

@@ -313,10 +313,59 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
     () => ({ onSelect: selectTask, onRerun: rerunTask, onStop: stopTask }),
     [rerunTask, selectTask, stopTask],
   );
-  const { nodes, edges } = useMemo(
-    () => layoutGraph(runtime.tasks, runtime.links, handlers, runtime.selectedTaskId),
-    [handlers, runtime.links, runtime.selectedTaskId, runtime.tasks],
-  );
+  // 1. Calculate Dagre node positions ONLY when tasks or links structure changes
+  const layoutPositions = useMemo(() => {
+    const graph = new dagre.graphlib.Graph();
+    graph.setDefaultEdgeLabel(() => ({}));
+    graph.setGraph({ rankdir: 'TB', nodesep: 38, ranksep: 58 });
+
+    runtime.tasks.forEach((task) => graph.setNode(task.id, { width: 154, height: 96 }));
+    runtime.links.forEach((link) => graph.setEdge(link.source, link.target));
+    dagre.layout(graph);
+
+    const positions: Record<string, { x: number; y: number }> = {};
+    runtime.tasks.forEach((task) => {
+      const point = graph.node(task.id) as { x: number; y: number } | undefined;
+      if (point) {
+        positions[task.id] = { x: point.x - 77, y: point.y - 48 };
+      }
+    });
+    return positions;
+  }, [runtime.tasks, runtime.links]);
+
+  // 2. Map positions to ReactFlow nodes and edges (very fast, runs on selection or handlers updates)
+  const { nodes, edges } = useMemo(() => {
+    const nodes: Node<PipelineNodeData>[] = runtime.tasks.map((task) => {
+      const pos = layoutPositions[task.id] ?? { x: 0, y: 0 };
+      return {
+        id: task.id,
+        type: 'pipelineTask',
+        position: pos,
+        sourcePosition: Position.Bottom,
+        targetPosition: Position.Top,
+        data: {
+          task,
+          selected: task.id === runtime.selectedTaskId,
+          ...handlers,
+        },
+        draggable: false,
+      };
+    });
+
+    const edges: Edge[] = runtime.links.map((link) => ({
+      id: `${link.source}-${link.target}`,
+      source: link.source,
+      target: link.target,
+      animated: runtime.tasks.find((task) => task.id === link.source)?.status === 'running',
+      markerEnd: { type: MarkerType.ArrowClosed },
+      style: {
+        stroke: 'var(--vscode-focusBorder, #1677ff)',
+        strokeWidth: 1.7,
+      },
+    }));
+
+    return { nodes, edges };
+  }, [layoutPositions, runtime.tasks, runtime.links, runtime.selectedTaskId, handlers]);
   const selectedTask = runtime.tasks.find((task) => task.id === runtime.selectedTaskId);
   const failedCount = runtime.tasks.filter((task) => task.status === 'failed').length;
   const runningCount = runtime.tasks.filter((task) => task.status === 'running').length;

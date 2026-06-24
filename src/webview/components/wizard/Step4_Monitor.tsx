@@ -3,11 +3,18 @@ import { Card, Progress, Result, Typography, Space, Button } from 'antd';
 import { LoadingOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import useWizardStore from '../../store/wizardStore';
 import vscode from '../../utils/vscode';
+import { useShallow } from 'zustand/react/shallow';
 
 const { Text } = Typography;
 
 const Step4Monitor: React.FC = () => {
-  const { taskPayload, updatePayload, reset } = useWizardStore();
+  const { taskPayload, updatePayload, reset } = useWizardStore(
+    useShallow((s) => ({
+      taskPayload: s.taskPayload,
+      updatePayload: s.updatePayload,
+      reset: s.reset,
+    }))
+  );
   const [jobId, setJobId] = useState<string | null>(taskPayload.jobId || null);
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState<'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED'>('PENDING');

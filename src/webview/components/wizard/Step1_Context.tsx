@@ -18,7 +18,8 @@ const moduleOptions = [
 
 const Step1Context: React.FC = () => {
   const [form] = Form.useForm();
-  const { nextStep, updatePayload } = useWizardStore();
+  const nextStep = useWizardStore((s) => s.nextStep);
+  const updatePayload = useWizardStore((s) => s.updatePayload);
 
   const handleNext = async () => {
     try {

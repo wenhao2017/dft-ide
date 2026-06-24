@@ -171,7 +171,14 @@ type ProjectFormValue = {
 };
 
 const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }) => {
-  const {setFlowContext, setActiveProject, currentUser, setCurrentUser} = useWizardStore();
+  const {setFlowContext, setActiveProject, currentUser, setCurrentUser} = useWizardStore(
+    useShallow((state) => ({
+      setFlowContext: state.setFlowContext,
+      setActiveProject: state.setActiveProject,
+      currentUser: state.currentUser,
+      setCurrentUser: state.setCurrentUser,
+    }))
+  );
   const [dashboard, setDashboard] = useState<ProjectDashboard | null>(null);
   const [projects, setProjects] = useState<DftProject[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
@@ -205,11 +212,13 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
     const keyword = projectKeyword.trim().toLowerCase();
     if (!keyword) return projects;
     return projects?.filter((project) =>
-      [project.name, project.id, project.owner, project.role].some((text) => text.toLowerCase().includes(keyword))
+      [project.name, project.id, project.owner, project.role].some((text) =>
+        text && typeof text === 'string' && text.toLowerCase().includes(keyword)
+      )
     );
-  }, [dashboard, projects, projectKeyword]);
+  }, [projects, projectKeyword]);
 
-  const fetchProjectData = async () => {
+  const fetchProjectData = useCallback(async () => {
     setLoadingProjects(true);
     try {
       const data = await fetchProjectDashboard(currentUser);
@@ -221,7 +230,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
     } finally {
       setLoadingProjects(false);
     }
-  };
+  }, [currentUser]);
 
   useEffect(() => {
     let disposed = false;
@@ -289,11 +298,13 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
     });
   }, [setActiveProject, workspaceProject, workspaceProjectInfo]);
 
-  const enterProject = async (project: DftProject, rootPath?: string) => {
+  const chooseProjectsRootRef = useRef<(project: DftProject, doEnter?: boolean) => Promise<void>>(null as any);
+
+  const enterProject = useCallback(async (project: DftProject, rootPath?: string) => {
     setWorkingProjectId(project.id);
     try {
       if(!project.rootPath && !rootPath) {
-        chooseProjectsRoot(project, true);
+        chooseProjectsRootRef.current?.(project, true);
         return;
       }
       const result = await enterProjectWorkspace(project);
@@ -324,10 +335,10 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
     } finally {
       setWorkingProjectId(null);
     }
-  };
+  }, [onNavigate, setActiveProject, setFlowContext]);
 
-  const setProjectRoot = async (project: DftProject, porjectRootPath: string) => {
-    setProjects(projects?.map(item =>
+  const setProjectRoot = useCallback(async (project: DftProject, porjectRootPath: string) => {
+    setProjects((prevProjects) => prevProjects?.map(item =>
       (item.id === project.id && item.ctmp_id === project.ctmp_id) ? { ...item, rootPath: porjectRootPath } : item
     ));
     // 请求后端保存项目目录数据
@@ -338,7 +349,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
       message.error(err instanceof Error ? err.message : '项目目录保存失败');
       return { success: false };
     }
-  };
+  }, [currentUser]);
 
   const isProjectInitialized = (project: DftProject) =>
     project.repos.length > 0 && project.repos.every((repo) => repo.status === 'ready');
@@ -369,7 +380,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
     return '进入项目，首次本地初始化'
   }
 
-  const initializeProject = async (project: DftProject) => {
+  const initializeProject = useCallback(async (project: DftProject) => {
     setInitializingProjectId(project.ctmp_id?.toString() ?? '');
     try {
       await initProject(project);
@@ -379,9 +390,9 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
     } finally {
       setInitializingProjectId(null);
     }
-  }
+  }, [fetchProjectData]);
 
-  const initializeProject2 = async (project: DftProject) => {
+  const initializeProject2 = useCallback(async (project: DftProject) => {
     if (isProjectInitialized(project)) return;
 
     setInitializingProjectId(project.id);
@@ -420,26 +431,26 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
         setInitializingProgress(0);
       }, 450);
     }
-  };
+  }, []);
 
-  const openLocalProject = async () => {
+  const openLocalProject = useCallback(async () => {
     const selected = await selectPath('folder');
     if (!selected) return;
     const openResult = await openProjectWorkspace(selected);
     if (!openResult.success) {
       message.error(openResult.error ?? '本地项目打开失败');
     }
-  };
+  }, []);
 
-  const openFlow = (category: string) => {
+  const openFlow = useCallback((category: string) => {
     if (onNavigate) {
       onNavigate(category);
     } else {
       setFlowContext({ category, projectId: dashboard?.currentProjectId ?? undefined });
     }
-  };
+  }, [dashboard?.currentProjectId, onNavigate, setFlowContext]);
 
-  const chooseProjectsRoot = async (project: DftProject, doEnter=false) => {
+  const chooseProjectsRoot = useCallback(async (project: DftProject, doEnter=false) => {
     const selected = await selectPath('folder');
     if (selected) {
       const result = await setProjectRoot(project, selected);
@@ -447,19 +458,21 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
         enterProject( {...project, rootPath: selected}, selected);
       }
     }
-  };
+  }, [setProjectRoot, enterProject]);
 
-  const openProjectModal = () => {
+  chooseProjectsRootRef.current = chooseProjectsRoot;
+
+  const openProjectModal = useCallback(() => {
     projectForm.setFieldsValue({ name: '', description: '' });
     setProjectModalOpen(true);
-  };
+  }, [projectForm]);
 
-  const closeProjectModal = () => {
+  const closeProjectModal = useCallback(() => {
     setProjectModalOpen(false);
     projectForm.resetFields();
-  };
+  }, [projectForm]);
 
-  const saveProject = async () => {
+  const saveProject = useCallback(async () => {
     const value = await projectForm.validateFields();
     setProjectSaving(true);
     try {
@@ -475,7 +488,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
     } finally {
       setProjectSaving(false);
     }
-  };
+  }, [projectForm, currentUser, closeProjectModal, fetchProjectData]);
 
   return (
     <div>

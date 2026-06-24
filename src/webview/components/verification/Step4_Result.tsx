@@ -21,7 +21,7 @@ import { PipelineRuntimeSnapshot } from '../../store/pipelineRuntimeStore';
 const { Link } = Typography;
 
 const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onNext, onPrev }) => {
-  const { activeProject } = useWizardStore();
+  const activeProject = useWizardStore((s) => s.activeProject);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRecords, setHistoryRecords] = useState<ExecutionHistoryRecord[]>([]);
   const [activeRecord, setActiveRecord] = useState<ExecutionHistoryRecord | null>(null);

@@ -23,6 +23,7 @@ import ProjectMembers from './components/ProjectMembers';
 import useWizardStore from './store/wizardStore';
 import vscode from './utils/vscode';
 import { toggleZenMode as ipcToggleZenMode } from './utils/ipc';
+import { useShallow } from 'zustand/react/shallow';
 import type { DftProject } from './services/projectService';
 
 const { Content } = Layout;
@@ -80,7 +81,17 @@ const flowTabs: Array<{ key: string; label: string; icon: React.ReactNode }> = [
 const disabledTabs = new Set(['Formal', 'STA']);
 
 const App: React.FC = () => {
-  const { flowContext, activeProject, dirtyFlows, setFlowContext, zenMode, toggleZenMode, reset } = useWizardStore();
+  const { flowContext, activeProject, dirtyFlows, setFlowContext, zenMode, toggleZenMode, reset } = useWizardStore(
+    useShallow((state) => ({
+      flowContext: state.flowContext,
+      activeProject: state.activeProject,
+      dirtyFlows: state.dirtyFlows,
+      setFlowContext: state.setFlowContext,
+      zenMode: state.zenMode,
+      toggleZenMode: state.toggleZenMode,
+      reset: state.reset,
+    }))
+  );
   const [vscTheme, setVscTheme] = useState<'dark' | 'light' | 'hc'>(detectVscodeTheme);
   const isDirty = useWizardStore((s) => s.isDirty);
   const [memberProject, setMemberProject] = useState<DftProject | null>(null);

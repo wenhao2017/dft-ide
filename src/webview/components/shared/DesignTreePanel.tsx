@@ -42,6 +42,7 @@ import {
 } from '../../utils/ipc';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 import usePipelineRuntimeStore from '../../store/pipelineRuntimeStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const { Text, Title } = Typography;
 
@@ -96,9 +97,12 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
 
   const selectedConfig = configs.find((item) => item.key === selectedKey) ?? configs[0];
 
-  const runtimes = usePipelineRuntimeStore((state) => state.runtimes);
-  const flowRuntimes = Object.values(runtimes).filter((r) => r.flowKey === flow);
-  const flowTasks = flowRuntimes.find((r) => r.tasks && r.tasks.length > 0)?.tasks || [];
+  const flowTasks = usePipelineRuntimeStore(
+    useShallow((state) => {
+      const flowRuntimes = Object.values(state.runtimes).filter((r) => r.flowKey === flow);
+      return flowRuntimes.find((r) => r.tasks && r.tasks.length > 0)?.tasks || [];
+    })
+  );
 
   const DEFAULT_FLOW_STEPS: Record<'hibist' | 'sailor' | 'verification', string[]> = useMemo(() => ({
     hibist: [

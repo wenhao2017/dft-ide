@@ -56,7 +56,9 @@ const columns: ColumnsType<NormalizedRow> = [
 ];
 
 const Step2DataVerify: React.FC = () => {
-  const { nextStep, prevStep, updatePayload } = useWizardStore();
+  const nextStep = useWizardStore((s) => s.nextStep);
+  const prevStep = useWizardStore((s) => s.prevStep);
+  const updatePayload = useWizardStore((s) => s.updatePayload);
 
   const handleConfirm = () => {
     updatePayload({ normalizedData: mockData });

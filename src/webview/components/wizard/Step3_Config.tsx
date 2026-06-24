@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import useWizardStore from '../../store/wizardStore';
 import vscode from '../../utils/vscode';
+import { useShallow } from 'zustand/react/shallow';
 
 const configSchema = z.object({
   tool: z.enum(['hibist', 'sailor'] as const, {
@@ -27,7 +28,14 @@ const toolOptions = [
 ];
 
 const Step3Config: React.FC = () => {
-  const { prevStep, nextStep, updatePayload, taskPayload } = useWizardStore();
+  const { prevStep, nextStep, updatePayload, taskPayload } = useWizardStore(
+    useShallow((s) => ({
+      prevStep: s.prevStep,
+      nextStep: s.nextStep,
+      updatePayload: s.updatePayload,
+      taskPayload: s.taskPayload,
+    }))
+  );
   const [messageApi, contextHolder] = message.useMessage();
 
   const {
