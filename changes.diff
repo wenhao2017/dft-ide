@@ -1,523 +1,80 @@
 diff --git a/src/extension.ts b/src/extension.ts
-index d04ee66..70dac08 100644
+index d9dc2c6..daafe42 100644
 --- a/src/extension.ts
 +++ b/src/extension.ts
-@@ -1668,33 +1668,29 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
-           const platform = process.platform;
-           const urlToOpen = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+@@ -328,7 +328,7 @@ class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
  
--          try {
--            switch (platform) {
--              case 'win32':
--                await execFileAsync('cmd', ['/c', 'start', '', urlToOpen]);
--                return true;
--              case 'darwin':
--                await execFileAsync('open', [urlToOpen]);
-+          switch (platform) {
-+            case 'win32':
-+              await execFileAsync('cmd', ['/c', 'start', '', urlToOpen]);
-+              return true;
-+            case 'darwin':
-+              await execFileAsync('open', [urlToOpen]);
-+              return true;
-+            default:
-+              try {
-+                await execFileAsync('xdg-open', [urlToOpen]);
-                 return true;
--              default:
--                try {
--                  await execFileAsync('xdg-open', [urlToOpen]);
--                  return true;
--                } catch {
--                  const browsers = ['chromium', 'chrome', 'google-chrome', 'firefox', 'brave', 'epiphany', 'vivaldi'];
--                  for (const browser of browsers) {
--                    try {
--                      await execFileAsync(browser, [urlToOpen]);
--                      return true;
--                    } catch {
--                      // Try the next browser candidate.
--                    }
-+              } catch {
-+                const browsers = ['chromium', 'chrome', 'google-chrome', 'firefox', 'brave', 'epiphany', 'vivaldi'];
-+                for (const browser of browsers) {
-+                  try {
-+                    await execFileAsync(browser, [urlToOpen]);
-+                    return true;
-+                  } catch {
-+                    // Try the next browser candidate.
-                   }
--                  return false;
-                 }
--            }
--          } catch {
--            return false;
-+                throw new Error('Could not find an executable to open the URL');
-+              }
-           }
-         };
- 
-diff --git a/src/services/configService.ts b/src/services/configService.ts
-index 8ab59ea..7e71adb 100644
---- a/src/services/configService.ts
-+++ b/src/services/configService.ts
-@@ -1,6 +1,6 @@
- import * as vscode from 'vscode';
- import * as path from 'path';
--import { pathExists, readJsonFile, isRecord } from './utils';
-+import { pathExists, readJsonFile, isRecord, getFileNameAndExtension, getDirectory } from './utils';
- import {
-   resolveConfigPath,
-   resolveProjectRepoRoot,
-@@ -281,30 +281,81 @@ export function collectModuleNames(value: unknown, modules: Set<string>): void {
- }
- 
- export async function saveDefaultConfigLogs(defaultConfigLog: DefaultConfigLog) {
--  const flow = defaultConfigLog.flow;
--  const configsDir = await getFlowConfigsDirectory(flow);
--  await ensureLocalConfigDirectory(configsDir);
-+  try{
-+    const flow = defaultConfigLog.flow;
-+    const configsDir = await getFlowConfigsDirectory(flow);
-+    await ensureLocalConfigDirectory(configsDir);
-+    await ensureLocalConfigDirectory(`${configsDir}/.logs`);
-+    
-+    const scriptPath = await copyLogFile(defaultConfigLog.scriptPath, defaultConfigLog.timemilles || '', configsDir);
-+    const designTree = await copyLogFile(defaultConfigLog.designTree, defaultConfigLog.timemilles || '', configsDir);
-+    const normTable = await copyLogFile(defaultConfigLog.normTable, defaultConfigLog.timemilles || '', configsDir);
-+    const logFile = await moveLogFile(defaultConfigLog.logFile || '', configsDir);
-+    const success = await checkExecuteStatus(logFile);
-+    
-+    const filePath = resolveCfgPath(configsDir, "history");
-+    let content = [
-+      `{flow: "${flow}"`,
-+      `scriptPath: "${scriptPath.replace(/\\/g, '/')}"`,
-+      `designTree: "${designTree.replace(/\\/g, '/')}"`,
-+      `normTable: "${normTable.replace(/\\/g, '/')}"`,
-+      `logFile: "${logFile.replace(/\\/g, '/')}"`,
-+      `time: "${defaultConfigLog.timestamp}"`,
-+      `success: ${success}}`,
-+    ].join(',');
-+    if (await pathExists(filePath)) {
-+      const data = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
-+      let existingContent = Buffer.from(data).toString();
-+      content +=  "\n" + existingContent;
-+    }
-+    await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), Buffer.from(content, 'utf-8'));
-+    return { defaultConfigLog };
-+  }catch (error) {
-+    vscode.window.showErrorMessage(`${(error as Error).message}`);
-+    return undefined;
-+  }
-+}
- 
--  const filePath = resolveCfgPath(configsDir, "history");
--  let content = [
--    `{flow: "${flow}"`,
--    `scriptPath: "${defaultConfigLog.scriptPath.replace(/\\/g, '/')}"`,
--    `designTree: "${defaultConfigLog.designTree.replace(/\\/g, '/')}"`,
--    `normTable: "${defaultConfigLog.normTable.replace(/\\/g, '/')}"`,
--    `logFile: "${defaultConfigLog.logFile?.replace(/\\/g, '/')}"`,
--    `time: "${defaultConfigLog.timestamp}"`,
--    `success: ${defaultConfigLog.success}}`,
--  ].join(',');
--  if (await pathExists(filePath)) {
--    const data = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
--    let existingContent = Buffer.from(data).toString();
--    content +=  "\n" + existingContent;
-+export async function copyLogFile(filePath: string, timemilles: string, configsDir: string): Promise<string> {
-+  try {
-+    const { name, extension } = getFileNameAndExtension(filePath);
-+    await vscode.workspace.fs.copy(vscode.Uri.file(filePath), 
-+      vscode.Uri.file(`${configsDir}/.logs/${name}_${timemilles}.${extension}`));
-+    return `${configsDir}/.logs/${name}_${timemilles}.${extension}`;
-+  } catch (error) {
-+    vscode.window.showErrorMessage(`${(error as Error).message}`);
-+    return '';
+   private createMenuItem(cfg: FlowMenuConfig): vscode.TreeItem {
+     const item = new vscode.TreeItem(cfg.label, vscode.TreeItemCollapsibleState.None);
+-    
++
+     let colorId = 'charts.blue';
+     if (cfg.category === 'Hibist') colorId = 'charts.purple';
+     else if (cfg.category === 'Sailor') colorId = 'charts.blue';
+@@ -805,7 +805,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+         const title = typeof msg.title === 'string' && msg.title.trim()
+           ? msg.title.trim()
+           : 'DFT IDE Task';
+-        const command = typeof msg.command === 'string' ? msg.command.trim() : '';
++        const command = typeof msg.cmd === 'string' ? msg.cmd.trim() : '';
+         const requestedCwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
+         try {
+           await openExecutionTerminal({ title, command, cwd: requestedCwd });
+diff --git a/src/services/terminalService.ts b/src/services/terminalService.ts
+index e773d0c..2084a06 100644
+--- a/src/services/terminalService.ts
++++ b/src/services/terminalService.ts
+@@ -77,9 +77,9 @@ export async function openExecutionTerminal(options: {
    }
--  await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), Buffer.from(content, 'utf-8'));
-+}
  
--  return { defaultConfigLog };
-+export async function moveLogFile(filePath: string, configsDir: string): Promise<string> {
-+  try {
-+    const { name, extension } = getFileNameAndExtension(filePath);
-+    await vscode.workspace.fs.rename(vscode.Uri.file(filePath), 
-+      vscode.Uri.file(`${configsDir}/.logs/${name}.${extension}`));
-+    return `${configsDir}/.logs/${name}.${extension}`;
-+  } catch (error) {
-+    vscode.window.showErrorMessage(`${(error as Error).message}`);
-+    return '';
-+  }
+   vscode.window.showInformationMessage(`DFT IDE terminal opened: ${title}`);
+-  void runDftLogDiagnosticsDemo(title, command).catch((error) => {
+-    vscode.window.showWarningMessage(
+-      `DFT IDE log diagnostics demo failed: ${error instanceof Error ? error.message : String(error)}`
+-    );
+-  });
++  // void runDftLogDiagnosticsDemo(title, command).catch((error) => {
++  //   vscode.window.showWarningMessage(
++  //     `DFT IDE log diagnostics demo failed: ${error instanceof Error ? error.message : String(error)}`
++  //   );
++  // });
  }
- 
-+export async function checkExecuteStatus(logFile: string): Promise<boolean> {
-+  try {
-+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(logFile));
-+    const text = document.getText();
-+    const pattern = /\berror\b|\bexception\b/gi;
-+    const matches = text.match(pattern);
-+    if (matches && matches.length > 0) {
-+      return false;
-+    } else {
-+        return true;
-+    }
-+  } catch (error) {
-+    vscode.window.showErrorMessage(`${(error as Error).message}`);
-+    return false;
-+  }
-+}
- 
- export async function getDefaultConfigLogs(flow: 'hibist' | 'sailor' | 'verification') {
-   const configsDir = await getFlowConfigsDirectory(flow);
-diff --git a/src/services/gitlabService.ts b/src/services/gitlabService.ts
-new file mode 100644
-index 0000000..5691ba4
---- /dev/null
-+++ b/src/services/gitlabService.ts
-@@ -0,0 +1,4 @@
-+export function getGitlabHost(): string | undefined {
-+    const configured = (window as unknown as { DFT_IDE_GITLAB_HOST?: string }).DFT_IDE_GITLAB_HOST;
-+    return configured?.replace(/\/+$/, '') ?? undefined;
-+  }
-diff --git a/src/services/utils.ts b/src/services/utils.ts
-index eeebbe7..bae0cd7 100644
---- a/src/services/utils.ts
-+++ b/src/services/utils.ts
-@@ -40,3 +40,27 @@ export async function readJsonFile(filePath: string): Promise<Record<string, unk
- export function isRecord(value: unknown): value is Record<string, unknown> {
-   return typeof value === 'object' && value !== null && !Array.isArray(value);
- }
-+
-+export const getFileNameAndExtension = (filePath: string) => {
-+  const normalizedPath = filePath.replace(/\\/g, '/');
-+  const fileName = normalizedPath.split('/').pop();
-+  if (!fileName || fileName === '') {
-+    return { name: '', extension: '' };
-+  }
-+  const lastDotIndex = fileName.lastIndexOf('.');
-+    let name = fileName;
-+    let extension = '';
-+    
-+    if (lastDotIndex !== -1) {
-+        name = fileName.substring(0, lastDotIndex);
-+        extension = fileName.substring(lastDotIndex + 1);
-+    }
-+    return { name, extension };
-+};
-+
-+export const getDirectory = (filePath: string) => {
-+  const normalizedPath = filePath.replace(/\\/g, '/');
-+  let lastSlashIndex = normalizedPath.lastIndexOf('/');
-+  if (lastSlashIndex === -1) return '';
-+  return filePath.substring(0, lastSlashIndex);
-+};
-diff --git a/src/services/workspaceService.ts b/src/services/workspaceService.ts
-index 305496d..5af04a3 100644
---- a/src/services/workspaceService.ts
-+++ b/src/services/workspaceService.ts
-@@ -6,7 +6,7 @@ import {
-   LOCAL_STATE_DIR_NAME,
-   LOCAL_STATE_SUBDIR,
- } from './constants';
--import { executeFileCommand, pathExists, isRecord } from './utils';
-+import { executeFileCommand, pathExists, isRecord, getDirectory } from './utils';
- import { DftProject } from '../webview/services/projectService';
- import { inferDftFlow } from './diagnosticsService';
- 
-@@ -763,28 +763,21 @@ export interface DefaultConfigLog {
-   scriptPath: string;
-   designTree: string;
-   normTable: string;
-+  timemilles?: string;
-   timestamp?: string;
-   logFile?: string;
-   success?: boolean;
- }
- 
--const getDirectory = (filePath: string) => {
--  let lastSlashIndex = filePath.lastIndexOf('/');
--  if (lastSlashIndex === -1) {
--    lastSlashIndex = filePath.lastIndexOf('\\')
--  } 
--  if (lastSlashIndex === -1) return '';
--  return filePath.substring(0, lastSlashIndex);
--};
--
- export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
-   const terminal = vscode.window.createTerminal({
-     name: 'generate default flow configs'
-   });
-   const timestamp = dayjs().format('YYYY-MM-DD HH:mm:ss');
--  const directory = getDirectory(defaultConfigLog.scriptPath)
--  const logFile = `${directory}/${defaultConfigLog.flow}-${defaultConfigLog.requestId}-${Date.now().toString()}.log`;
--  defaultConfigLog = {...defaultConfigLog, logFile, timestamp};
-+  const timemilles = Date.now().toString();
-+  const directory = getDirectory(defaultConfigLog.scriptPath);
-+  const logFile = `${directory}/${defaultConfigLog.flow}-${defaultConfigLog.requestId}-${timemilles}.log`;
-+  defaultConfigLog = {...defaultConfigLog, logFile, timestamp, timemilles};
-   await new Promise<void>((resolve, reject) => {
-     if ('onDidEndTerminalShellExecution' in vscode.window) {
-       const disposable = vscode.window.onDidEndTerminalShellExecution(e => {
-@@ -792,10 +785,8 @@ export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
-           disposable.dispose();
-           if (e.exitCode === 0) {
-           //  terminal.dispose();
--            defaultConfigLog = {...defaultConfigLog, success: true};
-             resolve();
-           } else {
--            defaultConfigLog = {...defaultConfigLog, success: false};
-             reject(new Error('Failed to generate default flow configs. See terminal logs for specific error details'));
-           }
-         }
-@@ -822,10 +813,8 @@ export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
-               defaultConfigLog = {...defaultConfigLog, success: true};
-               resolve();
-             } else if (result.includes('fatal:')) {
--              defaultConfigLog = {...defaultConfigLog, success: false};
-               reject(new Error(result));
-             } else {
--              defaultConfigLog = {...defaultConfigLog, success: false};
-               reject(new Error('Failed to clone the Git repository. See terminal logs for specific error details'));
-             }
-           }
-diff --git a/src/webview/components/ProjectMembers.tsx b/src/webview/components/ProjectMembers.tsx
-index b28212a..cd7bd79 100644
---- a/src/webview/components/ProjectMembers.tsx
-+++ b/src/webview/components/ProjectMembers.tsx
-@@ -41,6 +41,7 @@ import {
- } from '../services/projectService';
- import dayjs from 'dayjs';
- import {openExternalUrl} from '../utils/ipc';
-+import {getGitlabHost} from '../../services/gitlabService';
- 
- const { Text, Title } = Typography;
- 
-@@ -129,20 +130,20 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
-     form.setFieldValue('employeeIds', values);
-     if (!values || values.length === 0) return;
- 
--    const firstNotInUsers = values.slice().reverse().find(value => {
-+    const lastNotInUsers = values.slice().reverse().find(value => {
-       return !users.some(user => user.username.toLowerCase() === value.toLowerCase());
-     });
--    if (firstNotInUsers) {
--      const user = await fetchSingleUser(firstNotInUsers);
-+    if (lastNotInUsers) {
-+      const user = await fetchSingleUser(lastNotInUsers);
-       if (user) {
-         if (user.locked) {
--          message.warning(`Gitlab 用户 ${firstNotInUsers} 已被锁定, 请联系管理员进行解锁`);
-+          message.warning(`Gitlab 用户 ${lastNotInUsers} 已被锁定, 请联系管理员进行解锁`);
-         } else if (user.state !== 'active') {
-           if(user.state === 'deactivated'){
-             message.warning(
-               <span>
--                Gitlab 用户 {firstNotInUsers} 的状态为 {user.state}(已停用), 可能是长时间未登录导致.<br />
--                请登录个人主页{' '}
-+                Gitlab 用户 {lastNotInUsers} 的状态为 {user.state}(已停用), 可能是长时间未登录导致.<br />
-+                请用户登录个人主页{' '}
-                 <a href={user.web_url} target="_blank" rel="noopener noreferrer">
-                   {user.web_url}
-                 </a>{' '}
-@@ -150,13 +151,24 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
-               </span>
-             );
-           }else{
--            message.warning(`Gitlab 用户 ${firstNotInUsers} 的状态为 ${user.state}, 请联系管理员进行恢复`);
-+            message.warning(`Gitlab 用户 ${lastNotInUsers} 的状态为 ${user.state}, 请联系管理员进行恢复`);
-           }
-         } else {
-           setUsers((items) => [...items, user]);
-         }
-       } else {
--        message.warning(`Gitlab 用户 ${firstNotInUsers} 不存在`);
-+        const webUrl = getGitlabHost();
-+        message.error(
-+          <span>
-+            Gitlab 用户 {lastNotInUsers} 不存在.
-+            请用户登录 Gitlab 网址{' '}
-+            <a href={webUrl} target="_blank" rel="noopener noreferrer">
-+              {webUrl}
-+            </a>{' '}
-+            后重试或联系管理员进行添加
-+          </span>
-+        );
-+        form.setFieldValue('employeeIds', values.filter(value => value !== lastNotInUsers));
-       }
+diff --git a/src/webview/components/shared/PipelineExecutionOverview.tsx b/src/webview/components/shared/PipelineExecutionOverview.tsx
+index d3c0622..7ac9ece 100644
+--- a/src/webview/components/shared/PipelineExecutionOverview.tsx
++++ b/src/webview/components/shared/PipelineExecutionOverview.tsx
+@@ -483,7 +483,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
+     if (task && task.status !== 'pending' && task.status !== 'skipped') {
+       void openExecutionTerminal({
+         title: getStepTerminalTitle(run.flowLabel, run.moduleKey, task),
+-        command: task.command,
++        cmd: task.command,
+         cwd: moduleWorkDirs?.[run.moduleKey],
+       });
      }
-   };
-@@ -189,23 +201,25 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
-         setMembers((items) => items.map((item) => item.employeeId === editingMember.employeeId ? updated : item));
-         message.success('成员已更新');
-       } else {
--        for (const employeeId of value.employeeIds){
-+        let count = 0;
-+        for (const employeeId of value.employeeIds) {
-           const isExists = members.some(member => member.employeeId === employeeId.trim());
-           if (isExists) {
-             message.info(`成员 ${employeeId} 已存在`);
--            continue;
-+          } else {
-+            const created = await addProjectMember(project.id, {
-+              employeeId: employeeId.trim(),
-+              role: value.role,
-+              ctmp: value.ctmp,
-+            });
-+            setMembers((items) => [...items, created]);
-+            count += 1;
-           }
--
--          const created = await addProjectMember(project.id, {
--            employeeId: employeeId.trim(),
--            role: value.role,
--            ctmp: value.ctmp,
--          });
--
--          setMembers((items) => [...items, created]);
-           form.setFieldValue('employeeIds', value.employeeIds.filter(id => id !== employeeId));
-         }
--        message.success('成员已添加');
-+        if (count > 0) {
-+          message.success('成员已添加');
-+        }
-       }
-       closeModal();
-     } catch (err) {
-diff --git a/src/webview/components/design/DefaultConfgHistory.tsx b/src/webview/components/design/DefaultConfgHistory.tsx
-index ea93f50..815e846 100644
---- a/src/webview/components/design/DefaultConfgHistory.tsx
-+++ b/src/webview/components/design/DefaultConfgHistory.tsx
-@@ -7,7 +7,6 @@ import {
- import type { ColumnsType } from 'antd/es/table';
- import { DefaultConfigLog } from '../../../services/workspaceService';
- import { fetchDefaultConfigLogs, openFileInEditor } from '../../utils/ipc';
--import { FileTextOutlined } from '@ant-design/icons';
- import Link from 'antd/es/typography/Link';
+diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
+index 9e3a9a2..3a9c1d4 100644
+--- a/src/webview/utils/ipc.ts
++++ b/src/webview/utils/ipc.ts
+@@ -509,7 +509,7 @@ export async function toggleZenMode(
  
- interface Props {
-diff --git a/src/webview/components/design/Step1_CommonConfig.tsx b/src/webview/components/design/Step1_CommonConfig.tsx
-index 05be95f..429afff 100644
---- a/src/webview/components/design/Step1_CommonConfig.tsx
-+++ b/src/webview/components/design/Step1_CommonConfig.tsx
-@@ -3,7 +3,6 @@ import { Badge, Button, Card, Col, Form, Radio, Row, Select, Space, Spin, messag
- import {
-   BranchesOutlined,
-   FileAddOutlined,
--  FileTextOutlined,
-   HistoryOutlined,
-   MinusCircleOutlined,
-   PlusOutlined,
-@@ -13,11 +12,10 @@ import {
- import { useVscodePath } from '../../hooks/useVscodePath';
- import { useFlowConfig } from '../../hooks/useFlowConfig';
- import PathInput from '../shared/PathInput';
--import { generateDefaultFlowConfigs, getGitInfo, type RepoKey } from '../../utils/ipc';
-+import { generateDefaultFlowConfigs, getGitInfo, RepoKey } from '../../utils/ipc';
- import useWizardStore from '../../store/wizardStore';
- import CollapsibleSection from '../shared/CollapsibleSection';
- import ControlledPathInput from '../shared/ControlledPathInput';
--import Link from 'antd/es/typography/Link';
- import DefaultConfgHistory from './DefaultConfgHistory';
- 
- interface Props {
-@@ -57,7 +55,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
-   const flowKey = category.toLowerCase();
-   const project = useVscodePath();
-   const workPath = useVscodePath();
--  // const sailorCfg = useVscodePath();
-   const [domainCfg, setDomainCfg] = useState<number>(1);
- 
-   const [currentBranch, setCurrentBranch] = useState<string>('');
-@@ -89,7 +86,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
-     const source = (savedData.step1 as Record<string, unknown> | undefined) ?? savedData;
-     if (source.project) project.setValue(String(source.project));
-     if (source.workPath) workPath.setValue(String(source.workPath));
--    // if (source.sailorCfg) sailorCfg.setValue(String(source.sailorCfg));
-     if (source.domainCfg) setDomainCfg(Number(source.domainCfg))
- 
-     if (Array.isArray(source.normalizeCfgs)) {
-@@ -118,7 +114,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
-     project: project.value,
-     workPath: workPath.value,
-     domainCfg,
--    // sailorCfg: sailorCfg.value,
-     normalizeCfgs,
-     normalizeIndex,
-   });
-@@ -171,7 +166,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
-         message.error(result.error ?? '生成默认配置失败');
-         return;
-       }
--      message.success(`已生成 ${result.created} 个默认 cfg，目录：${result.configsDir ?? 'configs'}`);
-+      message.success(`生成默认配置完成`);
-     } finally {
-       setGenerating(false);
-     }
-@@ -247,9 +242,11 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
-                   </Col>
-                 </Row>
-               ))}
--              <Button type="dashed" onClick={() => addNormalizeCfg()} block icon={<PlusOutlined />}>
--                添加
--              </Button>
-+              <div style={{ textAlign: 'center' }}>
-+                <Button style={{ minWidth: 200 }} type="dashed" icon={<PlusOutlined />} onClick={() => addNormalizeCfg()}>
-+                  添加
-+                </Button>
-+              </div>
-             </CollapsibleSection>
-           </Card>
- 
-diff --git a/src/webview/flows/CommonFlow.tsx b/src/webview/flows/CommonFlow.tsx
-index 42cfda5..45f1709 100644
---- a/src/webview/flows/CommonFlow.tsx
-+++ b/src/webview/flows/CommonFlow.tsx
-@@ -42,6 +42,7 @@ import { useFlowConfig } from '../hooks/useFlowConfig';
- import PathInput from '../components/shared/PathInput';
- import useWizardStore from '../store/wizardStore';
- import ObsViewer from '../components/shared/ObsViewer';
-+import {getGitlabHost} from '../../services/gitlabService';
- import {
-   getProjectRepoGitInfo,
-   openSourceControl,
-@@ -55,6 +56,7 @@ import {
-   applyCommonArtifactSync,
-   getRepoGitInfo,
-   getBranches,
-+  openExternalUrl
- } from '../utils/ipc';
- import {
-   accentPanelStyle,
-@@ -377,7 +379,8 @@ const CommonFlow: React.FC = () => {
-       return;
-     }
- 
--    const result = await openGitlabHost(repoGitName);
-+    const webUrl = getGitlabHost();
-+    const result = await openExternalUrl(`${webUrl}/${repoGitName}`);
-     if (!result.success) {
-       message.error(result.error ?? '无法打开浏览器，请检查系统默认设置!');
-     }
+ export async function openExecutionTerminal(options: {
+   title: string;
+-  command?: string;
++  cmd?: string;
+   cwd?: string;
+ }): Promise<{ success: boolean; error?: string }> {
+   vscode.postMessage({ command: 'openExecutionTerminal', ...options });
 diff --git a/src/webviewHtml.ts b/src/webviewHtml.ts
-index eb5aab9..516ec3a 100644
+index 7f69097..dc0a8e8 100644
 --- a/src/webviewHtml.ts
 +++ b/src/webviewHtml.ts
-@@ -17,6 +17,10 @@ export function getWebviewHtml(
-   const apiBase =
-     process.env.DFT_IDE_API_BASE ??
-     vscode.workspace.getConfiguration('dftIde').get<string>('apiBase', '');
-+  
-+  const gitlabHost =
-+    process.env.GITLAB_HOST ??
-+    vscode.workspace.getConfiguration('dftIde').get<string>('gitlabHost', '');
- 
-   return `<!DOCTYPE html>
- <html lang="zh-CN">
-@@ -37,6 +41,7 @@ export function getWebviewHtml(
-   <script nonce="${nonce}">
-     window.DFT_IDE_API_BASE = ${JSON.stringify(apiBase)};
-     window.DFT_IDE_INITIAL_VIEW = ${JSON.stringify(initialView)};
-+    window.DFT_IDE_GITLAB_HOST = ${JSON.stringify(gitlabHost)};
-   </script>
-   <script nonce="${nonce}" src="${scriptUri}"></script>
- </body>
+@@ -29,7 +29,7 @@ export function getWebviewHtml(
+   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+   <meta http-equiv="Content-Security-Policy"
+         content="default-src 'none';
+-                 connect-src http://localhost:* http://127.0.0.1:* http://pandas.hisi.huawei.com/dft-ide-server/ https:;
++                 connect-src http://localhost:* http://127.0.0.1:* ${apiBase} https:;
+                  style-src ${webview.cspSource} 'unsafe-inline';
+                  script-src 'nonce-${nonce}';
+                  font-src ${webview.cspSource};
