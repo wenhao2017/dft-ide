@@ -29,7 +29,7 @@ export function getWebviewHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'none';
-                 connect-src http://localhost:* http://127.0.0.1:* http://pandas.hisi.huawei.com/dft-ide-server/ https:;
+                 connect-src http://localhost:* http://127.0.0.1:* ${apiBase} https:;
                  style-src ${webview.cspSource} 'unsafe-inline';
                  script-src 'nonce-${nonce}';
                  font-src ${webview.cspSource};

@@ -509,7 +509,7 @@ export async function toggleZenMode(
 
 export async function openExecutionTerminal(options: {
   title: string;
-  command?: string;
+  cmd?: string;
   cwd?: string;
 }): Promise<{ success: boolean; error?: string }> {
   vscode.postMessage({ command: 'openExecutionTerminal', ...options });

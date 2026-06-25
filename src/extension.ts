@@ -328,7 +328,7 @@ class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
 
   private createMenuItem(cfg: FlowMenuConfig): vscode.TreeItem {
     const item = new vscode.TreeItem(cfg.label, vscode.TreeItemCollapsibleState.None);
-    
+
     let colorId = 'charts.blue';
     if (cfg.category === 'Hibist') colorId = 'charts.purple';
     else if (cfg.category === 'Sailor') colorId = 'charts.blue';
@@ -805,7 +805,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         const title = typeof msg.title === 'string' && msg.title.trim()
           ? msg.title.trim()
           : 'DFT IDE Task';
-        const command = typeof msg.command === 'string' ? msg.command.trim() : '';
+        const command = typeof msg.cmd === 'string' ? msg.cmd.trim() : '';
         const requestedCwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
         try {
           await openExecutionTerminal({ title, command, cwd: requestedCwd });

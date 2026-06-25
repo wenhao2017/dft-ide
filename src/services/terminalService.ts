@@ -77,9 +77,9 @@ export async function openExecutionTerminal(options: {
   }
 
   vscode.window.showInformationMessage(`DFT IDE terminal opened: ${title}`);
-  void runDftLogDiagnosticsDemo(title, command).catch((error) => {
-    vscode.window.showWarningMessage(
-      `DFT IDE log diagnostics demo failed: ${error instanceof Error ? error.message : String(error)}`
-    );
-  });
+  // void runDftLogDiagnosticsDemo(title, command).catch((error) => {
+  //   vscode.window.showWarningMessage(
+  //     `DFT IDE log diagnostics demo failed: ${error instanceof Error ? error.message : String(error)}`
+  //   );
+  // });
 }

@@ -483,7 +483,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     if (task && task.status !== 'pending' && task.status !== 'skipped') {
       void openExecutionTerminal({
         title: getStepTerminalTitle(run.flowLabel, run.moduleKey, task),
-        command: task.command,
+        cmd: task.command,
         cwd: moduleWorkDirs?.[run.moduleKey],
       });
     }
