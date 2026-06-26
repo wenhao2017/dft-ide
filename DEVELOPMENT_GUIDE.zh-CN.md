@@ -36,28 +36,28 @@ DFT IDE 采用典型的 VS Code Webview 架构，分为**扩展宿主 (Extension
 
 ```mermaid
 graph TD
-    subgraph Extension Host [扩展宿主端 (Node.js & VS Code API)]
-        E_Entry[src/extension.ts Entry] --> E_IPC[IPC 消息接收器]
-        E_IPC --> E_Services[Services 业务层]
-        E_Services --> E_Git[gitService]
-        E_Services --> E_OBS[obsService]
-        E_Services --> E_Workspace[workspaceService]
-        E_Services --> E_Config[configService]
-        E_Services --> E_Pipeline[pipelineRuntimeService]
-        E_Services --> E_Donau[donauService]
-        E_Services --> E_Term[terminalService]
+    subgraph ExtensionHost["扩展宿主端 Node.js / VS Code API"]
+        E_Entry["src/extension.ts Entry"] --> E_IPC["IPC 消息接收器"]
+        E_IPC --> E_Services["Services 业务层"]
+        E_Services --> E_Git["gitService"]
+        E_Services --> E_OBS["obsService"]
+        E_Services --> E_Workspace["workspaceService"]
+        E_Services --> E_Config["configService"]
+        E_Services --> E_Pipeline["pipelineRuntimeService"]
+        E_Services --> E_Donau["donauService"]
+        E_Services --> E_Term["terminalService"]
     end
 
-    subgraph Webview Browser [网页浏览器端 (React 19 & Ant Design 5)]
-        W_Entry[src/webview/main.tsx] --> W_App[App.tsx Router/Theme]
-        W_App --> W_Flows[flows/ Flows 容器]
-        W_Flows --> W_Components[components/ 页面步骤]
-        W_Components --> W_IPCClient[utils/ipc.ts]
-        W_Components --> W_Store[store/ Zustand]
+    subgraph WebviewBrowser["网页浏览器端 React 19 / Ant Design 5"]
+        W_Entry["src/webview/main.tsx"] --> W_App["App.tsx Router / Theme"]
+        W_App --> W_Flows["flows / Flows 容器"]
+        W_Flows --> W_Components["components / 页面步骤"]
+        W_Components --> W_IPCClient["utils/ipc.ts"]
+        W_Components --> W_Store["store / Zustand"]
     end
 
-    W_IPCClient -- window.postMessage --> E_IPC
-    E_IPC -- webview.postMessage --> W_IPCClient
+    W_IPCClient -- "window.postMessage" --> E_IPC
+    E_IPC -- "webview.postMessage" --> W_IPCClient
 ```
 
 ### 2.1 扩展宿主端 (Extension Host)
