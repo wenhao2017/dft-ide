@@ -1,0 +1,1103 @@
+diff --git a/src/webview/components/shared/CustomSelect.tsx b/src/webview/components/shared/CustomSelect.tsx
+new file mode 100644
+index 0000000..9f21946
+--- /dev/null
++++ b/src/webview/components/shared/CustomSelect.tsx
+@@ -0,0 +1,56 @@
++import React, { useState, useRef } from 'react';
++import { Select, Divider, Input, Button, Space } from 'antd';
++import { PlusOutlined } from '@ant-design/icons';
++
++const CustomSelect = () => {
++  const [options, setOptions] = useState([
++    { label: 'DFT', value: 'dft' },
++    { label: 'PR', value: 'pr' },
++  ]);
++  const [addValue, setAddValue] = useState('');
++  const [extendValue, setExtendValue] = useState('');
++
++  // 处理新增选项
++  const handleAddOption = () => {
++    if (addValue.trim() !== '') {
++      const newOption = { label: addValue, value: addValue };
++      setOptions([...options, newOption]);
++      setAddValue('');
++    }
++  };
++
++  return (
++    <Select
++      style={{ width: '100%' }}
++      placeholder="请选择stage"
++      options={options}
++      dropdownRender={(menu) => (
++        <>
++          {menu}
++          <Divider style={{ margin: '8px 0' }} />
++          {/* 使用 onMouseDown 阻止点击自定义内容时关闭浮层 */}
++          <Space style={{ padding: '0 8px 4px' }}>
++            <Input
++              placeholder="添加stage"
++              value={addValue}
++              onChange={(e) => setAddValue(e.target.value)}
++              onPressEnter={handleAddOption}
++            />
++
++            继承于
++            <Input
++              placeholder="添加stage"
++              value={extendValue}
++              onChange={(e) => setExtendValue(e.target.value)}
++            />
++            <Button type="primary" icon={<PlusOutlined />} onClick={handleAddOption}>
++              新增
++            </Button>
++          </Space>
++        </>
++      )}
++    />
++  );
++};
++
++export default CustomSelect;
+\ No newline at end of file
+diff --git a/src/webview/components/shared/DesignTreePanel.tsx b/src/webview/components/shared/DesignTreePanel.tsx
+index 20072c8..5e17c8d 100644
+--- a/src/webview/components/shared/DesignTreePanel.tsx
++++ b/src/webview/components/shared/DesignTreePanel.tsx
+@@ -230,7 +230,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+     focusHydratedRef.current = false;
+     setConfigsLoaded(false);
+     readConfig(flow).then(data => {
+-      const keys = (data?.executionModuleKeys || []) as string[]
++      const keys = (data?.focusModuleKeys || []) as string[]
+       setFocusKeys(keys);
+     }).catch(() => undefined);
+     onExecutionSelectionChange?.([]);
+diff --git a/src/webview/components/shared/PipelineRuntimeView.tsx b/src/webview/components/shared/PipelineRuntimeView.tsx
+index a7f2494..de97697 100644
+--- a/src/webview/components/shared/PipelineRuntimeView.tsx
++++ b/src/webview/components/shared/PipelineRuntimeView.tsx
+@@ -252,7 +252,7 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
+     if (readOnly) {
+       return;
+     }
+-    stopRuntimeTask(activeFlowKey, activeModuleKey, id);
++    stopRuntimeTask(activeFlowKey, activeModuleKey, id, flowLabel);
+   }, [activeFlowKey, activeModuleKey, readOnly, stopRuntimeTask]);
+ 
+   const rerunTask = useCallback((id: string) => {
+diff --git a/src/webview/components/verification/Step1_CommonConfig.tsx b/src/webview/components/verification/Step1_CommonConfig.tsx
+index fa4ab84..308cdd2 100644
+--- a/src/webview/components/verification/Step1_CommonConfig.tsx
++++ b/src/webview/components/verification/Step1_CommonConfig.tsx
+@@ -1,41 +1,95 @@
+-import React, { useState, useEffect } from 'react';
+-import { Form, Button, Radio, Typography, Badge, Spin, message } from 'antd';
++import React, { useEffect, useState } from 'react';
++import { Badge, Button, Card, Form, message, Modal, Select, Space, Spin, } from 'antd';
+ import {
+-  SaveOutlined,
+-  RightOutlined,
+-  FileAddOutlined,
+   BranchesOutlined,
++  FileAddOutlined,
++  HistoryOutlined,
++  RightOutlined,
++  SaveOutlined,
+ } from '@ant-design/icons';
+ import { useVscodePath } from '../../hooks/useVscodePath';
+ import { useFlowConfig } from '../../hooks/useFlowConfig';
+ import PathInput from '../shared/PathInput';
+-import { generateDefaultFlowConfigs, getGitInfo } from '../../utils/ipc';
++import { generateDefaultFlowConfigs, getGitInfo, RepoKey } from '../../utils/ipc';
+ import useWizardStore from '../../store/wizardStore';
+ import CollapsibleSection from '../shared/CollapsibleSection';
++import CustomSelect from '../shared/CustomSelect';
++import DefaultConfgHistory from '../design/DefaultConfgHistory';
++
++interface Props {
++  onNext?: () => void;
++}
++
++const templateOptions = [
++  {
++    value: 1,
++    label:'网络'
++  },
++  {
++    value: 2,
++    label:'连接'
++  },
++  {
++    value: 3,
++    label:'图灵'
++  },
++];
++
++const modeOptions = [
++  {
++    value: 1,
++    label:'merge_3d流程'
++  },
++  {
++    value: 2,
++    label:'MBIST_SUB模式'
++  },
++  {
++    value: 3, 
++    label: 'MBIST_TOP模式'
++  },
++  {
++    value: 4, 
++    label: 'MBIST_TOP_REPAIR模式'
++  },
++  {
++    value: 5, 
++    label: 'ATPG验证'
++  },
++  {
++    value: 6, 
++    label: 'IP验证'
++  },
++  {
++    value: 7, 
++    label: 'JTAG验证'
++  },
++  {
++    value: 8, 
++    label: 'FML验证'
++  },
++];
++
++const pageStyle: React.CSSProperties = {
++  padding: 4,
++  color: 'var(--vscode-foreground)',
++};
+ 
+-const { Text } = Typography;
+-
+-const Step1CommonConfig: React.FC<{ onNext: () => void; moduleKey?: string }> = ({ onNext, moduleKey }) => {
+-  const project    = useVscodePath();
+-  const commonPath = useVscodePath();
+-  const workPath   = useVscodePath();
+-  const sailorCfg  = useVscodePath();
+-  const atpgCfg    = useVscodePath();
+-  const staCfg     = useVscodePath();
+-  const fmlCfg     = useVscodePath();
++const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
++  const project = useVscodePath();
++  const defaultCfg = useVscodePath();
+ 
+   const [currentBranch, setCurrentBranch] = useState<string>('');
+-  const [exitType, setExitType] = useState<string>('sim');
++  const [template, setTemplate] = useState<string>('');
++  const [mode, setMode] = useState<string>('');
+   const [generating, setGenerating] = useState(false);
++  const [historyOpen, setHistoryOpen] = useState(false);
+   const updatePayload = useWizardStore((state) => state.updatePayload);
+ 
+-  // ── 配置持久化 Hook ─────────────────────────────────
+-  const { savedData, loading, saving, hasUnsaved, handleSave } =
+-    useFlowConfig(moduleKey ? `verification/${moduleKey}/config` : 'verification');
++  const { savedData, loading, saving, hasUnsaved, handleSave } = useFlowConfig('verification');
+ 
+-  // 获取 Git 分支
+   useEffect(() => {
+-    getGitInfo('verification')
++    getGitInfo('verification' as RepoKey)
+       .then((res) => {
+         if (res && res.branch) {
+           const branchName = res.branch as string;
+@@ -48,111 +102,103 @@ const Step1CommonConfig: React.FC<{ onNext: () => void; moduleKey?: string }> =
+       .catch(() => setCurrentBranch('Git Error'));
+   }, [updatePayload]);
+ 
+-  // 回填配置
+   useEffect(() => {
+     if (!savedData) return;
+     const source = (savedData.step1 as Record<string, unknown> | undefined) ?? savedData;
+-    if (source.project)    project.setValue(String(source.project));
+-    if (source.commonPath) commonPath.setValue(String(source.commonPath));
+-    if (source.workPath)   workPath.setValue(String(source.workPath));
+-    if (source.sailorCfg)  sailorCfg.setValue(String(source.sailorCfg));
+-    if (source.atpgCfg)    atpgCfg.setValue(String(source.atpgCfg));
+-    if (source.staCfg)     staCfg.setValue(String(source.staCfg));
+-    if (source.fmlCfg)     fmlCfg.setValue(String(source.fmlCfg));
+-    if (source.exitType)   setExitType(String(source.exitType));
++    if (source.project) project.setValue(String(source.project));
++    if (source.defaultCfg) defaultCfg.setValue(String(source.defaultCfg))
+   // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [savedData, moduleKey]);
++  }, [savedData]);
+ 
+   const collectFormData = () => ({
+-    project:    project.value,
+-    commonPath: commonPath.value,
+-    workPath:   workPath.value,
+-    sailorCfg:  sailorCfg.value,
+-    atpgCfg:    atpgCfg.value,
+-    staCfg:     staCfg.value,
+-    fmlCfg:     fmlCfg.value,
+-    exitType,
++    project: project.value,
++    landerCfg: defaultCfg.value,
+   });
+ 
+   const onSave = () => {
+     const data = collectFormData();
+-    if (!moduleKey) {
+-      handleSave(data);
+-      return;
+-    }
+-    handleSave({ moduleKey, step1: data });
++    void handleSave({ data });
+   };
+ 
+   const onGenerateDefaults = async () => {
+     setGenerating(true);
+     try {
+-      const result = await generateDefaultFlowConfigs('verification');
++      const result = await generateDefaultFlowConfigs('verification', '');
+       if (!result.success) {
+-        message.error(result.error ?? '产生默认配置失败');
++        message.error(result.error ?? '生成默认配置失败');
+         return;
+       }
+-      message.success(`已生成 ${result.created} 个默认 cfg，目录：${result.configsDir ?? 'configs'}`);
++      message.success(`生成默认配置完成`);
+     } finally {
+       setGenerating(false);
+     }
+   };
+-
++  
+   return (
+     <Spin spinning={loading} tip="读取配置中...">
+-      <div style={{ padding: '8px 0' }}>
+-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
+-          <Button shape="round" icon={<BranchesOutlined />} style={{ cursor: 'default' }}>
+-            {currentBranch || '获取分支中...'}
+-          </Button>
+-        </div>
+-
+-        <Form layout="horizontal" labelCol={{ span: 5 }} wrapperCol={{ span: 19 }}>
+-          <Form.Item label="所需项目">
+-            <PathInput
+-              state={project}
+-              placeholder="project.cshrc 路径"
+-              showOpen
+-              showSelectFile
+-            />
+-          </Form.Item>
+-
+-          <Form.Item label="Common_PATH">
+-            <PathInput state={commonPath} placeholder="请选择 Common_PATH 目录" showSelectFolder showOpen />
+-          </Form.Item>
+-
+-          <Form.Item label="WORK_PATH">
+-            <PathInput state={workPath} placeholder="请选择 WORK_PATH 目录" showSelectFolder showOpen />
+-          </Form.Item>
+-
+-          <Form.Item label="common sailor cfg">
+-            <PathInput state={sailorCfg} placeholder="请输入或选择 common sailor cfg 路径" showSelectFile showOpen />
+-          </Form.Item>
+-
+-          <CollapsibleSection title="出口配置">
+-            <Form.Item label="验证出口">
+-              <Radio.Group value={exitType} onChange={(e) => setExitType(e.target.value)}>
+-                <Radio value="ATPG">ATPG</Radio>
+-                <Radio value="sim">sim</Radio>
+-                <Radio value="STA">STA</Radio>
+-                <Radio value="formal">formal</Radio>
+-              </Radio.Group>
+-            </Form.Item>
+-
+-            <Form.Item label="common atpg cfg">
+-              <PathInput state={atpgCfg} placeholder="请输入或选择 common atpg cfg 路径" showSelectFile showOpen />
+-            </Form.Item>
+-
+-            <Form.Item label="common sta cfg">
+-              <PathInput state={staCfg} placeholder="请输入或选择 common sta cfg 路径" showSelectFile showOpen />
+-            </Form.Item>
+-
+-            <Form.Item label="common fml cfg">
+-              <PathInput state={fmlCfg} placeholder="请输入或选择 common fml cfg 路径" showSelectFile showOpen />
++      <Form layout="horizontal" labelCol={{ span: 4 }} wrapperCol={{ span: 20 }}>
++        <div style={pageStyle}>
++          <Card size="small" style={{ marginBottom: 14 }} styles={{ body: { padding: 18 } }}>
++            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
++              <Button shape="round" icon={<BranchesOutlined />} style={{ cursor: 'default' }}>
++                {currentBranch || '获取分支中...'}
++              </Button>
++            </div>
++            <Form.Item label="project.cshrc">
++              <PathInput
++                state={project}
++                pathSources={['local']}
++                placeholder="请选择 project.cshrc"
++                showOpen
++                showSelectFile
++              />
+             </Form.Item>
+-          </CollapsibleSection>
+-
+-          <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 32 }}>
+-            <Button icon={<FileAddOutlined />} loading={generating} onClick={onGenerateDefaults}>产生默认配置</Button>
++          </Card>
++
++          <Card size="small" style={{ marginBottom: 14 }} styles={{ body: { padding: 18 } }}>
++            <CollapsibleSection title="stage 配置">
++              <div style={{ marginBottom: 12, textAlign: 'right' }}>
++                <Button size="small" icon={<HistoryOutlined />} onClick={() => setHistoryOpen(true)}>
++                  历史记录
++                </Button>
++              </div>
++              <Form.Item label="stage">
++                <CustomSelect />
++              </Form.Item>
++              <Form.Item label="选择模板">
++                <Select
++                  value={template}
++                  onChange={(value) => setTemplate(value)}
++                  allowClear
++                  placeholder="请选择模板"
++                  options={templateOptions}
++                />
++              </Form.Item>
++              <Form.Item label="选择模式">
++                <Select
++                  value={mode}
++                  onChange={(value) => setMode(value)}
++                  allowClear
++                  placeholder="请选择模式"
++                  options={modeOptions}
++                />
++              </Form.Item>
++              <Form.Item label="配置文件">
++                <PathInput
++                  state={defaultCfg}
++                  pathSources={['local']}
++                  placeholder="请选择配置文件"
++                  showOpen
++                  showSelectFile
++                />
++              </Form.Item>
++            </CollapsibleSection>
++          </Card>
++
++          <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
++            <Button icon={<FileAddOutlined />} loading={generating} onClick={onGenerateDefaults}>
++              产生默认配置
++            </Button>
+             <Badge dot={hasUnsaved} offset={[-4, 4]}>
+               <Button icon={<SaveOutlined />} loading={saving} onClick={onSave}>
+                 保存
+@@ -162,8 +208,37 @@ const Step1CommonConfig: React.FC<{ onNext: () => void; moduleKey?: string }> =
+               下一页 <RightOutlined />
+             </Button>
+           </div>
+-        </Form>
+-      </div>
++        </div>
++      </Form>
++      
++      <Modal
++        title={
++          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '90%' }}>
++            <span style={{ fontSize: 16, fontWeight: 700 }}>配置生成历史记录</span>
++          </div>
++        }
++        open={historyOpen}
++        onCancel={() => {setHistoryOpen(false)}}
++        footer={null}
++        width={1000}
++        style={{ top: 40 }}
++        destroyOnHidden
++      >
++        <div style={{ marginTop: 12, marginBottom: 20 }}>
++          <div style={{ 
++            display: 'flex', 
++            justifyContent: 'space-between', 
++            alignItems: 'center',
++            borderBottom: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
++            paddingBottom: 12,
++            marginBottom: 16
++          }}>
++            <Space direction="vertical" size={16} style={{ width: '100%' }}>
++              <DefaultConfgHistory flowKey={'verification'} />
++            </Space>
++          </div>
++        </div>
++      </Modal>
+     </Spin>
+   );
+ };
+diff --git a/src/webview/components/verification/Step2_ToolConfig.tsx b/src/webview/components/verification/Step2_ToolConfig.tsx
+index c4f9cbc..5f25675 100644
+--- a/src/webview/components/verification/Step2_ToolConfig.tsx
++++ b/src/webview/components/verification/Step2_ToolConfig.tsx
+@@ -1,78 +1,269 @@
+-import React, { useEffect } from 'react';
+-import { Form, Input, Button, Select, Badge, Spin, Space } from 'antd';
+-import { LeftOutlined, RightOutlined, SaveOutlined } from '@ant-design/icons';
++import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
++import {
++  Form,
++  Input,
++  Button,
++  Radio,
++  Typography,
++  Row,
++  Col,
++  Tabs,
++  Badge,
++  Spin,
++  Select,
++} from 'antd';
++import {
++  PlusOutlined,
++  MinusCircleOutlined,
++  LeftOutlined,
++  RightOutlined,
++  SaveOutlined,
++} from '@ant-design/icons';
+ import { useFlowConfig } from '../../hooks/useFlowConfig';
+ import ControlledPathInput from '../shared/ControlledPathInput';
++import CollapsibleSection from '../shared/CollapsibleSection';
++import DonauResourcePicker from '../shared/DonauResourcePicker';
++import PipelineExecutionOverview, { PipelineExecutionRef as OverviewRef } from '../shared/PipelineExecutionOverview';
+ 
+-const Step2ToolConfig: React.FC<{ onNext: () => void; onPrev: () => void; moduleKey?: string }> = ({
+-  onNext,
+-  onPrev,
+-  moduleKey,
+-}) => {
+-  const [form] = Form.useForm();
++const { Text } = Typography;
++
++interface Props {
++  onNext: () => void;
++  onPrev: () => void;
++  moduleKey?: string;
++  onModuleSelect?: (moduleKey: string) => void;
++  moduleKeys: string[];
++  moduleWorkDirs?: Record<string, string>;
++}
++
++export interface PipelineExecutionRef {
++  handleExternalRun: (keys: string[]) => void;
++  handleExternalStop: (keys: string[]) => void;
++}
++
++const toolOptions = [
++  {
++    label: 'ELI',
++    value: 'eli'
++  },
++  {
++    label: 'DC',
++    value: 'dc'
++  },
++  {
++    label: 'PT',
++    value: 'pt'
++  },
++  {
++    label: 'VCS',
++    value: 'vcs'
++  },{
++    label: 'fml',
++    value: 'fml'
++  }
++]
++
++const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPrev, moduleKey, onModuleSelect, moduleKeys, moduleWorkDirs }, ref) => {
++  const [activeTab, setActiveTab] = useState('task');
++  const [taskForm] = Form.useForm();
++  const [designForm] = Form.useForm();
++  const overviewRef = useRef<OverviewRef>(null);
++  const pendingCommandRef = useRef<{ type: 'run' | 'stop'; keys: string[] } | null>(null);
++  const selectedAccount = Form.useWatch('clusterGroup', taskForm);
++  const selectedQueue = Form.useWatch('clusterQueue', taskForm);
++
++  const repo = 'verification';
++  const flowLabel = 'DFTM';
++
++  useImperativeHandle(ref, () => ({
++    handleExternalRun(keys: string[]) {
++      const cleanKeys = keys.filter(Boolean);
++      if (!cleanKeys.length) {
++        return;
++      }
++      if (overviewRef.current) {
++        overviewRef.current.handleExternalRun(cleanKeys);
++      } else {
++        pendingCommandRef.current = { type: 'run', keys: cleanKeys };
++      }
++      setActiveTab('execution');
++    },
++    handleExternalStop(keys: string[]) {
++      const cleanKeys = keys.filter(Boolean);
++      if (!cleanKeys.length) {
++        return;
++      }
++      if (overviewRef.current) {
++        overviewRef.current.handleExternalStop(cleanKeys);
++      } else {
++        pendingCommandRef.current = { type: 'stop', keys: cleanKeys };
++      }
++      setActiveTab('execution');
++    },
++  }));
++
++  useEffect(() => {
++    if (activeTab !== 'execution' || !overviewRef.current || !pendingCommandRef.current) {
++      return;
++    }
++    const command = pendingCommandRef.current;
++    pendingCommandRef.current = null;
++    if (command.type === 'run') {
++      overviewRef.current.handleExternalRun(command.keys);
++    } else {
++      overviewRef.current.handleExternalStop(command.keys);
++    }
++  }, [activeTab]);
+ 
+   // ── 配置持久化 Hook ─────────────────────────────────
++  // 注意：Step2 与 Step1 同属 design flow，但字段不同，合并到同一个文件中
++  // 这里使用独立 key 区分：step2_task / step2_design
+   const { savedData, loading, saving, hasUnsaved, handleSave } =
+     useFlowConfig(moduleKey ? `verification/${moduleKey}/config` : 'verification');
+ 
+-  // 回填
++  // 回填：从文件读到 savedData 后填入表单
+   useEffect(() => {
+     if (!savedData) return;
+     const source = (savedData.step2 as Record<string, unknown> | undefined) ?? savedData;
+-    if (source) {
+-      form.setFieldsValue(source);
++    // 任务配置子表单
++    if (source.step2Task) {
++      taskForm.setFieldsValue(source.step2Task);
+     }
+-  }, [savedData, form, moduleKey]);
++    // 设计配置子表单
++    if (source.step2Design) {
++      designForm.setFieldsValue(source.step2Design);
++    }
++  }, [savedData, taskForm, designForm, moduleKey]);
++
++  useEffect(() => {
++    if (!taskForm.getFieldValue('clusterGroup')) {
++      taskForm.setFieldValue('clusterGroup', 'ug_dft.HIS-HIS-ASIC-HISC-DFT-PLAT-WS');
++    }
++    if (!taskForm.getFieldValue('clusterQueue')) {
++      taskForm.setFieldValue('clusterQueue', 'normal');
++    }
++  }, [taskForm]);
++
++  const collectFormData = (): Record<string, unknown> => ({
++    // 只写 step2 字段，保留 step1 字段（merge 在 extension 侧）
++    step2Task: taskForm.getFieldsValue(true),
++    step2Design: designForm.getFieldsValue(true),
++  });
+ 
+   const onSave = () => {
+-    const data = form.getFieldsValue(true);
++    const data = collectFormData();
+     if (!moduleKey) {
+-      handleSave({ step2: data });
++      handleSave(data);
+       return;
+     }
+     handleSave({ moduleKey, step2: data });
+   };
+ 
++  // ── 任务配置 Tab ──────────────────────────────────
++  const renderTaskConfig = () => (
++    <Form form={taskForm} layout="vertical" style={{ padding: '16px 0' }}>
++      <Row gutter={16}>
++        <Col span={14}>
++          <Form.Item label="常用工具版本" name="toolName">
++            <Select
++              allowClear
++              placeholder="请选择工具"
++              options={toolOptions}
++            />
++          </Form.Item>
++        </Col>
++        <Col span={10}>
++          <Form.Item label="工具版本或路径配置" name="toolVersion">
++            <Input placeholder="输入版本号或绝对路径" />
++          </Form.Item>
++        </Col>
++      </Row>
++
++      <div style={{ marginBottom: 24, marginTop: -12 }}>
++        <Text type="secondary" style={{ fontSize: 12 }}>
++          (默认项目统一在 project.cshrc，此处主要用于 debug 时候可能存在的尝试不同版本)
++        </Text>
++      </div>
++
++      <CollapsibleSection title="集群配置">
++        <Row gutter={16} align="bottom">
++          <Col flex="1 1 260px">
++            <Form.Item label="群组" name="clusterGroup">
++              <Input readOnly
++                placeholder="下拉选择群组"
++              />
++            </Form.Item>
++          </Col>
++          <Col flex="1 1 220px">
++            <Form.Item label="队列" name="clusterQueue">
++              <Input readOnly
++                placeholder="下拉选择队列"
++              />
++            </Form.Item>
++          </Col>
++          <Col flex="0 0 180px">
++            <Form.Item label=" ">
++              <DonauResourcePicker
++                account={typeof selectedAccount === 'string' ? selectedAccount : undefined}
++                queue={typeof selectedQueue === 'string' ? selectedQueue : undefined}
++                onChange={({ account, queue }) => {
++                  taskForm.setFieldsValue({
++                    clusterGroup: account,
++                    clusterQueue: queue,
++                  });
++                }}
++              />
++            </Form.Item>
++          </Col>
++        </Row>
++        <Row gutter={16}>
++          <Col span={8}>
++            <Form.Item label="CPU" name="cpu">
++              <Input placeholder="输入核心数" />
++            </Form.Item>
++          </Col>
++          <Col span={8}>
++            <Form.Item label="内存 (MB)" name="memory">
++              <Input placeholder="输入内存大小" />
++            </Form.Item>
++          </Col>
++          <Col span={8}>
++            <Form.Item label="其他" name="clusterExtra">
++              <Input placeholder="其他参数" />
++            </Form.Item>
++          </Col>
++        </Row>
++      </CollapsibleSection>
++    </Form>
++  );
++
+   return (
+     <Spin spinning={loading} tip="读取配置中...">
+-      <Form
+-        form={form}
+-        layout="horizontal"
+-        labelCol={{ span: 5 }}
+-        wrapperCol={{ span: 19 }}
+-        style={{ padding: '16px 0' }}
+-      >
+-        <Form.Item label="common tessent cfg" name="tessentCfg">
+-          <ControlledPathInput placeholder="选择文件..." showSelectFile showOpen />
+-        </Form.Item>
+-
+-        <Form.Item label="common mbist cfg" name="mbistCfg">
+-          <ControlledPathInput placeholder="选择文件..." showSelectFile showOpen />
+-        </Form.Item>
+-
+-        <Form.Item label="IP 选择" name="selectedIp">
+-          <Select
+-            placeholder="选择或输入 IP"
+-            options={[
+-              { value: 'ip1', label: 'IP_Core_1' },
+-              { value: 'ip2', label: 'IP_Core_2' },
+-              { value: 'ip3', label: 'IP_SRAM_A' },
+-            ]}
+-          />
+-        </Form.Item>
+-
+-        <Form.Item label="模块选择" name="selectedModule">
+-          <Select
+-            placeholder="选择验证模块"
+-            options={[
+-              { value: 'mod1', label: 'Module_A' },
+-              { value: 'mod2', label: 'Module_B' },
+-              { value: 'mod3', label: 'Module_C' },
+-            ]}
+-          />
+-        </Form.Item>
+-
+-        <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 32 }}>
++      <div>
++        <Tabs
++          activeKey={activeTab}
++          onChange={setActiveTab}
++          type="card"
++          items={[
++            { key: 'task',   label: '任务配置',  children: renderTaskConfig()   },
++            {
++              key: 'execution',
++              label: '执行配置',
++              children: (
++                <PipelineExecutionOverview
++                  ref={overviewRef}
++                  flowKey={repo}
++                  flowLabel={flowLabel}
++                  moduleKeys={moduleKeys}
++                  moduleWorkDirs={moduleWorkDirs}
++                  activeModuleKey={moduleKey}
++                  onActiveModuleChange={onModuleSelect}
++                />
++              ),
++            },
++          ]}
++        />
++        <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 16 }}>
+           <Button onClick={onPrev} icon={<LeftOutlined />}>
+             上一页
+           </Button>
+@@ -85,9 +276,11 @@ const Step2ToolConfig: React.FC<{ onNext: () => void; onPrev: () => void; module
+             下一页 <RightOutlined />
+           </Button>
+         </div>
+-      </Form>
++      </div>
+     </Spin>
+   );
+-};
++});
++
++Step2ToolConfig.displayName = 'Step2ToolConfig';
+ 
+ export default Step2ToolConfig;
+diff --git a/src/webview/components/verification/Step3_Execution.tsx b/src/webview/components/verification/Step3_Execution.tsx
+index 7b1161e..7042f6b 100644
+--- a/src/webview/components/verification/Step3_Execution.tsx
++++ b/src/webview/components/verification/Step3_Execution.tsx
+@@ -1,51 +1,26 @@
+-import React, { forwardRef, useImperativeHandle, useRef } from 'react';
++import React from 'react';
+ import { Button, Divider, Space } from 'antd';
+-import { LeftOutlined, RightOutlined } from '@ant-design/icons';
+-import PipelineExecutionOverview, { PipelineExecutionRef as OverviewRef } from '../shared/PipelineExecutionOverview';
++import { LeftOutlined, RightOutlined, SaveOutlined } from '@ant-design/icons';
++import PipelineExecutionOverview from '../shared/PipelineExecutionOverview';
+ 
+ interface Props {
+   onNext: () => void;
+   onPrev: () => void;
++  category?: string;
++  moduleKey?: string;
+   moduleKeys?: string[];
+-  moduleWorkDirs?: Record<string, string>;
+-  activeModuleKey?: string;
+-  onModuleSelect?: (moduleKey: string) => void;
+ }
+ 
+-export interface PipelineExecutionRef {
+-  handleExternalRun: (keys: string[]) => void;
+-  handleExternalStop: (keys: string[]) => void;
+-}
+-
+-const Step3Execution = forwardRef<PipelineExecutionRef, Props>(({
+-  onNext,
+-  onPrev,
+-  moduleKeys = [],
+-  moduleWorkDirs,
+-  activeModuleKey,
+-  onModuleSelect,
+-}, ref) => {
+-  const overviewRef = useRef<OverviewRef>(null);
+-
+-  useImperativeHandle(ref, () => ({
+-    handleExternalRun(keys: string[]) {
+-      overviewRef.current?.handleExternalRun(keys);
+-    },
+-    handleExternalStop(keys: string[]) {
+-      overviewRef.current?.handleExternalStop(keys);
+-    },
+-  }));
++const Step3Execution: React.FC<Props> = ({ onNext, onPrev, category, moduleKeys = [], moduleKey}) => {
++  const repo = category?.toLowerCase() === 'sailor' ? 'sailor' : 'hibist';
++  const flowLabel = repo === 'sailor' ? 'Sailor' : 'DFTM';
+ 
+   return (
+     <div>
+       <PipelineExecutionOverview
+-        ref={overviewRef}
+-        flowKey="verification"
+-        flowLabel="Lander"
++        flowKey={repo}
++        flowLabel={flowLabel}
+         moduleKeys={moduleKeys}
+-        moduleWorkDirs={moduleWorkDirs}
+-        activeModuleKey={activeModuleKey}
+-        onActiveModuleChange={onModuleSelect}
+       />
+ 
+       <Divider style={{ margin: '18px 0 14px' }} />
+@@ -60,8 +35,6 @@ const Step3Execution = forwardRef<PipelineExecutionRef, Props>(({
+       </Space>
+     </div>
+   );
+-});
+-
+-Step3Execution.displayName = 'Step3Execution';
++};
+ 
+ export default Step3Execution;
+diff --git a/src/webview/components/verification/Step4_Result.tsx b/src/webview/components/verification/Step4_Result.tsx
+index d26902a..3c35aca 100644
+--- a/src/webview/components/verification/Step4_Result.tsx
++++ b/src/webview/components/verification/Step4_Result.tsx
+@@ -1,11 +1,10 @@
+ import React, { useState, useEffect } from 'react';
+-import { Tabs, Button, Alert, Space, Typography, message } from 'antd';
++import { Button, Alert, Space, Typography, message } from 'antd';
+ import {
+   LeftOutlined,
+   RightOutlined,
+   CheckCircleOutlined,
+   WarningOutlined,
+-  LineChartOutlined,
+   FileTextOutlined,
+   HistoryOutlined,
+   CloudUploadOutlined,
+@@ -20,7 +19,12 @@ import { PipelineRuntimeSnapshot } from '../../store/pipelineRuntimeStore';
+ 
+ const { Link } = Typography;
+ 
+-const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onNext, onPrev }) => {
++interface Props {
++  onNext: () => void;
++  onPrev: () => void;
++}
++
++const Step4Result: React.FC<Props> = ({ onNext, onPrev }) => {
+   const activeProject = useWizardStore((s) => s.activeProject);
+   const [historyOpen, setHistoryOpen] = useState(false);
+   const [historyRecords, setHistoryRecords] = useState<ExecutionHistoryRecord[]>([]);
+@@ -37,7 +41,7 @@ const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onN
+       }
+     };
+     fetchHistory();
+-  }, []);
++  });
+ 
+   const handleUpload = async () => {
+     if (!activeProject?.id) {
+@@ -56,9 +60,8 @@ const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onN
+         status: activeRecord.status,
+         logs: activeRecord.logs,
+         executedAt: activeRecord.executedAt,
+-        metrics: { coverage: 98.5, assertionsPassed: true },
+       });
+-      message.success('已成功同步验证数据到云端分析平台');
++      message.success('已成功同步执行数据到云端分析平台');
+     } catch (err) {
+       message.error('同步失败: ' + String(err));
+     } finally {
+@@ -66,32 +69,34 @@ const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onN
+     }
+   };
+ 
++  const currentLogs = activeRecord?.logs ?? [];
+   const openPipelineRuntime = (record: ExecutionHistoryRecord) => {
+     if (isPipelineRuntimeSnapshot(record.runtimeSnapshot)) {
+       setHistoryRuntime(record.runtimeSnapshot);
+     }
+   };
+ 
+-  const renderSimResult = () => (
+-    <div style={{ marginTop: 16 }}>
++  return (
++    <div style={{ padding: '16px 0' }}>
+       <Alert
+-        message={activeRecord?.status === 'success' ? 'SIM 执行完成，无 Error 产生' : 'SIM 执行结果待确认'}
++        message="状态检查"
+         description="执行结果来自已保存的日志或历史记录；真实任务请在 VS Code 终端中运行。"
+         type={activeRecord?.status === 'success' ? 'success' : 'warning'}
+         showIcon
+         icon={activeRecord?.status === 'success' ? <CheckCircleOutlined /> : <WarningOutlined />}
+         style={{ marginBottom: 16 }}
+       />
+-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
++
++      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+         <Space size="large">
+-          <Button icon={<LineChartOutlined />}>查看波形</Button>
+           <Link>
+-            <FileTextOutlined /> sim/vcs.log
++            <FileTextOutlined /> {'verification'}/synth.log
+           </Link>
+           <Link>
+-            <FileTextOutlined /> sim/verdi.log
++            <FileTextOutlined /> {'verification'}/opt.log
+           </Link>
+         </Space>
++
+         <Button
+           icon={<HistoryOutlined />}
+           onClick={() => setHistoryOpen(true)}
+@@ -101,37 +106,11 @@ const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onN
+       </div>
+ 
+       <ExecutionLogPanel
+-        title={`仿真结果分析 ${activeRecord ? `[${new Date(activeRecord.executedAt).toLocaleString()}]` : ''}`}
++        title={`日志分析 ${activeRecord ? `[${new Date(activeRecord.executedAt).toLocaleString()}]` : ''}`}
+         status={activeRecord?.status || 'idle'}
+-        logs={activeRecord?.logs ?? []}
++        logs={currentLogs}
+         minHeight={300}
+       />
+-    </div>
+-  );
+-
+-  return (
+-    <div>
+-      <Tabs
+-        type="line"
+-        items={[
+-          {
+-            key: 'plan',
+-            label: 'PLAN',
+-            children: <Alert message="PLAN 检查通过" type="success" showIcon style={{ marginTop: 16 }} />,
+-          },
+-          {
+-            key: 'env',
+-            label: 'ENV',
+-            children: <Alert message="ENV 检查通过" type="success" showIcon style={{ marginTop: 16 }} />,
+-          },
+-          { key: 'sim', label: 'SIM', children: renderSimResult() },
+-          {
+-            key: 'atpg',
+-            label: 'ATPG',
+-            children: <Alert message="ATPG 未执行" type="info" showIcon style={{ marginTop: 16 }} />,
+-          },
+-        ]}
+-      />
+ 
+       <ExecutionHistoryList
+         open={historyOpen}
+@@ -162,7 +141,7 @@ const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onN
+           onClick={handleUpload}
+           loading={uploading}
+         >
+-          提交验证结果到云端
++          提交分析到云端
+         </Button>
+         <Button type="primary" onClick={onNext}>
+           下一页 <RightOutlined />
+diff --git a/src/webview/flows/VerificationFlow.tsx b/src/webview/flows/VerificationFlow.tsx
+index fc35524..b308621 100644
+--- a/src/webview/flows/VerificationFlow.tsx
++++ b/src/webview/flows/VerificationFlow.tsx
+@@ -1,22 +1,22 @@
+ import React, { useRef, useState } from 'react';
+ import Step1CommonConfig from '../components/verification/Step1_CommonConfig';
+-import Step2ToolConfig from '../components/verification/Step2_ToolConfig';
+-import Step3Execution, { PipelineExecutionRef } from '../components/verification/Step3_Execution';
++import Step2ToolConfig, { PipelineExecutionRef } from '../components/verification/Step2_ToolConfig';
+ import Step4Result from '../components/verification/Step4_Result';
+-import Step5Cloud from '../components/verification/Step5_Cloud';
+ import FlowShell from '../components/shared/FlowShell';
+ import DesignTreePanel from '../components/shared/DesignTreePanel';
++import Step5Cloud from '../components/verification/Step5_Cloud';
+ 
+ const VerificationFlow: React.FC = () => {
+   const [currentStep, setCurrentStep] = useState(0);
+   const [selectedModule, setSelectedModule] = useState('');
+   const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>([]);
+   const [moduleWorkDirs, setModuleWorkDirs] = useState<Record<string, string>>({});
+-  const executionRef = useRef<PipelineExecutionRef>(null);
+ 
+   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
+   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
+-
++  
++  const executionRef = useRef<PipelineExecutionRef>(null);
++  
+   const handleTreeRun = (keys: string[]) => {
+     executionRef.current?.handleExternalRun(keys);
+   };
+@@ -27,21 +27,14 @@ const VerificationFlow: React.FC = () => {
+ 
+   const steps = [
+     { title: '公共配置', description: '环境与出口', content: <Step1CommonConfig onNext={nextStep} /> },
+-    { title: '工具配置', description: '仿真工具链', content: <Step2ToolConfig moduleKey={selectedModule} onNext={nextStep} onPrev={prevStep} /> },
+-    {
+-      title: '执行页',
+-      description: '用例与命令',
+-      content: (
+-        <Step3Execution
+-          ref={executionRef}
+-          moduleKeys={executionModuleKeys}
+-          moduleWorkDirs={moduleWorkDirs}
+-          activeModuleKey={selectedModule}
+-          onModuleSelect={setSelectedModule}
+-          onNext={nextStep}
+-          onPrev={prevStep}
+-        />
+-      ),
++    { title: '工具配置', description: '仿真工具链', content: <Step2ToolConfig
++      ref={executionRef}
++      moduleKey={selectedModule}
++      onModuleSelect={setSelectedModule}
++      onNext={nextStep}
++      onPrev={prevStep}
++      moduleKeys={executionModuleKeys}
++      moduleWorkDirs={moduleWorkDirs} /> 
+     },
+     { title: '结果页', description: '日志与报告', content: <Step4Result onNext={nextStep} onPrev={prevStep} /> },
+     { title: '端云协同', description: '共享与复用', content: <Step5Cloud onPrev={prevStep} /> },
+diff --git a/src/webview/store/pipelineRuntimeStore.ts b/src/webview/store/pipelineRuntimeStore.ts
+index 9dd2fc0..21d383a 100644
+--- a/src/webview/store/pipelineRuntimeStore.ts
++++ b/src/webview/store/pipelineRuntimeStore.ts
+@@ -40,7 +40,7 @@ interface PipelineRuntimeStore {
+   startRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string, selectedTaskIds?: string[], cwd?: string) => void;
+   stopRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string) => void;
+   selectTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string) => void;
+-  stopTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string) => void;
++  stopTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string, flowLabel: string) => void;
+   rerunTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string) => void;
+   applyRuntime: (snapshot: PipelineRuntimeSnapshot) => void;
+   applyRuntimes: (snapshots: PipelineRuntimeSnapshot[]) => void;
+@@ -223,8 +223,8 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
+     void selectPipelineTask({ flowKey, moduleKey, taskId });
+   },
+ 
+-  stopTask: (flowKey, moduleKey, taskId) => {
+-    void stopPipelineTask({ flowKey, moduleKey, taskId });
++  stopTask: (flowKey, moduleKey, taskId, flowLabel) => {
++    void stopPipelineTask({ flowKey, moduleKey, taskId, flowLabel });
+   },
+ 
+   rerunTask: (flowKey, moduleKey, taskId) => {
+diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
+index c4b7141..82a49a7 100644
+--- a/src/webview/utils/ipc.ts
++++ b/src/webview/utils/ipc.ts
+@@ -137,6 +137,10 @@ export function openFileInEditor(path: string): void {
+   vscode.postMessage({ command: 'openFile', path });
+ }
+ 
++export function openFileReadonly(path: string): void {
++  vscode.postMessage({ command: 'openFileReadonly', path });
++}
++
+ export async function openObsFileReadOnly(path: string): Promise<{ success: boolean; error?: string }> {
+   const res = await ipcRequest('openObsFileReadOnly', { path });
+   return res as { success: boolean; error?: string };
+@@ -616,6 +620,7 @@ export async function stopPipelineTask(options: {
+   flowKey: 'hibist' | 'sailor' | 'verification';
+   moduleKey: string;
+   taskId: string;
++  flowLabel: string;
+ }): Promise<{ success: boolean; error?: string }> {
+   const res = await ipcRequest('stopPipelineTask', options);
+   return res as { success: boolean; error?: string };
