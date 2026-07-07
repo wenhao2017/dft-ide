@@ -264,70 +264,73 @@ function runSequentialSimulation(
       const stepCommand = task.command.trim();
       if (stepCommand) {
         let commands: string[] = [];
-        // a. 加载环境配置
-        if (envConfig) {
-          commands.push(`source ${envConfig.project}`);
-        }
-        // b. 设置环境变量
-        // 模块名称
-        commands.push(`setenv module "${moduleKey}"`);
-        // 项目路径
-        const projectPath = resolveProjectPath(flowKey);
-        if (projectPath) {
-          commands.push(`setenv project_path "${projectPath}"`);
-        }
-        // setenv STAGE DFT
-        // setenv DIE CDIE
-        // setenv GRP xxx
-        // setenv TC xxx
-        // c. 自定义配置
-        const source = taskConfig?.step2 as Record<string, unknown> | undefined;
-        const customConfig = source?.step2Task as Record<string, unknown> | undefined;
-        if(customConfig){
-          // 工具版本
-          const toolName = String(customConfig.toolName ?? "").trim();
-          const toolVersion = String(customConfig.toolVersion ?? "").trim();
-          if (toolName && toolVersion) {
-            try {
-              fs.statSync(toolVersion);
-              commands.push(`source ${toolVersion}`);
-            } catch {
-              commands.push(`ma ${toolName}/${toolVersion}`);
+        if (index === 0) {
+          // a. 加载环境配置
+          if (envConfig) {
+            commands.push(`source ${envConfig.project}`);
+          }
+          // b. 设置环境变量
+          // 模块名称
+          commands.push(`setenv module "${moduleKey}"`);
+          // 项目路径
+          const projectPath = resolveProjectPath(flowKey);
+          if (projectPath) {
+            commands.push(`setenv project_path "${projectPath}"`);
+          }
+          // setenv STAGE DFT
+          // setenv DIE CDIE
+          // setenv GRP xxx
+          // setenv TC xxx
+          // c. 自定义配置
+          const source = taskConfig?.step2 as Record<string, unknown> | undefined;
+          const customConfig = source?.step2Task as Record<string, unknown> | undefined;
+          if(customConfig){
+            // 工具版本
+            const toolName = String(customConfig.toolName ?? "").trim();
+            const toolVersion = String(customConfig.toolVersion ?? "").trim();
+            if (toolName && toolVersion) {
+              try {
+                fs.statSync(toolVersion);
+                commands.push(`source ${toolVersion}`);
+              } catch {
+                commands.push(`ma ${toolName}/${toolVersion}`);
+              }
+            }
+            // 集群
+            const clusterGroup = String(customConfig.clusterGroup ?? "").trim();
+            const clusterQueue = String(customConfig.clusterQueue ?? "").trim();
+            const cpu = String(customConfig.cpu ?? "").trim();
+            const memory = String(customConfig.memory ?? "").trim();
+            const clusterExtra = String(customConfig.clusterExtra ?? "").trim();
+            if (clusterGroup) {
+              commands.push(`setenv DONAU_GROUP "${clusterGroup}"`);
+              let queue = '';
+              let resource = '';
+              if (clusterQueue) {
+                queue = `-q ${clusterQueue}`;
+              }
+              if (cpu || memory) {
+                let arr: string[] = [];
+                if (cpu) {
+                  arr.push(`cpu=${cpu}`);
+                }
+                if (memory) {
+                  arr.push(`mem=${memory}`);
+                }
+                resource = `-R '${arr.join(';')}'`;
+              }
+              const dsub = `dsub -I -A ${clusterGroup} ${queue} ${resource} ${clusterExtra}`;
+              commands.push(`alias dsubrun_I "${dsub}"`);
             }
           }
-          // 集群
-          const clusterGroup = String(customConfig.clusterGroup ?? "").trim();
-          const clusterQueue = String(customConfig.clusterQueue ?? "").trim();
-          const cpu = String(customConfig.cpu ?? "").trim();
-          const memory = String(customConfig.memory ?? "").trim();
-          const clusterExtra = String(customConfig.clusterExtra ?? "").trim();
-          if (clusterGroup) {
-            commands.push(`setenv DONAU_GROUP "${clusterGroup}"`);
-            let queue = '';
-            let resource = '';
-            if (clusterQueue) {
-              queue = `-q ${clusterQueue}`;
-            }
-            if (cpu || memory) {
-              let arr: string[] = [];
-              if (cpu) {
-                arr.push(`cpu=${cpu}`);
-              }
-              if (memory) {
-                arr.push(`mem=${memory}`);
-              }
-              resource = `-R '${arr.join(';')}'`;
-            }
-            const dsub = `dsub -I -A ${clusterGroup} ${queue} ${resource} ${clusterExtra}`;
-            commands.push(`alias dsubrun_I "${dsub}"`);
-          }
         }
+        commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
         // d. 步骤命令
         const scriptPath = path.resolve(__dirname, '../scripts');
         const scriptName = stepCommand.split(' ')[0];
         commands.push(`source ${path.join(scriptPath, scriptName)}${stepCommand.substring(scriptName.length)}`);
 
-        openTerminal(`${flowLabel} / ${moduleKey} / ${task.name || task.id}`, commands, cwd);
+        openTerminal(`${flowLabel} / ${moduleKey}`, commands, cwd);
       }
       appendLog(`${logPrefix} ${task.name} 运行启动。`);
     });
@@ -518,7 +521,7 @@ export class PipelineRuntimeService {
       finishedAt: nowStamp(),
       tasks: runtime.tasks.map((task) => {
         if (task.status === 'running') {
-          stopExecutionTerminal(`${flowLabel} / ${moduleKey} / ${task.name || task.id}`);
+          stopExecutionTerminal(`${flowLabel} / ${moduleKey}`);
 
           return {
             ...task,
@@ -560,7 +563,7 @@ export class PipelineRuntimeService {
           return task;
         }
 
-        stopExecutionTerminal(`${flowLabel} / ${moduleKey} / ${task.name || task.id}`);
+        stopExecutionTerminal(`${flowLabel} / ${moduleKey}`);
 
         return {
           ...task,
@@ -576,6 +579,8 @@ export class PipelineRuntimeService {
   rerunTask(flowKey: PipelineFlowKey, moduleKey: string, taskId: string): void {
     const key = getPipelineRuntimeKey(flowKey, moduleKey);
     const config = pipelineFlowConfigs[flowKey];
+    const runtime = this.runtimes.get(key);
+    const task = runtime?.tasks.find((t) => t.id === taskId);
 
     this.patchTask(key, taskId, {
       status: 'running',
@@ -583,6 +588,16 @@ export class PipelineRuntimeService {
       finishedAt: undefined,
     });
     this.appendLog(key, config.logPrefix, `手动重跑任务 ${taskId}...`);
+
+    if (task && task.command.trim() && runtime) {
+      const stepCommand = task.command.trim();
+      let commands: string[] = [];
+      commands.push(`echo "=== [DFT IDE] Rerun Step: ${task.name || task.id} ==="`);
+      const scriptPath = path.resolve(__dirname, '../scripts');
+      const scriptName = stepCommand.split(' ')[0];
+      commands.push(`source ${path.join(scriptPath, scriptName)}${stepCommand.substring(scriptName.length)}`);
+      this.options.openTerminal(`${runtime.flowLabel} / ${moduleKey}`, commands);
+    }
 
     scheduleRuntime(key, 1200, () => {
       this.patchTask(key, taskId, {

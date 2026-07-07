@@ -248,8 +248,8 @@ function getAncestorIds(taskId: string, parentByChild: Map<string, string>): str
   return ancestors;
 }
 
-function getStepTerminalTitle(flowLabel: string, moduleKey: string, task: PipelineTask): string {
-  return `${flowLabel} / ${moduleKey} / ${task.name || task.id}`;
+function getStepTerminalTitle(flowLabel: string, moduleKey: string, _task?: PipelineTask): string {
+  return `${flowLabel} / ${moduleKey}`;
 }
 
 function getTrackTaskId(run: PipelineRunOverview, parentByChild: Map<string, string>): string | undefined {
@@ -483,7 +483,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     if (task && task.status !== 'pending' && task.status !== 'skipped') {
       void openExecutionTerminal({
         title: getStepTerminalTitle(run.flowLabel, run.moduleKey, task),
-        cmd: task.command,
         cwd: moduleWorkDirs?.[run.moduleKey],
       });
     }

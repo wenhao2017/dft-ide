@@ -655,31 +655,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
-      case 'openFileReadonly': {
-        const filePath: string | undefined = msg.path;
-        if (!filePath) { return; }
-        try {
-          const uri = vscode.Uri.file(filePath);
-          await fs.chmod(filePath, 0o444, ()=> {
-            if (isSpreadsheetFile(uri.fsPath)) {
-              vscode.commands.executeCommand(
-                'vscode.openWith',
-                uri,
-                'grapecity.gc-excelviewer',
-                vscode.ViewColumn.Active
-              );
-            } else {
-              vscode.window.showTextDocument(uri, {
-                viewColumn: vscode.ViewColumn.Active,
-                preview: false,
-              });
-            }
-          });
-        } catch (error) {
-          vscode.window.showErrorMessage(`无法打开路径: ${filePath}`);
-        }
-        return;
-      }
 
       case 'openObsFileReadOnly': {
         const requestId: string = msg.requestId;
