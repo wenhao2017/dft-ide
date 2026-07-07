@@ -1,0 +1,22 @@
+# DFT IDE Lander 仿真验证 流水线配置文件（prune 模式）
+# 修改此文件可以自定义流水线的执行步骤和执行命令
+
+- id: create_project
+  name: create_project
+  command: "run_flow_lander create_project"
+  description: 创建每个步骤文件目录
+
+- id: gen_design_info
+  name: gen_design_info
+  command: "run_flow_lander gen_design_info"
+  description: 生成工具所需文件
+
+- id: gen_prune_env
+  name: gen_prune_env
+  command: "run_flow_lander gen_prune_env"
+  description: 生成prune环境
+
+- id: run_prune
+  name: run_prune
+  command: "run_flow_lander run_prune"
+  description: 执行prune

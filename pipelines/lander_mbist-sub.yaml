@@ -1,0 +1,77 @@
+# DFT IDE Lander 仿真验证 流水线配置文件（mbist-sub 模式）
+# 修改此文件可以自定义流水线的执行步骤和执行命令
+
+- id: create_project
+  name: create_project
+  command: "run_flow_lander create_project"
+  description: 创建每个步骤文件目录
+
+- id: gen_design_info
+  name: gen_design_info
+  command: "run_flow_lander gen_design_info"
+  description: 生成工具所需文件
+
+- id: gen_plan_env
+  name: gen_plan_env
+  command: "run_flow_lander gen_plan_env"
+  description: 生成验证tc和分组plan
+
+- id: release_plan
+  name: release_plan
+  command: "run_flow_lander release_plan"
+  description: 打包交付tc和分组plan
+
+- id: gen_pdl_env
+  name: gen_pdl_env
+  command: "run_flow_lander gen_pdl_env"
+  description: 生成setup pdl文件
+
+- id: gen_hibist_excel
+  name: gen_hibist_excel
+  command: "run_flow_lander gen_hibist_excel"
+  description: 产生全芯片的mbist信息
+
+- id: gen_mbist_setting
+  name: gen_mbist_setting
+  command: "run_flow_lander gen_mbist_setting"
+  description: 生成所有向量的设置文件
+
+- id: gen_run_env
+  name: gen_run_env
+  command: "run_flow_lander gen_run_env"
+  description: 生成tb和wgl所需的中间件
+
+- id: run_mbist_gen
+  name: run_mbist_gen
+  command: "run_flow_lander run_mbist_gen"
+  description: 执行gen向量进程
+
+- id: sed_3d_tb
+  name: sed_3d_tb
+  command: "run_flow_lander sed_3d_tb"
+  description: 对module_name进行_3D module替换（仅在麒麟3D模式下使用）
+
+- id: gen_sim_env
+  name: gen_sim_env
+  command: "run_flow_lander gen_sim_env"
+  description: 生成仿真环境
+
+- id: run_sim
+  name: run_sim
+  command: "run_flow_lander run_sim"
+  description: 运行仿真
+
+- id: upload_simu_database_pre
+  name: upload_simu_database_pre
+  command: "run_flow_lander upload_simu_database_pre"
+  description: 上传数据库前准备工作
+
+- id: upload_simu_database
+  name: upload_simu_database
+  command: "run_flow_lander upload_simu_database"
+  description: 上传数据到数据库
+
+- id: gen_report
+  name: gen_report
+  command: "run_flow_lander gen_report"
+  description: 生成报告summary

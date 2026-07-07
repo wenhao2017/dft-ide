@@ -1,0 +1,37 @@
+# DFT IDE Lander 仿真验证 流水线配置文件（merge_3d 模式）
+# 修改此文件可以自定义流水线的执行步骤和执行命令
+
+- id: create_project
+  name: create_project
+  command: "run_flow_lander create_project"
+  description: 创建每个步骤文件目录
+
+- id: gen_design_info
+  name: gen_design_info
+  command: "run_flow_lander gen_design_info"
+  description: 生成工具所需文件
+
+- id: gen_3d_merge_env
+  name: gen_3d_merge_env
+  command: "run_flow_lander gen_3d_merge_env"
+  description: 生成DC和NetlistMerge环境
+
+- id: analysis_3d_netlist
+  name: analysis_3d_netlist
+  command: "run_flow_lander analysis_3d_netlist"
+  description: 运行DC
+
+- id: complete_check
+  name: complete_check
+  command: "run_flow_lander complete_check"
+  description: 检查InstanceType抽取的信息
+
+- id: run_3d_merge
+  name: run_3d_merge
+  command: "run_flow_lander run_3d_merge"
+  description: 运行NetlistMerge
+
+- id: delivery_data
+  name: delivery_data
+  command: "run_flow_lander delivery_data"
+  description: 生成lander outgoing数据包

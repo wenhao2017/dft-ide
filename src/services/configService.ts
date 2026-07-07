@@ -21,6 +21,23 @@ export interface FlowConfigFileInfo {
   size?: number;
 }
 
+export async function readConfig(flow: string): Promise<Record<string, unknown> | null> {
+  const filePath = resolveConfigPath(flow);
+  if (filePath) {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(
+        vscode.Uri.file(filePath)
+      );
+
+      const data = JSON.parse(Buffer.from(bytes).toString('utf-8'));
+      return data;
+    } catch (error) {
+      console.error(`Failed to read config for flow:${flow}`, error);
+    }
+  }
+  return null;
+}
+
 export async function mergeConfigFile(
   filePath: string,
   newData: Record<string, unknown>

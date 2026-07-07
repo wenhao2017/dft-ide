@@ -53,6 +53,7 @@ import {
   deleteFlowConfigFile,
   generateDefaultFlowConfigs,
   mergeConfigFile,
+  readConfig,
 } from './services/configService';
 
 // Import design tree services
@@ -97,6 +98,14 @@ const execFileAsync = promisify(execFile);
 let currentPanel: vscode.WebviewPanel | undefined = undefined;
 let activeCategory: string | undefined = undefined;
 let pendingWebviewCommand: InitialWebviewCommand | undefined;
+
+let configQueue: Promise<any> = Promise.resolve();  // 全局配置读写队列
+
+function enqueueConfigTask<T>(task: () => Promise<T>): Promise<T> {
+  const run = configQueue.then(task, task);
+  configQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
 
 const pipelineRuntimeService = new PipelineRuntimeService({
   onUpdate: (snapshot) => {
@@ -478,13 +487,15 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           } else if (msg.command === 'startPipelineRuntime') {
             const selectedTaskIds = Array.isArray(msg.selectedTaskIds) ? msg.selectedTaskIds : undefined;
             const cwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
-            pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel, selectedTaskIds, cwd);
+            const envConfig = await readConfig(flowKey);
+            const taskConfig = await readConfig(`${flowKey}/${moduleKey}/config`);
+            pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel, selectedTaskIds, cwd, envConfig, taskConfig);
           } else if (msg.command === 'stopPipelineRuntime') {
             pipelineRuntimeService.stopRuntime(flowKey, moduleKey, flowLabel);
           } else if (msg.command === 'selectPipelineTask') {
             pipelineRuntimeService.selectTask(flowKey, moduleKey, taskId);
           } else if (msg.command === 'stopPipelineTask') {
-            pipelineRuntimeService.stopTask(flowKey, moduleKey, taskId);
+            pipelineRuntimeService.stopTask(flowKey, moduleKey, taskId, flowLabel);
           } else if (msg.command === 'rerunPipelineTask') {
             pipelineRuntimeService.rerunTask(flowKey, moduleKey, taskId);
           }
@@ -612,6 +623,58 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
               preview: false,
             });
           }
+        } catch (error) {
+          vscode.window.showErrorMessage(`无法打开路径: ${filePath}`);
+        }
+        return;
+      }
+
+      case 'openFileReadonly': {
+        const filePath: string | undefined = msg.path;
+        if (!filePath) { return; }
+        try {
+          const uri = vscode.Uri.file(filePath);
+          await fs.chmod(filePath, 0o444, ()=> {
+            if (isSpreadsheetFile(uri.fsPath)) {
+              vscode.commands.executeCommand(
+                'vscode.openWith',
+                uri,
+                'grapecity.gc-excelviewer',
+                vscode.ViewColumn.Active
+              );
+            } else {
+              vscode.window.showTextDocument(uri, {
+                viewColumn: vscode.ViewColumn.Active,
+                preview: false,
+              });
+            }
+          });
+        } catch (error) {
+          vscode.window.showErrorMessage(`无法打开路径: ${filePath}`);
+        }
+        return;
+      }
+
+      case 'openFileReadonly': {
+        const filePath: string | undefined = msg.path;
+        if (!filePath) { return; }
+        try {
+          const uri = vscode.Uri.file(filePath);
+          await fs.chmod(filePath, 0o444, ()=> {
+            if (isSpreadsheetFile(uri.fsPath)) {
+              vscode.commands.executeCommand(
+                'vscode.openWith',
+                uri,
+                'grapecity.gc-excelviewer',
+                vscode.ViewColumn.Active
+              );
+            } else {
+              vscode.window.showTextDocument(uri, {
+                viewColumn: vscode.ViewColumn.Active,
+                preview: false,
+              });
+            }
+          });
         } catch (error) {
           vscode.window.showErrorMessage(`无法打开路径: ${filePath}`);
         }
@@ -1000,77 +1063,85 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         const requestId: string = msg.requestId;
         const flow = String(msg.flow ?? 'default');
         const data = msg.data as Record<string, unknown>;
-        try {
+
+        enqueueConfigTask(async () => {
           const filePath = resolveConfigPath(flow);
+
           if (!filePath) {
             currentPanel?.webview.postMessage({
-              command: 'saveConfigResponse', requestId,
-              success: false, error: '未找到工作区路径，请先打开 DFT 项目工作区'
+              command: 'saveConfigResponse',
+              requestId,
+              success: false,
+              error: '未找到工作区路径'
             });
             return;
           }
-          await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.dirname(filePath)));
+
+          await vscode.workspace.fs.createDirectory(
+            vscode.Uri.file(path.dirname(filePath))
+          );
+
+          // gitignore（已经被串行保护）
           const projectRoot = resolveProjectRoot();
           if (projectRoot) {
-            // Setup ignore pattern
             const gitignoreUri = vscode.Uri.file(path.join(projectRoot, '.gitignore'));
+
             let content = '';
             try {
               const bytes = await vscode.workspace.fs.readFile(gitignoreUri);
               content = Buffer.from(bytes).toString('utf-8');
             } catch {}
-            const lines = new Set(content.split(/\r?\n/).map((line) => line.trim()));
-            if (!lines.has(`${LOCAL_STATE_DIR_NAME}/`)) {
+
+            if (!content.includes(`${LOCAL_STATE_DIR_NAME}/`)) {
               const prefix = content && !content.endsWith('\n') ? '\n' : '';
-              const nextContent = `${content}${prefix}\n# DFT IDE local user state\n${LOCAL_STATE_DIR_NAME}/\n`;
-              await vscode.workspace.fs.writeFile(gitignoreUri, Buffer.from(nextContent, 'utf-8'));
+              const next = `${content}${prefix}\n# DFT IDE local user state\n${LOCAL_STATE_DIR_NAME}/\n`;
+
+              await vscode.workspace.fs.writeFile(
+                gitignoreUri,
+                Buffer.from(next, 'utf-8')
+              );
             }
           }
+
           const merged = await mergeConfigFile(filePath, data);
-          const encoded = Buffer.from(JSON.stringify(merged, null, 2));
-          await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), encoded);
-          const relative = vscode.workspace.asRelativePath(filePath);
+
+          await vscode.workspace.fs.writeFile(
+            vscode.Uri.file(filePath),
+            Buffer.from(JSON.stringify(merged, null, 2))
+          );
+
           currentPanel?.webview.postMessage({
-            command: 'saveConfigResponse', requestId,
-            success: true, filePath: relative
+            command: 'saveConfigResponse',
+            requestId,
+            success: true,
+            filePath: vscode.workspace.asRelativePath(filePath)
           });
-        } catch (err) {
+        }).catch(err => {
           currentPanel?.webview.postMessage({
-            command: 'saveConfigResponse', requestId,
-            success: false, error: String(err)
+            command: 'saveConfigResponse',
+            requestId,
+            success: false,
+            error: String(err)
           });
-        }
+        });
+
         return;
       }
 
       case 'readConfig': {
         const requestId: string = msg.requestId;
         const flow = String(msg.flow ?? 'default');
-        try {
-          const filePath = resolveConfigPath(flow);
-          if (!filePath) {
+
+        enqueueConfigTask(async () => {
+            const data = await readConfig(flow);
+
             currentPanel?.webview.postMessage({
-              command: 'readConfigResponse', requestId, data: null
+              command: 'readConfigResponse',
+              requestId,
+              data
             });
-            return;
-          }
-          try {
-            const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
-            const data = JSON.parse(Buffer.from(bytes).toString('utf-8'));
-            currentPanel?.webview.postMessage({
-              command: 'readConfigResponse', requestId, data
-            });
-          } catch {
-            currentPanel?.webview.postMessage({
-              command: 'readConfigResponse', requestId, data: null
-            });
-          }
-        } catch (err) {
-          currentPanel?.webview.postMessage({
-            command: 'readConfigResponse', requestId,
-            error: String(err), data: null
-          });
-        }
+        });
+
         return;
       }
 
@@ -1608,12 +1679,8 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'openGitlabHost': {
         const requestId: string = msg.requestId;
         const repoGitName = normalizeHistoryFlow(msg.repoGitName);
-
-        let gitlabHost =
-        process.env.GITLAB_HOST ??
-        vscode.workspace.getConfiguration('dftIde').get<string>('gitlabHost', '');
+        let gitlabHost = process.env.GITLAB_HOST ?? vscode.workspace.getConfiguration('dftIde').get<string>('gitlabHost', '');
         gitlabHost = gitlabHost.replace(/\/+$/, '');
-
         try {
           const targetUrl = vscode.Uri.parse(`${gitlabHost}/${repoGitName}`);
           const success = await vscode.env.openExternal(targetUrl);

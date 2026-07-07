@@ -7,6 +7,8 @@ import {
   TaskStatus,
   pipelineFlowConfigs,
 } from '../webview/components/shared/pipelineMockData';
+import { resolveProjectPath } from './workspaceService';
+import { stopExecutionTerminal } from './terminalService';
 
 export type PipelineFlowKey = 'hibist' | 'sailor' | 'verification';
 export type PipelineRunState = 'idle' | 'running' | 'completed' | 'stopped';
@@ -39,7 +41,7 @@ export interface PipelineRuntimeHistoryRecord {
 interface PipelineRuntimeServiceOptions {
   onUpdate: (snapshot: PipelineRuntimeSnapshot) => void;
   onHistory: (record: PipelineRuntimeHistoryRecord) => void;
-  openTerminal: (title: string, command: string, cwd?: string) => void;
+  openTerminal: (title: string, command: string | string[], cwd?: string) => void;
 }
 
 const timers = new Map<string, ReturnType<typeof setTimeout>[]>();
@@ -171,7 +173,7 @@ function getYamlFileName(flowKey: PipelineFlowKey): string {
 }
 
 function getYamlPath(flowKey: PipelineFlowKey): string | undefined {
-  const root = getProjectRootPath();
+  const root = path.resolve(__dirname, '../');
   if (!root) return undefined;
   return path.join(root, 'pipelines', getYamlFileName(flowKey));
 }
@@ -241,9 +243,12 @@ function runSequentialSimulation(
   tasks: PipelineTask[],
   logPrefix: string,
   flowLabel: string,
+  flowKey: string,
   moduleKey: string,
   cwd: string | undefined,
-  openTerminal: (title: string, command: string, cwd?: string) => void,
+  envConfig: Record<string, unknown> | null | undefined,
+  taskConfig: Record<string, unknown> | null | undefined,
+  openTerminal: (title: string, command: string | string[], cwd?: string) => void,
   patchTask: (id: string, patch: Partial<PipelineTask> | ((task: PipelineTask) => Partial<PipelineTask>)) => void,
   appendLog: (msg: string) => void,
   setRunState: (state: PipelineRunState) => void,
@@ -256,8 +261,73 @@ function runSequentialSimulation(
         status: 'running',
         startedAt: nowText(),
       });
-      if (task.command) {
-        openTerminal(`${flowLabel} / ${moduleKey} / ${task.name || task.id}`, task.command, cwd);
+      const stepCommand = task.command.trim();
+      if (stepCommand) {
+        let commands: string[] = [];
+        // a. 加载环境配置
+        if (envConfig) {
+          commands.push(`source ${envConfig.project}`);
+        }
+        // b. 设置环境变量
+        // 模块名称
+        commands.push(`setenv module "${moduleKey}"`);
+        // 项目路径
+        const projectPath = resolveProjectPath(flowKey);
+        if (projectPath) {
+          commands.push(`setenv project_path "${projectPath}"`);
+        }
+        // setenv STAGE DFT
+        // setenv DIE CDIE
+        // setenv GRP xxx
+        // setenv TC xxx
+        // c. 自定义配置
+        const source = taskConfig?.step2 as Record<string, unknown> | undefined;
+        const customConfig = source?.step2Task as Record<string, unknown> | undefined;
+        if(customConfig){
+          // 工具版本
+          const toolName = String(customConfig.toolName ?? "").trim();
+          const toolVersion = String(customConfig.toolVersion ?? "").trim();
+          if (toolName && toolVersion) {
+            try {
+              fs.statSync(toolVersion);
+              commands.push(`source ${toolVersion}`);
+            } catch {
+              commands.push(`ma ${toolName}/${toolVersion}`);
+            }
+          }
+          // 集群
+          const clusterGroup = String(customConfig.clusterGroup ?? "").trim();
+          const clusterQueue = String(customConfig.clusterQueue ?? "").trim();
+          const cpu = String(customConfig.cpu ?? "").trim();
+          const memory = String(customConfig.memory ?? "").trim();
+          const clusterExtra = String(customConfig.clusterExtra ?? "").trim();
+          if (clusterGroup) {
+            commands.push(`setenv DONAU_GROUP "${clusterGroup}"`);
+            let queue = '';
+            let resource = '';
+            if (clusterQueue) {
+              queue = `-q ${clusterQueue}`;
+            }
+            if (cpu || memory) {
+              let arr: string[] = [];
+              if (cpu) {
+                arr.push(`cpu=${cpu}`);
+              }
+              if (memory) {
+                arr.push(`mem=${memory}`);
+              }
+              resource = `-R '${arr.join(';')}'`;
+            }
+            const dsub = `dsub -I -A ${clusterGroup} ${queue} ${resource} ${clusterExtra}`;
+            commands.push(`alias dsubrun_I "${dsub}"`);
+          }
+        }
+        // d. 步骤命令
+        const scriptPath = path.resolve(__dirname, '../scripts');
+        const scriptName = stepCommand.split(' ')[0];
+        commands.push(`source ${path.join(scriptPath, scriptName)}${stepCommand.substring(scriptName.length)}`);
+
+        openTerminal(`${flowLabel} / ${moduleKey} / ${task.name || task.id}`, commands, cwd);
       }
       appendLog(`${logPrefix} ${task.name} 运行启动。`);
     });
@@ -363,6 +433,8 @@ export class PipelineRuntimeService {
     flowLabel: string,
     selectedTaskIds?: string[],
     cwd?: string,
+    envConfig?: Record<string, unknown> | null,
+    taskConfig?: Record<string, unknown> | null,
   ): PipelineRuntimeSnapshot {
     const key = getPipelineRuntimeKey(flowKey, moduleKey);
     const config = pipelineFlowConfigs[flowKey];
@@ -413,8 +485,11 @@ export class PipelineRuntimeService {
       selectedTasksToRun,
       config.logPrefix,
       flowLabel,
+      flowKey,
       moduleKey,
       cwd,
+      envConfig,
+      taskConfig,
       this.options.openTerminal,
       (id, patch) => this.patchTask(key, id, patch),
       (msg) => this.appendLog(key, config.logPrefix, msg),
@@ -443,6 +518,8 @@ export class PipelineRuntimeService {
       finishedAt: nowStamp(),
       tasks: runtime.tasks.map((task) => {
         if (task.status === 'running') {
+          stopExecutionTerminal(`${flowLabel} / ${moduleKey} / ${task.name || task.id}`);
+
           return {
             ...task,
             status: 'stopped',
@@ -471,7 +548,7 @@ export class PipelineRuntimeService {
     this.updateRuntime(key, (runtime) => ({ ...runtime, selectedTaskId: taskId }));
   }
 
-  stopTask(flowKey: PipelineFlowKey, moduleKey: string, taskId: string): void {
+  stopTask(flowKey: PipelineFlowKey, moduleKey: string, taskId: string, flowLabel: string): void {
     const key = getPipelineRuntimeKey(flowKey, moduleKey);
     const config = pipelineFlowConfigs[flowKey];
     const logMsg = `[${nowText()}] ${config.logPrefix} 用户手动停止任务。`;
@@ -482,6 +559,8 @@ export class PipelineRuntimeService {
         if (task.id !== taskId) {
           return task;
         }
+
+        stopExecutionTerminal(`${flowLabel} / ${moduleKey} / ${task.name || task.id}`);
 
         return {
           ...task,

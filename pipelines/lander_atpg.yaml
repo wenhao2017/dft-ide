@@ -1,0 +1,87 @@
+# DFT IDE Lander 仿真验证 流水线配置文件（atpg 模式）
+# 修改此文件可以自定义流水线的执行步骤和执行命令
+
+- id: create_project
+  name: create_project
+  command: "run_flow_lander_atpg create_project"
+  description: 创建每个步骤文件目录
+
+- id: gen_design_info
+  name: gen_design_info
+  command: "run_flow_lander_atpg gen_design_info"
+  description: 生成工具所需文件
+
+- id: gen_plan_env
+  name: gen_plan_env
+  command: "run_flow_lander_atpg gen_plan_env"
+  description: 生成验证tc和分组plan
+
+- id: release_plan
+  name: release_plan
+  command: "run_flow_lander_atpg release_plan"
+  description: 打包交付tc和分组plan
+
+- id: gen_atpg_setting
+  name: gen_atpg_setting
+  command: "run_flow_lander_atpg gen_atpg_setting"
+  description: 生成所有向量的设置文件
+
+- id: gen_pdl_env
+  name: gen_pdl_env
+  command: "run_flow_lander_atpg gen_pdl_env"
+  description: 生成setup pdl文件
+
+- id: gen_atpg_env_pre
+  name: gen_atpg_env_pre
+  command: "run_flow_lander_atpg gen_atpg_env_pre"
+  description: 生成中间件准备工作
+
+- id: gen_atpg_env
+  name: gen_atpg_env
+  command: "run_flow_lander_atpg gen_atpg_env"
+  description: 生成tb和wgl所需的中间件
+
+- id: gen_crg_env
+  name: gen_crg_env
+  command: "run_flow_lander_atpg gen_crg_env"
+  description: 生成crg环境（仅在crg场景下使用）
+
+- id: run_crg_gen
+  name: run_crg_gen
+  command: "run_flow_lander_atpg run_crg_gen"
+  description: 执行gen向量进程（仅在crg场景下使用）
+
+- id: run_atpg
+  name: run_atpg
+  command: "run_flow_lander_atpg run_atpg"
+  description: 执行atpg
+
+- id: gen_all_scan_env
+  name: gen_all_scan_env
+  command: "run_flow_lander_atpg gen_all_scan_env"
+  description: 生成scan环境（仅在all_scan场景下使用）
+
+- id: run_all_scan
+  name: run_all_scan
+  command: "run_flow_lander_atpg run_all_scan"
+  description: 执行scan（仅在all_scan场景下使用）
+
+- id: delivery_data
+  name: delivery_data
+  command: "run_flow_lander_atpg delivery_data"
+  description: 生成outgoing
+
+- id: sed_3d_tb
+  name: sed_3d_tb
+  command: "run_flow_lander_atpg sed_3d_tb"
+  description: 对module_name进行_3D module替换（仅在麒麟3D模式下使用）
+
+- id: gen_sim_env
+  name: gen_sim_env
+  command: "run_flow_lander_atpg gen_sim_env"
+  description: 生成仿真环境
+
+- id: run_sim
+  name: run_sim
+  command: "run_flow_lander_atpg run_sim"
+  description: 运行仿真

@@ -40,7 +40,7 @@ interface PipelineRuntimeStore {
   startRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string, selectedTaskIds?: string[], cwd?: string) => void;
   stopRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string) => void;
   selectTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string) => void;
-  stopTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string) => void;
+  stopTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string, flowLabel: string) => void;
   rerunTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string) => void;
   applyRuntime: (snapshot: PipelineRuntimeSnapshot) => void;
   applyRuntimes: (snapshots: PipelineRuntimeSnapshot[]) => void;
@@ -223,8 +223,8 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
     void selectPipelineTask({ flowKey, moduleKey, taskId });
   },
 
-  stopTask: (flowKey, moduleKey, taskId) => {
-    void stopPipelineTask({ flowKey, moduleKey, taskId });
+  stopTask: (flowKey, moduleKey, taskId, flowLabel) => {
+    void stopPipelineTask({ flowKey, moduleKey, taskId, flowLabel });
   },
 
   rerunTask: (flowKey, moduleKey, taskId) => {

@@ -29,6 +29,7 @@ import {
   enterProjectWorkspace,
   LocalConfigInfo,
   WorkspaceProjectInfo,
+  openExternalUrl,
 } from '../utils/ipc';
 import useWizardStore from '../store/wizardStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -434,6 +435,17 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
     }
   }, []);
 
+  const openGitlabProjectPage = async (repoUrl: string | undefined) => {
+    if (repoUrl) {
+      const result = await openExternalUrl(repoUrl);
+      if (!result.success) {
+        message.error(result.error ?? '无法打开浏览器, 请检查系统默认设置');
+      }
+    } else {
+      message.error('Gitlab 项目页面地址为空');
+    }
+  }
+
   const openLocalProject = useCallback(async () => {
     const selected = await selectPath('folder');
     if (!selected) return;
@@ -750,7 +762,11 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                         <Text type="secondary">{project.description}</Text>
                         <Space wrap>
                           {project.repos.map((repo) => (
-                            <Tag key={repo.key} color={repoTagColor(repo.status)}>
+                            <Tag
+                              key={repo.key}
+                              color={repoTagColor(repo.status)}
+                              onClick={() => openGitlabProjectPage(repo.http_url_to_repo)}
+                            >
                               {repo.gitlabProjectName}
                             </Tag>
                           ))}

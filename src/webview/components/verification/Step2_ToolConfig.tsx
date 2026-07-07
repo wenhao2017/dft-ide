@@ -1,78 +1,269 @@
-import React, { useEffect } from 'react';
-import { Form, Input, Button, Select, Badge, Spin, Space } from 'antd';
-import { LeftOutlined, RightOutlined, SaveOutlined } from '@ant-design/icons';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import {
+  Form,
+  Input,
+  Button,
+  Radio,
+  Typography,
+  Row,
+  Col,
+  Tabs,
+  Badge,
+  Spin,
+  Select,
+} from 'antd';
+import {
+  PlusOutlined,
+  MinusCircleOutlined,
+  LeftOutlined,
+  RightOutlined,
+  SaveOutlined,
+} from '@ant-design/icons';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 import ControlledPathInput from '../shared/ControlledPathInput';
+import CollapsibleSection from '../shared/CollapsibleSection';
+import DonauResourcePicker from '../shared/DonauResourcePicker';
+import PipelineExecutionOverview, { PipelineExecutionRef as OverviewRef } from '../shared/PipelineExecutionOverview';
 
-const Step2ToolConfig: React.FC<{ onNext: () => void; onPrev: () => void; moduleKey?: string }> = ({
-  onNext,
-  onPrev,
-  moduleKey,
-}) => {
-  const [form] = Form.useForm();
+const { Text } = Typography;
+
+interface Props {
+  onNext: () => void;
+  onPrev: () => void;
+  moduleKey?: string;
+  onModuleSelect?: (moduleKey: string) => void;
+  moduleKeys: string[];
+  moduleWorkDirs?: Record<string, string>;
+}
+
+export interface PipelineExecutionRef {
+  handleExternalRun: (keys: string[]) => void;
+  handleExternalStop: (keys: string[]) => void;
+}
+
+const toolOptions = [
+  {
+    label: 'ELI',
+    value: 'eli'
+  },
+  {
+    label: 'DC',
+    value: 'dc'
+  },
+  {
+    label: 'PT',
+    value: 'pt'
+  },
+  {
+    label: 'VCS',
+    value: 'vcs'
+  },{
+    label: 'fml',
+    value: 'fml'
+  }
+]
+
+const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPrev, moduleKey, onModuleSelect, moduleKeys, moduleWorkDirs }, ref) => {
+  const [activeTab, setActiveTab] = useState('task');
+  const [taskForm] = Form.useForm();
+  const [designForm] = Form.useForm();
+  const overviewRef = useRef<OverviewRef>(null);
+  const pendingCommandRef = useRef<{ type: 'run' | 'stop'; keys: string[] } | null>(null);
+  const selectedAccount = Form.useWatch('clusterGroup', taskForm);
+  const selectedQueue = Form.useWatch('clusterQueue', taskForm);
+
+  const repo = 'verification';
+  const flowLabel = 'DFTM';
+
+  useImperativeHandle(ref, () => ({
+    handleExternalRun(keys: string[]) {
+      const cleanKeys = keys.filter(Boolean);
+      if (!cleanKeys.length) {
+        return;
+      }
+      if (overviewRef.current) {
+        overviewRef.current.handleExternalRun(cleanKeys);
+      } else {
+        pendingCommandRef.current = { type: 'run', keys: cleanKeys };
+      }
+      setActiveTab('execution');
+    },
+    handleExternalStop(keys: string[]) {
+      const cleanKeys = keys.filter(Boolean);
+      if (!cleanKeys.length) {
+        return;
+      }
+      if (overviewRef.current) {
+        overviewRef.current.handleExternalStop(cleanKeys);
+      } else {
+        pendingCommandRef.current = { type: 'stop', keys: cleanKeys };
+      }
+      setActiveTab('execution');
+    },
+  }));
+
+  useEffect(() => {
+    if (activeTab !== 'execution' || !overviewRef.current || !pendingCommandRef.current) {
+      return;
+    }
+    const command = pendingCommandRef.current;
+    pendingCommandRef.current = null;
+    if (command.type === 'run') {
+      overviewRef.current.handleExternalRun(command.keys);
+    } else {
+      overviewRef.current.handleExternalStop(command.keys);
+    }
+  }, [activeTab]);
 
   // ── 配置持久化 Hook ─────────────────────────────────
+  // 注意：Step2 与 Step1 同属 design flow，但字段不同，合并到同一个文件中
+  // 这里使用独立 key 区分：step2_task / step2_design
   const { savedData, loading, saving, hasUnsaved, handleSave } =
     useFlowConfig(moduleKey ? `verification/${moduleKey}/config` : 'verification');
 
-  // 回填
+  // 回填：从文件读到 savedData 后填入表单
   useEffect(() => {
     if (!savedData) return;
     const source = (savedData.step2 as Record<string, unknown> | undefined) ?? savedData;
-    if (source) {
-      form.setFieldsValue(source);
+    // 任务配置子表单
+    if (source.step2Task) {
+      taskForm.setFieldsValue(source.step2Task);
     }
-  }, [savedData, form, moduleKey]);
+    // 设计配置子表单
+    if (source.step2Design) {
+      designForm.setFieldsValue(source.step2Design);
+    }
+  }, [savedData, taskForm, designForm, moduleKey]);
+
+  useEffect(() => {
+    if (!taskForm.getFieldValue('clusterGroup')) {
+      taskForm.setFieldValue('clusterGroup', 'ug_dft.HIS-HIS-ASIC-HISC-DFT-PLAT-WS');
+    }
+    if (!taskForm.getFieldValue('clusterQueue')) {
+      taskForm.setFieldValue('clusterQueue', 'normal');
+    }
+  }, [taskForm]);
+
+  const collectFormData = (): Record<string, unknown> => ({
+    // 只写 step2 字段，保留 step1 字段（merge 在 extension 侧）
+    step2Task: taskForm.getFieldsValue(true),
+    step2Design: designForm.getFieldsValue(true),
+  });
 
   const onSave = () => {
-    const data = form.getFieldsValue(true);
+    const data = collectFormData();
     if (!moduleKey) {
-      handleSave({ step2: data });
+      handleSave(data);
       return;
     }
     handleSave({ moduleKey, step2: data });
   };
 
+  // ── 任务配置 Tab ──────────────────────────────────
+  const renderTaskConfig = () => (
+    <Form form={taskForm} layout="vertical" style={{ padding: '16px 0' }}>
+      <Row gutter={16}>
+        <Col span={14}>
+          <Form.Item label="常用工具版本" name="toolName">
+            <Select
+              allowClear
+              placeholder="请选择工具"
+              options={toolOptions}
+            />
+          </Form.Item>
+        </Col>
+        <Col span={10}>
+          <Form.Item label="工具版本或路径配置" name="toolVersion">
+            <Input placeholder="输入版本号或绝对路径" />
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <div style={{ marginBottom: 24, marginTop: -12 }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          (默认项目统一在 project.cshrc，此处主要用于 debug 时候可能存在的尝试不同版本)
+        </Text>
+      </div>
+
+      <CollapsibleSection title="集群配置">
+        <Row gutter={16} align="bottom">
+          <Col flex="1 1 260px">
+            <Form.Item label="群组" name="clusterGroup">
+              <Input readOnly
+                placeholder="下拉选择群组"
+              />
+            </Form.Item>
+          </Col>
+          <Col flex="1 1 220px">
+            <Form.Item label="队列" name="clusterQueue">
+              <Input readOnly
+                placeholder="下拉选择队列"
+              />
+            </Form.Item>
+          </Col>
+          <Col flex="0 0 180px">
+            <Form.Item label=" ">
+              <DonauResourcePicker
+                account={typeof selectedAccount === 'string' ? selectedAccount : undefined}
+                queue={typeof selectedQueue === 'string' ? selectedQueue : undefined}
+                onChange={({ account, queue }) => {
+                  taskForm.setFieldsValue({
+                    clusterGroup: account,
+                    clusterQueue: queue,
+                  });
+                }}
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col span={8}>
+            <Form.Item label="CPU" name="cpu">
+              <Input placeholder="输入核心数" />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item label="内存 (MB)" name="memory">
+              <Input placeholder="输入内存大小" />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item label="其他" name="clusterExtra">
+              <Input placeholder="其他参数" />
+            </Form.Item>
+          </Col>
+        </Row>
+      </CollapsibleSection>
+    </Form>
+  );
+
   return (
     <Spin spinning={loading} tip="读取配置中...">
-      <Form
-        form={form}
-        layout="horizontal"
-        labelCol={{ span: 5 }}
-        wrapperCol={{ span: 19 }}
-        style={{ padding: '16px 0' }}
-      >
-        <Form.Item label="common tessent cfg" name="tessentCfg">
-          <ControlledPathInput placeholder="选择文件..." showSelectFile showOpen />
-        </Form.Item>
-
-        <Form.Item label="common mbist cfg" name="mbistCfg">
-          <ControlledPathInput placeholder="选择文件..." showSelectFile showOpen />
-        </Form.Item>
-
-        <Form.Item label="IP 选择" name="selectedIp">
-          <Select
-            placeholder="选择或输入 IP"
-            options={[
-              { value: 'ip1', label: 'IP_Core_1' },
-              { value: 'ip2', label: 'IP_Core_2' },
-              { value: 'ip3', label: 'IP_SRAM_A' },
-            ]}
-          />
-        </Form.Item>
-
-        <Form.Item label="模块选择" name="selectedModule">
-          <Select
-            placeholder="选择验证模块"
-            options={[
-              { value: 'mod1', label: 'Module_A' },
-              { value: 'mod2', label: 'Module_B' },
-              { value: 'mod3', label: 'Module_C' },
-            ]}
-          />
-        </Form.Item>
-
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 32 }}>
+      <div>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          type="card"
+          items={[
+            { key: 'task',   label: '任务配置',  children: renderTaskConfig()   },
+            {
+              key: 'execution',
+              label: '执行配置',
+              children: (
+                <PipelineExecutionOverview
+                  ref={overviewRef}
+                  flowKey={repo}
+                  flowLabel={flowLabel}
+                  moduleKeys={moduleKeys}
+                  moduleWorkDirs={moduleWorkDirs}
+                  activeModuleKey={moduleKey}
+                  onActiveModuleChange={onModuleSelect}
+                />
+              ),
+            },
+          ]}
+        />
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 16 }}>
           <Button onClick={onPrev} icon={<LeftOutlined />}>
             上一页
           </Button>
@@ -85,9 +276,11 @@ const Step2ToolConfig: React.FC<{ onNext: () => void; onPrev: () => void; module
             下一页 <RightOutlined />
           </Button>
         </div>
-      </Form>
+      </div>
     </Spin>
   );
-};
+});
+
+Step2ToolConfig.displayName = 'Step2ToolConfig';
 
 export default Step2ToolConfig;

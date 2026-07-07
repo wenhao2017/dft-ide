@@ -50,15 +50,27 @@ export async function saveExecutionHistoryRecord(
 
 export async function openExecutionTerminal(options: {
   title?: string;
-  command?: string;
+  command?: string | string[];
   cwd?: string;
+  flow?: string;
 }): Promise<void> {
   const title = typeof options.title === 'string' && options.title.trim()
     ? options.title.trim()
     : 'DFT IDE Task';
-  const command = typeof options.command === 'string' ? options.command.trim() : '';
+
+  let command = '';
+  if (typeof options.command === 'string') {
+    command = options.command.trim();
+  } else if (Array.isArray(options.command) && options.command.length > 0) {
+    command = options.command[options.command.length - 1].trim();
+  }
+
   const requestedCwd = typeof options.cwd === 'string' && options.cwd.trim() ? options.cwd.trim() : undefined;
   const terminalCwd = requestedCwd ?? resolveExecutionCwd(title, command);
+
+  if(terminalCwd){
+    await vscode.workspace.fs.createDirectory(vscode.Uri.file(terminalCwd));
+  }
 
   let terminal = vscode.window.terminals.find((t) => t.name === title);
   const isNew = !terminal;
@@ -72,14 +84,28 @@ export async function openExecutionTerminal(options: {
 
   terminal!.show();
 
-  if (isNew && command) {
-    terminal!.sendText(command);
+  if (command) {
+    if (Array.isArray(options.command)) {
+      for (const cmd of options.command) {
+        terminal!.sendText(cmd.trim());
+      }
+    } else {
+      terminal!.sendText(command);
+    }
   }
 
-  vscode.window.showInformationMessage(`DFT IDE terminal opened: ${title}`);
   // void runDftLogDiagnosticsDemo(title, command).catch((error) => {
   //   vscode.window.showWarningMessage(
   //     `DFT IDE log diagnostics demo failed: ${error instanceof Error ? error.message : String(error)}`
   //   );
   // });
+}
+
+export async function stopExecutionTerminal(title: string) {
+  let terminal = vscode.window.terminals.find((t) => t.name === title);
+  if (terminal) {
+    terminal.sendText('\u0003'); // \u0003 是 Ctrl+C 的 ASCII 码
+  } else {
+    console.error(`Not found terminal: ${title}`);
+  }
 }

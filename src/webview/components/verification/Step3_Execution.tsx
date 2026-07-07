@@ -1,51 +1,26 @@
-import React, { forwardRef, useImperativeHandle, useRef } from 'react';
+import React from 'react';
 import { Button, Divider, Space } from 'antd';
-import { LeftOutlined, RightOutlined } from '@ant-design/icons';
-import PipelineExecutionOverview, { PipelineExecutionRef as OverviewRef } from '../shared/PipelineExecutionOverview';
+import { LeftOutlined, RightOutlined, SaveOutlined } from '@ant-design/icons';
+import PipelineExecutionOverview from '../shared/PipelineExecutionOverview';
 
 interface Props {
   onNext: () => void;
   onPrev: () => void;
+  category?: string;
+  moduleKey?: string;
   moduleKeys?: string[];
-  moduleWorkDirs?: Record<string, string>;
-  activeModuleKey?: string;
-  onModuleSelect?: (moduleKey: string) => void;
 }
 
-export interface PipelineExecutionRef {
-  handleExternalRun: (keys: string[]) => void;
-  handleExternalStop: (keys: string[]) => void;
-}
-
-const Step3Execution = forwardRef<PipelineExecutionRef, Props>(({
-  onNext,
-  onPrev,
-  moduleKeys = [],
-  moduleWorkDirs,
-  activeModuleKey,
-  onModuleSelect,
-}, ref) => {
-  const overviewRef = useRef<OverviewRef>(null);
-
-  useImperativeHandle(ref, () => ({
-    handleExternalRun(keys: string[]) {
-      overviewRef.current?.handleExternalRun(keys);
-    },
-    handleExternalStop(keys: string[]) {
-      overviewRef.current?.handleExternalStop(keys);
-    },
-  }));
+const Step3Execution: React.FC<Props> = ({ onNext, onPrev, category, moduleKeys = [], moduleKey}) => {
+  const repo = category?.toLowerCase() === 'sailor' ? 'sailor' : 'hibist';
+  const flowLabel = repo === 'sailor' ? 'Sailor' : 'DFTM';
 
   return (
     <div>
       <PipelineExecutionOverview
-        ref={overviewRef}
-        flowKey="verification"
-        flowLabel="Lander"
+        flowKey={repo}
+        flowLabel={flowLabel}
         moduleKeys={moduleKeys}
-        moduleWorkDirs={moduleWorkDirs}
-        activeModuleKey={activeModuleKey}
-        onActiveModuleChange={onModuleSelect}
       />
 
       <Divider style={{ margin: '18px 0 14px' }} />
@@ -60,8 +35,6 @@ const Step3Execution = forwardRef<PipelineExecutionRef, Props>(({
       </Space>
     </div>
   );
-});
-
-Step3Execution.displayName = 'Step3Execution';
+};
 
 export default Step3Execution;

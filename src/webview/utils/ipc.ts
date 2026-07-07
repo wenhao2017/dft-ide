@@ -136,6 +136,10 @@ export function openFileInEditor(path: string): void {
   vscode.postMessage({ command: 'openFile', path });
 }
 
+export function openFileReadonly(path: string): void {
+  vscode.postMessage({ command: 'openFileReadonly', path });
+}
+
 export async function openObsFileReadOnly(path: string): Promise<{ success: boolean; error?: string }> {
   const res = await ipcRequest('openObsFileReadOnly', { path });
   return res as { success: boolean; error?: string };
@@ -615,6 +619,7 @@ export async function stopPipelineTask(options: {
   flowKey: 'hibist' | 'sailor' | 'verification';
   moduleKey: string;
   taskId: string;
+  flowLabel: string;
 }): Promise<{ success: boolean; error?: string }> {
   const res = await ipcRequest('stopPipelineTask', options);
   return res as { success: boolean; error?: string };

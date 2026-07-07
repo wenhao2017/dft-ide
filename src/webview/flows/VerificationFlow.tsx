@@ -1,21 +1,21 @@
 import React, { useRef, useState } from 'react';
 import Step1CommonConfig from '../components/verification/Step1_CommonConfig';
-import Step2ToolConfig from '../components/verification/Step2_ToolConfig';
-import Step3Execution, { PipelineExecutionRef } from '../components/verification/Step3_Execution';
+import Step2ToolConfig, { PipelineExecutionRef } from '../components/verification/Step2_ToolConfig';
 import Step4Result from '../components/verification/Step4_Result';
-import Step5Cloud from '../components/verification/Step5_Cloud';
 import FlowShell from '../components/shared/FlowShell';
 import DesignTreePanel from '../components/shared/DesignTreePanel';
+import Step5Cloud from '../components/verification/Step5_Cloud';
 
 const VerificationFlow: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedModule, setSelectedModule] = useState('');
   const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>([]);
   const [moduleWorkDirs, setModuleWorkDirs] = useState<Record<string, string>>({});
-  const executionRef = useRef<PipelineExecutionRef>(null);
 
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
+
+  const executionRef = useRef<PipelineExecutionRef>(null);
 
   const handleTreeRun = (keys: string[]) => {
     executionRef.current?.handleExternalRun(keys);
@@ -27,21 +27,14 @@ const VerificationFlow: React.FC = () => {
 
   const steps = [
     { title: '公共配置', description: '环境与出口', content: <Step1CommonConfig onNext={nextStep} /> },
-    { title: '工具配置', description: '仿真工具链', content: <Step2ToolConfig moduleKey={selectedModule} onNext={nextStep} onPrev={prevStep} /> },
-    {
-      title: '执行页',
-      description: '用例与命令',
-      content: (
-        <Step3Execution
-          ref={executionRef}
-          moduleKeys={executionModuleKeys}
-          moduleWorkDirs={moduleWorkDirs}
-          activeModuleKey={selectedModule}
-          onModuleSelect={setSelectedModule}
-          onNext={nextStep}
-          onPrev={prevStep}
-        />
-      ),
+    { title: '工具配置', description: '仿真工具链', content: <Step2ToolConfig
+      ref={executionRef}
+      moduleKey={selectedModule}
+      onModuleSelect={setSelectedModule}
+      onNext={nextStep}
+      onPrev={prevStep}
+      moduleKeys={executionModuleKeys}
+      moduleWorkDirs={moduleWorkDirs} />
     },
     { title: '结果页', description: '日志与报告', content: <Step4Result onNext={nextStep} onPrev={prevStep} /> },
     { title: '端云协同', description: '共享与复用', content: <Step5Cloud onPrev={prevStep} /> },

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import {
   PROJECT_REPOS,
   LOCAL_STATE_DIR_NAME,
@@ -30,6 +31,23 @@ export function resolveProjectRoot(): string | undefined {
   }
 
   return path.dirname(folders[0].uri.fsPath);
+}
+
+export function resolveProjectPath(repo: string): string | undefined {
+  const projectRoot = resolveProjectRoot();
+  if (projectRoot) {
+    const workspacePath = path.join(projectRoot, 'dft-ide.code-workspace');
+    try {
+      const data = fs.readFileSync(workspacePath, 'utf-8');
+      const workspaceConfig = JSON.parse(data);
+      const targetFolder = workspaceConfig.folders.find((node: { name: string, path: string }) => node.name === repo);
+      return targetFolder ? path.join(projectRoot, targetFolder.path) : undefined;
+    } catch (error) {
+      console.error('Failed to read file dft-ide.code-workspace:', error);
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 export function resolveLocalConfigDirectory(): string | undefined {
@@ -540,11 +558,6 @@ export async function writeDefaultLocalState(localStateUri: vscode.Uri, repos: {
       const cshrcFilePath = path.join(repo.localPath, 'project.cshrc');
       const isExists = await pathExists(cshrcFilePath);
       if (isExists) stateObject.project = cshrcFilePath;
-    }
-    if (!stateObject.sailorCfg) {
-      const cfgFilePath = path.join(repo.localPath, 'common.cfg');
-      const isExists = await pathExists(cfgFilePath);
-      if (isExists) stateObject.sailorCfg = cfgFilePath;
     }
 
     await writeFileIfMissing(stateUri, JSON.stringify(stateObject, null, 2));

@@ -1,48 +1,122 @@
 # DFT IDE SAILOR 流水线配置文件
 # 修改此文件可以自定义流水线的执行步骤和执行命令
 
-- id: create_branch
-  name: create_branch
-  command: "sailor branch -create feat_dft_scan"
-  description: 创建或切换 feature 分支
+- id: gen_libcell_env
+  name: gen_libcell_env
+  command: "run_flow_sailor gen_libcell_env"
+  description: 生成libcell环境
 
-- id: gen_cfg
-  name: gen_cfg
-  command: "sailor gen_cfg -spec norm_input.xlsx"
-  description: 根据归一化表格生成 sailor cfg
-
-- id: user_hook_before_gen_dcg_env
-  name: user_hook_before_gen_dcg_env
-  command: "run_flow_sailor hook --before gen_dcg_env"
-  description: 执行 DCG 生成前置 ECO 钩子
-
-- id: gen_dcg_env
-  name: gen_dcg_env
-  command: "sailor gen_dcg_env -cfg sailor.cfg"
-  description: 生成 DCG 扫描链环境
-
-- id: user_hook_after_gen_cfg
-  name: user_hook_after_gen_cfg
-  command: "run_flow_sailor hook --after gen_cfg"
-  description: 执行生成后置 ECO 校验钩子
-
-- id: run_scan
-  name: run_scan
-  command: "sailor run_scan -cfg sailor.cfg"
-  description: 执行 scan 链插入与缝合
+- id: run_libcell_syn
+  name: run_libcell_syn
+  command: "run_flow_sailor run_libcell_syn"
+  description: 执行libcell
 
 - id: gen_analysis_env
   name: gen_analysis_env
-  command: "sailor gen_analysis_env -cfg sailor.cfg"
-  description: 生成 scan 分析与 DRC 环境
+  command: "run_flow_sailor gen_analysis_env"
+  description: 生成analysis环境
 
 - id: run_analysis
   name: run_analysis
-  command: "sailor run_analysis -cfg sailor.cfg"
-  description: 执行 scan 检查与 DRC 分析
+  command: "run_flow_sailor run_analysis"
+  description: 执行analysis
 
-- id: commit_result
-  name: commit_result
-  command: "sailor commit -files "cfg,scripts,reports""
-  description: 提交配置文件、脚本与报告
+- id: gen_prescan_env
+  name: gen_prescan_env
+  command: "run_flow_sailor gen_prescan_env"
+  description: 生成prescan环境
 
+- id: run_prescan
+  name: run_prescan
+  command: "run_flow_sailor run_prescan"
+  description: 执行prescan
+
+- id: gen_scan_env
+  name: gen_scan_env
+  command: "run_flow_sailor gen_scan_env"
+  description: 生成scan环境
+
+- id: run_scan
+  name: run_scan
+  command: "run_flow_sailor run_scan"
+  description: 执行scan
+
+- id: gen_edt_env
+  name: gen_edt_env
+  command: "run_flow_sailor gen_edt_env"
+  description: 生成edt环境
+
+- id: run_edt_gen
+  name: run_edt_gen
+  command: "run_flow_sailor run_edt_gen"
+  description: 执行gen向量进程
+
+- id: gen_ip_env
+  name: gen_ip_env
+  command: "run_flow_sailor gen_ip_env"
+  description: 生成ip环境
+
+- id: gen_bscan_env
+  name: gen_bscan_env
+  command: "run_flow_sailor gen_bscan_env"
+  description: 生成bscan环境
+
+- id: run_bscan_gen
+  name: run_bscan_gen
+  command: "run_flow_sailor run_bscan_gen"
+  description: 执行gen向量进程
+
+- id: gen_bscan_insert
+  name: gen_bscan_insert
+  command: "run_flow_sailor gen_bscan_insert"
+  description: 生成bscan insert
+
+- id: gen_ioshare_env
+  name: gen_ioshare_env
+  command: "run_flow_sailor gen_ioshare_env"
+  description: 生成ioshare环境
+
+- id: gen_ijtag_env
+  name: gen_ijtag_env
+  command: "run_flow_sailor gen_ijtag_env"
+  description: 生成ijtag环境
+
+- id: run_ijtag_gen
+  name: run_ijtag_gen
+  command: "run_flow_sailor run_ijtag_gen"
+  description: 执行gen向量进程
+
+- id: gen_compile_env
+  name: gen_compile_env
+  command: "run_flow_sailor gen_compile_env"
+  description: 生成compile环境
+
+- id: run_compile
+  name: run_compile
+  command: "run_flow_sailor run_compile"
+  description: 执行compile
+
+- id: gen_assemble_env
+  name: gen_assemble_env
+  command: "run_flow_sailor gen_assemble_env"
+  description: 生成assemble环境
+
+- id: run_assemble
+  name: run_assemble
+  command: "run_flow_sailor run_assemble"
+  description: 执行assemble
+
+- id: gen_release_env
+  name: gen_release_env
+  command: "run_flow_sailor gen_release_env"
+  description: 生成release环境
+
+- id: run_release
+  name: run_release
+  command: "run_flow_sailor run_release"
+  description: 执行release
+
+- id: deliver
+  name: deliver
+  command: "run_flow_sailor deliver"
+  description: 生成outgoing

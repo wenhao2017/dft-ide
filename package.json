@@ -162,6 +162,11 @@
           "type": "string",
           "default": "http://code-dg.hisi.huawei.com/DFT_IDE_PROJECTS",
           "description": "gitlab host."
+        },
+        "dftIde.maxHistoryCounts": {
+          "type": "number",
+          "default": 5,
+          "description": "max history log files."
         }
       }
     }

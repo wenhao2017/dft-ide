@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Tabs, Button, Alert, Space, Typography, message } from 'antd';
+import { Button, Alert, Space, Typography, message } from 'antd';
 import {
   LeftOutlined,
   RightOutlined,
   CheckCircleOutlined,
   WarningOutlined,
-  LineChartOutlined,
   FileTextOutlined,
   HistoryOutlined,
   CloudUploadOutlined,
@@ -20,7 +19,12 @@ import { PipelineRuntimeSnapshot } from '../../store/pipelineRuntimeStore';
 
 const { Link } = Typography;
 
-const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onNext, onPrev }) => {
+interface Props {
+  onNext: () => void;
+  onPrev: () => void;
+}
+
+const Step4Result: React.FC<Props> = ({ onNext, onPrev }) => {
   const activeProject = useWizardStore((s) => s.activeProject);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRecords, setHistoryRecords] = useState<ExecutionHistoryRecord[]>([]);
@@ -37,7 +41,7 @@ const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onN
       }
     };
     fetchHistory();
-  }, []);
+  });
 
   const handleUpload = async () => {
     if (!activeProject?.id) {
@@ -56,9 +60,8 @@ const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onN
         status: activeRecord.status,
         logs: activeRecord.logs,
         executedAt: activeRecord.executedAt,
-        metrics: { coverage: 98.5, assertionsPassed: true },
       });
-      message.success('已成功同步验证数据到云端分析平台');
+      message.success('已成功同步执行数据到云端分析平台');
     } catch (err) {
       message.error('同步失败: ' + String(err));
     } finally {
@@ -66,32 +69,34 @@ const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onN
     }
   };
 
+  const currentLogs = activeRecord?.logs ?? [];
   const openPipelineRuntime = (record: ExecutionHistoryRecord) => {
     if (isPipelineRuntimeSnapshot(record.runtimeSnapshot)) {
       setHistoryRuntime(record.runtimeSnapshot);
     }
   };
 
-  const renderSimResult = () => (
-    <div style={{ marginTop: 16 }}>
+  return (
+    <div style={{ padding: '16px 0' }}>
       <Alert
-        message={activeRecord?.status === 'success' ? 'SIM 执行完成，无 Error 产生' : 'SIM 执行结果待确认'}
+        message="状态检查"
         description="执行结果来自已保存的日志或历史记录；真实任务请在 VS Code 终端中运行。"
         type={activeRecord?.status === 'success' ? 'success' : 'warning'}
         showIcon
         icon={activeRecord?.status === 'success' ? <CheckCircleOutlined /> : <WarningOutlined />}
         style={{ marginBottom: 16 }}
       />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Space size="large">
-          <Button icon={<LineChartOutlined />}>查看波形</Button>
           <Link>
-            <FileTextOutlined /> sim/vcs.log
+            <FileTextOutlined /> {'verification'}/synth.log
           </Link>
           <Link>
-            <FileTextOutlined /> sim/verdi.log
+            <FileTextOutlined /> {'verification'}/opt.log
           </Link>
         </Space>
+
         <Button
           icon={<HistoryOutlined />}
           onClick={() => setHistoryOpen(true)}
@@ -101,36 +106,10 @@ const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onN
       </div>
 
       <ExecutionLogPanel
-        title={`仿真结果分析 ${activeRecord ? `[${new Date(activeRecord.executedAt).toLocaleString()}]` : ''}`}
+        title={`日志分析 ${activeRecord ? `[${new Date(activeRecord.executedAt).toLocaleString()}]` : ''}`}
         status={activeRecord?.status || 'idle'}
-        logs={activeRecord?.logs ?? []}
+        logs={currentLogs}
         minHeight={300}
-      />
-    </div>
-  );
-
-  return (
-    <div>
-      <Tabs
-        type="line"
-        items={[
-          {
-            key: 'plan',
-            label: 'PLAN',
-            children: <Alert message="PLAN 检查通过" type="success" showIcon style={{ marginTop: 16 }} />,
-          },
-          {
-            key: 'env',
-            label: 'ENV',
-            children: <Alert message="ENV 检查通过" type="success" showIcon style={{ marginTop: 16 }} />,
-          },
-          { key: 'sim', label: 'SIM', children: renderSimResult() },
-          {
-            key: 'atpg',
-            label: 'ATPG',
-            children: <Alert message="ATPG 未执行" type="info" showIcon style={{ marginTop: 16 }} />,
-          },
-        ]}
       />
 
       <ExecutionHistoryList
@@ -162,7 +141,7 @@ const Step4Result: React.FC<{ onNext: () => void; onPrev: () => void }> = ({ onN
           onClick={handleUpload}
           loading={uploading}
         >
-          提交验证结果到云端
+          提交分析到云端
         </Button>
         <Button type="primary" onClick={onNext}>
           下一页 <RightOutlined />

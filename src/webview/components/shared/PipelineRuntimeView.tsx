@@ -252,7 +252,7 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
     if (readOnly) {
       return;
     }
-    stopRuntimeTask(activeFlowKey, activeModuleKey, id);
+    stopRuntimeTask(activeFlowKey, activeModuleKey, id, flowLabel);
   }, [activeFlowKey, activeModuleKey, readOnly, stopRuntimeTask]);
 
   const rerunTask = useCallback((id: string) => {
