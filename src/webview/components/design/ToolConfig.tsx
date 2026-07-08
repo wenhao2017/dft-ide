@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
+  Button,
   Form,
   Input,
   Typography,
@@ -10,7 +11,8 @@ import {
 } from 'antd';
 import {
   PlusOutlined,
-  MinusCircleOutlined
+  MinusCircleOutlined,
+  ClearOutlined,
 } from '@ant-design/icons';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 import CollapsibleSection from '../shared/CollapsibleSection';
@@ -138,6 +140,20 @@ const ToolConfig: React.FC<Props> = ({ moduleKey, category }) => {
                   taskForm.setFieldsValue({
                     clusterGroup: account,
                     clusterQueue: queue,
+                  });
+                }}
+              />
+            </Form.Item>
+          </Col>
+          <Col flex="0 0 30px">
+            <Form.Item label=" ">
+              <Button
+                danger
+                icon={<ClearOutlined />}
+                onClick={() => {
+                  taskForm.setFieldsValue({
+                    clusterGroup: '',
+                    clusterQueue: '',
                   });
                 }}
               />

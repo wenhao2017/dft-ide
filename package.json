@@ -75,7 +75,7 @@
       "properties": {
         "dftIde.apiBase": {
           "type": "string",
-          "default": "http://pandas.hisi.huawei.com/dft-ide-server",
+          "default": "http://pandas.hisi.huawei.com/dft-ide-server/",
           "description": "DFT IDE backend API base URL, for example http://localhost:8080."
         },
         "dftIde.localProjectsRoot": {

@@ -385,7 +385,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
   const initializeProject = useCallback(async (project: DftProject) => {
     setInitializingProjectId(project.ctmp_id?.toString() ?? '');
     try {
-      await initProject(project);
+      await initProject(currentUser, project);
       fetchProjectData();
     } catch (err) {
       message.error(err instanceof Error ? err.message : '项目初始化失败');
@@ -644,7 +644,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
           extra={
             <Space size={6} wrap>
               {workspaceProject && <Tag color="blue">当前加载：{workspaceProject.name}</Tag>}
-              {currentProject && <Tag>上次：{currentProject.name}</Tag>}
+              {!workspaceProject && currentProject && <Tag>上次：{currentProject.name}</Tag>}
             </Space>
           }
           style={{ height: '100%', borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
@@ -751,10 +751,10 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                     title={
                       <Space wrap>
                         <Text strong>{project.name}</Text>
-                        {active && <Tag color="blue">当前加载</Tag>}
                         <Tag>{project.ctmp_id ? "CTMP" : "自定义"}</Tag>
                         <Tag>{project.role}</Tag>
-                        {project.id === projectId && <Tag>上次项目</Tag>}
+                        {active && <Tag color="blue">当前加载</Tag>}
+                        {!active && project.id === projectId && <Tag color="blue">上次项目</Tag>}
                       </Space>
                     }
                     description={

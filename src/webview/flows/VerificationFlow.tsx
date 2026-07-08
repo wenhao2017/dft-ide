@@ -1,41 +1,47 @@
-import React, { useRef, useState } from 'react';
+import React, {  useState } from 'react';
 import Step1CommonConfig from '../components/verification/Step1_CommonConfig';
-import Step2ToolConfig, { PipelineExecutionRef } from '../components/verification/Step2_ToolConfig';
+
+import ConfigExecution from '../components/verification/ConfigExecution';
+
 import Step4Result from '../components/verification/Step4_Result';
 import FlowShell from '../components/shared/FlowShell';
-import DesignTreePanel from '../components/shared/DesignTreePanel';
 import Step5Cloud from '../components/verification/Step5_Cloud';
+
 
 const VerificationFlow: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(0);
-  const [selectedModule, setSelectedModule] = useState('');
-  const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>([]);
-  const [moduleWorkDirs, setModuleWorkDirs] = useState<Record<string, string>>({});
+
 
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
 
-  const executionRef = useRef<PipelineExecutionRef>(null);
 
-  const handleTreeRun = (keys: string[]) => {
-    executionRef.current?.handleExternalRun(keys);
-  };
-
-  const handleTreeStop = (keys: string[]) => {
-    executionRef.current?.handleExternalStop(keys);
-  };
+  const initialConfig = {
+    tc: [
+      { name: "Compute_TC_A" },
+      { name: "Storage_TC_B" },
+      { name: "Network_TC_C" },
+    ],
+    subattr: [
+      { name: "attr_capacity_limit" },
+      { name: "attr_io_threshold" },
+      { name: "attr_latency_mode" },
+    ],
+    groups: [
+      {
+        name: "Root_Cluster_01",
+        tc: ["Compute_TC_A", "Storage_TC_B"],
+        subattr: ["attr_capacity_limit", "attr_io_threshold"],
+      },
+      {
+        name: "Archive_Node_02",
+      },
+    ],
+  }
 
   const steps = [
     { title: '公共配置', description: '环境与出口', content: <Step1CommonConfig onNext={nextStep} /> },
-    { title: '工具配置', description: '仿真工具链', content: <Step2ToolConfig
-      ref={executionRef}
-      moduleKey={selectedModule}
-      onModuleSelect={setSelectedModule}
-      onNext={nextStep}
-      onPrev={prevStep}
-      moduleKeys={executionModuleKeys}
-      moduleWorkDirs={moduleWorkDirs} />
-    },
+    { title: '配置和执行', description: '仿真工具链', content: <ConfigExecution initialConfig={initialConfig} /> },
     { title: '结果页', description: '日志与报告', content: <Step4Result onNext={nextStep} onPrev={prevStep} /> },
     { title: '端云协同', description: '共享与复用', content: <Step5Cloud onPrev={prevStep} /> },
   ];
@@ -49,22 +55,6 @@ const VerificationFlow: React.FC = () => {
       steps={steps}
       current={currentStep}
       onStepChange={setCurrentStep}
-      sidebar={
-        currentStep !== 0 ? (
-          <DesignTreePanel
-            accent="#059669"
-            flow="verification"
-            flowLabel="Verification"
-            enableRun={currentStep === 2}
-            selectedKey={selectedModule}
-            onSelect={setSelectedModule}
-            onExecutionSelectionChange={setExecutionModuleKeys}
-            onModuleWorkDirsChange={setModuleWorkDirs}
-            onRun={handleTreeRun}
-            onStop={handleTreeStop}
-          />
-        ) : undefined
-      }
     />
   );
 };

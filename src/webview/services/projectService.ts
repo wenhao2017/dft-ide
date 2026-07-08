@@ -136,8 +136,8 @@ function normalizeProjectRepoKey(value: unknown): ProjectRepoKey | null {
 
 async function responseErrorHandler(response: Response, defaultError: string): Promise<void> {
   if (!response.ok) {
-    const errorData = await response.json().catch(() => undefined) as { error?: string } | undefined;
-    const errorMessage = errorData?.error || `${defaultError}: ${response.status}`;
+    const errorData = await response.json().catch(() => undefined) as { detail?: string } | undefined;
+    const errorMessage = errorData?.detail || `${defaultError}: ${response.status}`;
     throw new Error(errorMessage);
   }
 }
@@ -173,7 +173,7 @@ export async function createProject(currentUser: string, project: {
   return true;
 }
 
-export async function initProject(project: DftProject): Promise<boolean> {
+export async function initProject(currentUser: string, project: DftProject): Promise<boolean> {
   const apiBase = getApiBase();
   if (!apiBase) {
     return false;
@@ -185,6 +185,7 @@ export async function initProject(project: DftProject): Promise<boolean> {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
+      user_id: currentUser,
       project_name: project.name,
       ctmp_id: project.ctmp_id,
     }),

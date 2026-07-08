@@ -18,6 +18,7 @@ import {
   LeftOutlined,
   RightOutlined,
   SaveOutlined,
+  ClearOutlined,
 } from '@ant-design/icons';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 import ControlledPathInput from '../shared/ControlledPathInput';
@@ -220,6 +221,20 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
                   taskForm.setFieldsValue({
                     clusterGroup: account,
                     clusterQueue: queue,
+                  });
+                }}
+              />
+            </Form.Item>
+          </Col>
+          <Col flex="0 0 30px">
+            <Form.Item label=" ">
+              <Button
+                danger
+                icon={<ClearOutlined />}
+                onClick={() => {
+                  taskForm.setFieldsValue({
+                    clusterGroup: '',
+                    clusterQueue: '',
                   });
                 }}
               />
