@@ -1,6 +1,21 @@
 import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 
+// ==================== OBS 红区生产环境常量与密钥 ====================
+export const PANDAS_HOMEPAGE_PROD = 'http://pandas.hisi.huawei.com';
+export const OBS_BUCKET_NAME_RED = 'dft-files';
+export const OBS_AES_KEY_RED = '3WB4oEodiKFUreBi';
+export const OBS_AES_IV_RED = 'aQ5TOzDq4XsumbOn';
+
+// ==================== DFT 访问 OBS 核心 API 端点 ====================
+export const OBS_GET_SPACE_TOKEN = '/file-system-server-dft/api/v1/space/group/getSpaceToken';
+export const OBS_DOWNLOAD_FILE = '/file-system-server-dft/api/v1/file/command/download';
+export const OBS_GET_FILE_DETAILS = '/file-system-server-dft/api/v1/file/command/detail';
+export const OBS_GET_PATH = '/file-system-server-dft/api/v1/file/command/children';
+export const OBS_UPLOAD_FILE = '/file-system-server-dft/api/v1/file/command/upload';
+export const OBS_MKDIR = '/file-system-server-dft/api/v1/file/command/mkdir';
+export const OBS_GET_FILE_URL = '/file-system-server-dft/api/v1/file/command/url';
+
 interface ObsApiResponse<T> {
   code?: number;
   message?: string;
@@ -40,14 +55,94 @@ export class ObsService {
     return { url, spaceName };
   }
 
+  /**
+   * 获取当前的 spaceName，支持外部传入默认回退值
+   */
+  getSpaceName(fallback?: string): string {
+    return this.resolveSpaceName({ fallbackSpaceName: fallback });
+  }
+
+  /**
+   * §3.3 检查文件是否存在及详情
+   */
+  async getFileDetails(spaceName: string, filepath: string): Promise<boolean> {
+    const config = this.getConfig();
+    const spaceToken = await this.getSpaceToken(config, spaceName);
+
+    const normalizedPath = filepath.startsWith('/') ? filepath : `/${filepath}`;
+    const url = this.buildUrl(config.obsPage, OBS_GET_FILE_DETAILS, {
+      spaceName: spaceName,
+      filepath: normalizedPath,
+    });
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'User-Agent': USER_AGENT,
+        'spaceName': spaceName,
+        'spaceToken': spaceToken,
+      },
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+    const body = (await response.json()) as ObsApiResponse<unknown>;
+    return body.code === 1;
+  }
+
+  /**
+   * §4.2 下载最新文件到本地（用于“产生默认配置”）
+   */
+  async downloadFile(spaceName: string, remoteFilePath: string, localDestUri: vscode.Uri): Promise<void> {
+    const config = this.getConfig();
+    const spaceToken = await this.getSpaceToken(config, spaceName);
+
+    const normalizedPath = remoteFilePath.startsWith('/') ? remoteFilePath : `/${remoteFilePath}`;
+    const url = this.buildUrl(config.obsPage, OBS_DOWNLOAD_FILE, {
+      spaceName: spaceName,
+      filepath: normalizedPath,
+    });
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'User-Agent': USER_AGENT,
+        'spaceName': spaceName,
+        'spaceToken': spaceToken,
+        'Content-Type': 'application/octet-stream',
+      },
+    });
+
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const errJson = (await response.json()) as { code?: number; message?: string };
+        if (errJson.message === 'FILE_NOT_EXIST') {
+          throw new Error(`OBS 空间 [${spaceName}] 中不存在该文件: ${normalizedPath}`);
+        }
+        throw new Error(errJson.message || `OBS 下载报错 (code: ${errJson.code})`);
+      }
+      throw new Error(`OBS 请求下载失败: HTTP ${response.status}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    await vscode.workspace.fs.writeFile(localDestUri, Buffer.from(arrayBuffer));
+  }
+
   private getConfig(): ObsConfig {
     const config = vscode.workspace.getConfiguration('dftIde.obs');
+    const page = config.get<string>('page', '').trim().replace(/\/+$/, '');
+    const groupName = config.get<string>('groupName', '').trim();
+    const aesKey = config.get<string>('aesKey', '');
+    const aesIv = config.get<string>('aesIv', '');
+    const getSpaceTokenPath = config.get<string>('getSpaceTokenPath', '').trim();
     return {
-      obsPage: config.get<string>('page', '').trim().replace(/\/+$/, ''),
-      groupName: config.get<string>('groupName', '').trim(),
-      aesKey: config.get<string>('aesKey', ''),
-      aesIv: config.get<string>('aesIv', ''),
-      getSpaceTokenPath: config.get<string>('getSpaceTokenPath', '').trim(),
+      obsPage: page || PANDAS_HOMEPAGE_PROD,
+      groupName: groupName || 'dft',
+      aesKey: aesKey || OBS_AES_KEY_RED,
+      aesIv: aesIv || OBS_AES_IV_RED,
+      getSpaceTokenPath: getSpaceTokenPath || OBS_GET_SPACE_TOKEN,
       viewerUrlTemplate: config.get<string>('viewerUrlTemplate', '').trim(),
       w3id: config.get<string>('w3id', '').trim(),
     };
@@ -82,7 +177,7 @@ export class ObsService {
       throw new Error(`OBS SpaceToken request failed: HTTP ${response.status}`);
     }
 
-    const body = await response.json() as ObsApiResponse<SpaceTokenData>;
+    const body = (await response.json()) as ObsApiResponse<SpaceTokenData>;
     if (body.code !== 1 || !body.data?.spaceToken) {
       throw new Error(this.formatObsError('OBS SpaceToken request failed', body));
     }
@@ -169,3 +264,4 @@ export class ObsService {
 }
 
 export const obsService = new ObsService();
+

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { pathExists, readJsonFile, isRecord } from './utils';
+import { obsService } from './obsService';
 import {
   resolveConfigPath,
   resolveProjectRepoRoot,
@@ -148,6 +149,29 @@ export async function generateDefaultFlowConfigs(flow: 'hibist' | 'sailor' | 've
 }> {
   const configsDir = await getFlowConfigsDirectory(flow);
   await ensureLocalConfigDirectory(configsDir);
+
+  // 1. 去特定空间下载转换脚本（具体空间与路径在 package.json 预留，可留空后填）
+  const obsConfig = vscode.workspace.getConfiguration('dftIde.obs');
+  const scriptSpace = obsConfig.get<string>('scriptSpace', '').trim();
+  const scriptPaths = obsConfig.get<Record<string, string>>('scriptPaths', {});
+  const remoteScriptPath = scriptPaths?.[flow]?.trim() || '';
+
+  if (scriptSpace && remoteScriptPath) {
+    const scriptsDir = path.join(path.dirname(configsDir), 'scripts');
+    await ensureLocalConfigDirectory(scriptsDir);
+    const scriptFileName = path.basename(remoteScriptPath) || `${flow}_convert_script`;
+    const localScriptPath = path.join(scriptsDir, scriptFileName);
+    try {
+      await obsService.downloadFile(scriptSpace, remoteScriptPath, vscode.Uri.file(localScriptPath));
+      console.log(`[DFT IDE] 成功从 OBS 空间 [${scriptSpace}] 下载转换脚本 [${remoteScriptPath}] 至: ${localScriptPath}`);
+    } catch (err) {
+      console.warn(`[DFT IDE] 从 OBS 空间 [${scriptSpace}] 下载转换脚本失败:`, err);
+    }
+  } else {
+    console.info(`[DFT IDE] 尚未配置 dftIde.obs.scriptSpace 或 scriptPaths.${flow}，预留空项待填`);
+  }
+
+  // 2. 为当前工程模块生成基础配置架构
   const modules = await readModulesFromNormalizedTable(flow);
   let created = 0;
 

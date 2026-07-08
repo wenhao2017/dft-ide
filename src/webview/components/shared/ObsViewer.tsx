@@ -20,6 +20,7 @@ interface ObsViewerProps {
   open: boolean;
   spaceName: string;
   selectTarget?: ObsSelectTarget;
+  readOnly?: boolean;
   onCancel: () => void;
   onSelect?: (path: string) => void;
 }
@@ -79,6 +80,7 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
   open,
   spaceName,
   selectTarget,
+  readOnly = false,
   onCancel,
   onSelect,
 }) => {
@@ -348,7 +350,7 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
             </div>
           </Space>
           <Space wrap className="dft-obs-tags">
-            <Tag color="blue">Mock</Tag>
+            {readOnly ? <Tag color="error">Read Only / 仅读</Tag> : <Tag color="processing">Read / Write</Tag>}
             <Tag color="green">spaceToken ready</Tag>
             {selectTarget && <Tag color="purple">{selectTarget}</Tag>}
           </Space>
@@ -405,15 +407,19 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
                 <Tooltip title="Refresh">
                   <Button className="dft-obs-icon-button" icon={<ReloadOutlined />} />
                 </Tooltip>
-                <Tooltip title="Upload">
-                  <Button icon={<UploadOutlined />}><span className="dft-obs-action-label">Upload</span></Button>
-                </Tooltip>
+                {!readOnly && (
+                  <Tooltip title="Upload">
+                    <Button icon={<UploadOutlined />}><span className="dft-obs-action-label">Upload</span></Button>
+                  </Tooltip>
+                )}
                 <Tooltip title="Download">
                   <Button icon={<CloudDownloadOutlined />}><span className="dft-obs-action-label">Download</span></Button>
                 </Tooltip>
-                <Tooltip title="Delete">
-                  <Button className="dft-obs-icon-button" danger icon={<DeleteOutlined />} />
-                </Tooltip>
+                {!readOnly && (
+                  <Tooltip title="Delete">
+                    <Button className="dft-obs-icon-button" danger icon={<DeleteOutlined />} />
+                  </Tooltip>
+                )}
               </div>
             </div>
 

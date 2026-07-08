@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { CSSProperties, Key } from "react"
 import {
   Button,
@@ -1304,8 +1304,19 @@ function RenameResourceModal({
   )
 }
 
-export default function ConfigTab() {
-  const [config, setConfig] = useState<ConfigData>(() => MOCK_CONFIG_DATA)
+export interface ConfigTabProps {
+  config?: ConfigData;
+  onChange?: any;
+}
+
+export default function ConfigTab(props: ConfigTabProps = {}) {
+  const [config, setConfig] = useState<ConfigData>(() => props.config ?? MOCK_CONFIG_DATA)
+
+  useEffect(() => {
+    if (props.config) {
+      setConfig(props.config)
+    }
+  }, [props.config])
 
   const [page, setPage] = useState<PageKind>("group")
   const [activeGroupName, setActiveGroupName] = useState<string | undefined>(
@@ -1446,6 +1457,7 @@ export default function ConfigTab() {
 
   function updateConfig(nextConfig: ConfigData) {
     setConfig(nextConfig)
+    props.onChange?.(nextConfig)
   }
 
   function resetPageState(nextPage: PageKind) {

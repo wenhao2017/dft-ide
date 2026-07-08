@@ -105,28 +105,42 @@
         },
         "dftIde.obs.page": {
           "type": "string",
-          "default": "",
-          "description": "OBS service base URL, for example https://obs.example.com."
+          "default": "http://pandas.hisi.huawei.com",
+          "description": "OBS service base URL (Red Zone default: http://pandas.hisi.huawei.com)."
         },
         "dftIde.obs.groupName": {
           "type": "string",
-          "default": "",
+          "default": "dft",
           "description": "OBS group name used when generating fs-signature and requesting SpaceToken."
         },
         "dftIde.obs.aesKey": {
           "type": "string",
-          "default": "",
+          "default": "3WB4oEodiKFUreBi",
           "description": "OBS AES-128-CBC signature key. It must be 16 bytes when encoded as UTF-8."
         },
         "dftIde.obs.aesIv": {
           "type": "string",
-          "default": "",
+          "default": "aQ5TOzDq4XsumbOn",
           "description": "OBS AES-128-CBC signature IV. It must be 16 bytes when encoded as UTF-8."
         },
         "dftIde.obs.getSpaceTokenPath": {
           "type": "string",
-          "default": "",
+          "default": "/file-system-server-dft/api/v1/space/group/getSpaceToken",
           "description": "OBS_GET_SPACE_TOKEN endpoint path appended to dftIde.obs.page."
+        },
+        "dftIde.obs.scriptSpace": {
+          "type": "string",
+          "default": "",
+          "description": "OBS space name where conversion scripts are stored (leave empty to configure later)."
+        },
+        "dftIde.obs.scriptPaths": {
+          "type": "object",
+          "default": {
+            "hibist": "",
+            "sailor": "",
+            "verification": ""
+          },
+          "description": "Remote file paths of conversion scripts in the script space for each flow."
         },
         "dftIde.obs.viewerUrlTemplate": {
           "type": "string",
