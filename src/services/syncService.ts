@@ -13,7 +13,7 @@ import { mergeConfigFile } from './configService';
 import { resolveDesignTreeFilePath } from './designTreeService';
 import {
   buildCommonSyncArtifacts,
-} from './commonWorkbookSyncService';
+} from './commonSyncArtifacts';
 import {
   buildWorkbookDiffItemsInWorker,
   copyWorkbookArtifactIfChangedInWorker,

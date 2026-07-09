@@ -133,17 +133,29 @@ function formatStartTime(time?: number): string {
     .join(':');
 }
 
+function hashString(value: string): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function metricSeed(parts: Array<string | number | undefined>): number {
+  return hashString(parts.map((part) => String(part ?? '')).join('|'));
+}
+
 // Initial tasks and links fallback functions removed, configurations now load dynamically from workspace YAML files via runtime snapshots.
 
 function getTaskMetrics(task: PipelineTask) {
+  const seed = metricSeed([task.id, task.name, task.status, task.startedAt, task.finishedAt, task.duration]);
   if (task.status === 'running') {
     return {
-      cpu: `${Math.floor(Math.random() * 15) + 10}%`,
-      mem: `${(Math.random() * 1.2 + 0.4).toFixed(1)}GB`,
+      cpu: `${(seed % 15) + 10}%`,
+      mem: `${((seed % 12) / 10 + 0.4).toFixed(1)}GB`,
     };
   }
   if (['success', 'passed', 'completed'].includes(task.status)) {
-    const seed = task.name.charCodeAt(0) + task.name.charCodeAt(task.name.length - 1);
     const mockCpu = (seed % 15) + 8;
     const mockMem = ((seed % 10) / 10 + 0.3).toFixed(1);
     return {
@@ -187,8 +199,9 @@ function summarizeRuntime(
       failed += 1;
     }
   });
-  const cpu = runtime?.runState === 'running' ? Math.floor(Math.random() * 40) + 30 : 0;
-  const mem = runtime?.runState === 'running' ? Number((Math.random() * 4 + 2).toFixed(1)) : 0;
+  const runtimeSeed = metricSeed([runtime?.runId, moduleKey, runtime?.updatedAt]);
+  const cpu = runtime?.runState === 'running' ? (runtimeSeed % 40) + 30 : 0;
+  const mem = runtime?.runState === 'running' ? Number(((runtimeSeed % 40) / 10 + 2).toFixed(1)) : 0;
 
   return {
     runId: runtime?.runId,

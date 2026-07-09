@@ -50,6 +50,16 @@ const historySavedRunIds = new Set<string>();
 const nowText = () => new Date().toLocaleTimeString();
 const nowStamp = () => Date.now();
 
+function getPipelineTerminalTitle(flowLabel: string, moduleKey: string): string {
+  return `${flowLabel} / ${moduleKey}`;
+}
+
+function buildPipelineStepSourceCommand(stepCommand: string): string {
+  const scriptPath = path.resolve(__dirname, '../scripts');
+  const scriptName = stepCommand.split(' ')[0];
+  return `source ${path.join(scriptPath, scriptName)}${stepCommand.substring(scriptName.length)}`;
+}
+
 export function getPipelineRuntimeKey(flowKey: PipelineFlowKey, moduleKey: string): string {
   return `${flowKey}:${moduleKey}`;
 }
@@ -326,11 +336,9 @@ function runSequentialSimulation(
         }
         commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
         // d. 步骤命令
-        const scriptPath = path.resolve(__dirname, '../scripts');
-        const scriptName = stepCommand.split(' ')[0];
-        commands.push(`source ${path.join(scriptPath, scriptName)}${stepCommand.substring(scriptName.length)}`);
+        commands.push(buildPipelineStepSourceCommand(stepCommand));
 
-        openTerminal(`${flowLabel} / ${moduleKey}`, commands, cwd);
+        openTerminal(getPipelineTerminalTitle(flowLabel, moduleKey), commands, cwd);
       }
       appendLog(`${logPrefix} ${task.name} 运行启动。`);
     });
@@ -514,14 +522,13 @@ export class PipelineRuntimeService {
     const key = getPipelineRuntimeKey(flowKey, moduleKey);
     const config = pipelineFlowConfigs[flowKey];
     clearRuntimeTimers(key);
+    stopExecutionTerminal(getPipelineTerminalTitle(flowLabel, moduleKey));
 
     this.updateRuntime(key, (runtime) => ({
       ...runtime,
       runState: 'stopped',
       finishedAt: nowStamp(),
       tasks: runtime.tasks.map((task) => {
-        stopExecutionTerminal(`${flowLabel} / ${moduleKey}`);
-
         if (task.status === 'running') {
           return {
             ...task,
@@ -563,7 +570,7 @@ export class PipelineRuntimeService {
           return task;
         }
 
-        stopExecutionTerminal(`${flowLabel} / ${moduleKey}`);
+        stopExecutionTerminal(getPipelineTerminalTitle(flowLabel, moduleKey));
 
         return {
           ...task,
@@ -593,10 +600,8 @@ export class PipelineRuntimeService {
       const stepCommand = task.command.trim();
       let commands: string[] = [];
       commands.push(`echo "=== [DFT IDE] Rerun Step: ${task.name || task.id} ==="`);
-      const scriptPath = path.resolve(__dirname, '../scripts');
-      const scriptName = stepCommand.split(' ')[0];
-      commands.push(`source ${path.join(scriptPath, scriptName)}${stepCommand.substring(scriptName.length)}`);
-      this.options.openTerminal(`${runtime.flowLabel} / ${moduleKey}`, commands);
+      commands.push(buildPipelineStepSourceCommand(stepCommand));
+      this.options.openTerminal(getPipelineTerminalTitle(runtime.flowLabel, moduleKey), commands);
     }
 
     scheduleRuntime(key, 1200, () => {

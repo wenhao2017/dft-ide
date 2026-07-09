@@ -8,7 +8,7 @@ import { promisify } from 'util';
 import { submitJob, queryJobStatus, getDonauResources } from './services/donauService';
 import { gitService } from './services/gitService';
 import { obsService } from './services/obsService';
-import { isSpreadsheetFile } from './services/commonWorkbookSyncService';
+import { isSpreadsheetFile } from './services/commonSyncArtifacts';
 import { isPipelineFlowKey, isPipelineFlowKey as _isPipelineFlowKey, PipelineRuntimeService } from './services/pipelineRuntimeService';
 import { getWebviewHtml, InitialWebviewCommand } from './webviewHtml';
 import { SpreadsheetProvider } from "./spreadsheet"
