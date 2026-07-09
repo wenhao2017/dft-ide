@@ -6,7 +6,8 @@ import {
   LOCAL_STATE_DIR_NAME,
   LOCAL_STATE_SUBDIR,
 } from './constants';
-import { executeFileCommand, pathExists, isRecord } from './utils';
+import { executeFileCommand, pathExists, isRecord, getDirectory } from './utils';
+import dayjs from 'dayjs';
 import { DftProject } from '../webview/services/projectService';
 import { inferDftFlow } from './diagnosticsService';
 
@@ -767,4 +768,85 @@ export function getSyncedArtifactPath(
 
   const value = flowArtifacts[key];
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+export interface DefaultConfigLog {
+  requestId?: string;
+  flow: 'hibist' | 'sailor' | 'verification';
+  scriptPath: string;
+  designTree: string;
+  normTable: string;
+  timemilles?: string;
+  timestamp?: string;
+  logFile?: string;
+  success?: boolean;
+}
+
+export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
+  const terminal = vscode.window.createTerminal({
+    name: 'generate default flow configs'
+  });
+  const timestamp = dayjs().format('YYYY-MM-DD HH:mm:ss');
+  const timemilles = Date.now().toString();
+  const directory = getDirectory(defaultConfigLog.scriptPath);
+  const logFile = `${directory}/${defaultConfigLog.flow}-${defaultConfigLog.requestId}-${timemilles}.log`;
+  defaultConfigLog = {...defaultConfigLog, logFile, timestamp, timemilles};
+  await new Promise<void>((resolve, reject) => {
+    if ('onDidEndTerminalShellExecution' in vscode.window) {
+      const disposable = vscode.window.onDidEndTerminalShellExecution(e => {
+        if (e.terminal === terminal) {
+          disposable.dispose();
+          if (e.exitCode === 0) {
+            terminal.dispose();
+            resolve();
+          } else {
+            reject(new Error('Failed to generate default flow configs. See terminal logs for specific error details'));
+          }
+        }
+      });
+      terminal.sendText(`${defaultConfigLog.scriptPath} ${defaultConfigLog.designTree} ${defaultConfigLog.normTable} | tee ${logFile}`);
+      terminal.show();
+    } else {
+      let output = '';
+      const windowWithTerminalData = vscode.window as typeof vscode.window & {
+        onDidWriteTerminalData: (
+          listener: (event: { terminal: vscode.Terminal; data: string }) => unknown
+        ) => vscode.Disposable;
+      };
+      const disposable = windowWithTerminalData.onDidWriteTerminalData(e => {
+        if (e.terminal === terminal) {
+          output += e.data;
+          const lines = output.replace(/(\r\n|\r)/g, '\n').split('\n');
+          const cloneFinishedIndex = lines.indexOf('CLONE_FINISHED');
+          if (cloneFinishedIndex > 0) {
+            disposable.dispose();
+            terminal.dispose();
+            defaultConfigLog = {...defaultConfigLog, success: true};
+            resolve();
+          }
+        }
+      });
+      terminal.sendText(`${defaultConfigLog.scriptPath} ${defaultConfigLog.designTree} ${defaultConfigLog.normTable} | tee ${logFile} ; echo "CLONE_FINISHED"`);
+      terminal.show();
+    }
+  });
+  return defaultConfigLog;
+}
+
+export async function isDirectoryExists(dir: string) {
+  try {
+      const stat = await vscode.workspace.fs.stat(vscode.Uri.file(dir));
+      return stat.type === vscode.FileType.Directory;
+  } catch (error) {
+      return false;
+  }
+}
+
+export async function copyDirectory(srcDir: string, destDir: string) {
+  try {
+      await vscode.workspace.fs.copy(vscode.Uri.file(srcDir), vscode.Uri.file(destDir), { overwrite: true });
+  } catch (error) {
+      console.error('stage 复制目录失败:', error);
+      throw error;
+  }
 }

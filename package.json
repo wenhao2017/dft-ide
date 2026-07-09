@@ -27,6 +27,29 @@
     "terminalDataWriteEvent"
   ],
   "contributes": {
+    "customEditors": [
+      {
+        "viewType": "dftIde.spreadsheet",
+        "displayName": "DFT IDE SpreadSheet Viewer",
+        "selector": [
+          {
+            "filenamePattern": "*.xls"
+          },
+          {
+            "filenamePattern": "*.xlsx"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "diff": {
+      "supports": [
+        {
+          "from": "*.xlsx",
+          "to": "*.xlsx"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -207,11 +230,13 @@
     "@tanstack/react-virtual": "^3.14.3",
     "@xyflow/react": "^12.10.2",
     "antd": "^5.25.1",
+    "clara-xlsx-diff": "^0.1.6",
     "dagre": "^0.8.5",
     "dotenv": "^17.4.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-hook-form": "^7.56.3",
+    "x-data-spreadsheet": "^1.1.9",
     "xlsx": "^0.18.5",
     "zod": "^3.24.4",
     "zustand": "^5.0.5"

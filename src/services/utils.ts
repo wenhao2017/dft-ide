@@ -40,3 +40,28 @@ export async function readJsonFile(filePath: string): Promise<Record<string, unk
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+export const getFileNameAndExtension = (filePath: string) => {
+  const normalizedPath = filePath.replace(/\\/g, '/');
+  const fileName = normalizedPath.split('/').pop();
+  if (!fileName) {
+    return { name: '', extension: '' };
+  }
+
+  const lastDotIndex = fileName.lastIndexOf('.');
+  if (lastDotIndex === -1) {
+    return { name: fileName, extension: '' };
+  }
+
+  return {
+    name: fileName.substring(0, lastDotIndex),
+    extension: fileName.substring(lastDotIndex + 1),
+  };
+};
+
+export const getDirectory = (filePath: string) => {
+  const normalizedPath = filePath.replace(/\\/g, '/');
+  const lastSlashIndex = normalizedPath.lastIndexOf('/');
+  if (lastSlashIndex === -1) return '';
+  return filePath.substring(0, lastSlashIndex);
+};

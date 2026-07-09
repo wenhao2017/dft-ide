@@ -10,6 +10,19 @@ import vscode from './vscode';
 import { DftProject } from '../services/projectService';
 import { z } from 'zod';
 
+export interface DefaultConfigLog {
+  requestId?: string;
+  flow: 'hibist' | 'sailor' | 'verification';
+  scriptPath: string;
+  designTree: string;
+  normTable: string;
+  timemilles?: string;
+  timestamp?: string;
+  time?: string;
+  logFile?: string;
+  success?: boolean;
+}
+
 let _reqId = 0;
 /** 等待响应的 Promise 回调池：key = `{command}Response:{requestId}` */
 const pendingCallbacks = new Map<string, (data: Record<string, unknown>) => void>();
@@ -359,9 +372,9 @@ export async function deleteFlowConfigFile(
 }
 
 export async function generateDefaultFlowConfigs(
-  flow: 'hibist' | 'sailor' | 'verification'
+  flow: 'hibist' | 'sailor' | 'verification', scriptPath: string
 ): Promise<{ success: boolean; configs: FlowConfigFileInfo[]; configsDir?: string; created: number; error?: string }> {
-  const res = await ipcRequest('generateDefaultFlowConfigs', { flow });
+  const res = await ipcRequest('generateDefaultFlowConfigs', { flow, scriptPath });
   return res as unknown as { success: boolean; configs: FlowConfigFileInfo[]; configsDir?: string; created: number; error?: string };
 }
 
@@ -703,5 +716,35 @@ export async function openVsCodeDiff(options: {
   title: string;
 }): Promise<{ success: boolean; error?: string }> {
   const res = await ipcRequest('openVsCodeDiff', options);
+  return res as any;
+}
+
+export async function fetchDefaultConfigLogs(
+  flow: 'hibist' | 'sailor' | 'verification'
+): Promise<{ success: boolean; history: DefaultConfigLog[];}> {
+  const res = await ipcRequest('fetchDefaultConfigLogs', { flow });
+  return res as unknown as { success: boolean; history: DefaultConfigLog[]; };
+}
+
+export async function initLanderStage(
+  flow: 'verification',
+  addStage: string,
+  extendStage: string,
+): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('initLanderStage', { flow, addStage, extendStage });
+  return res as any;
+}
+
+export async function getLanderStages(
+  flow: 'verification',
+): Promise<{ success: boolean; stages: string[]; error?: string }> {
+  const res = await ipcRequest('getLanderStages', { flow });
+  return res as any;
+}
+
+export async function deleteLanderStage(
+  flow: 'verification', stage: string
+): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('deleteLanderStage', { flow, stage });
   return res as any;
 }

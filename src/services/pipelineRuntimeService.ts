@@ -346,7 +346,7 @@ function runSequentialSimulation(
         logs: [`[${nowText()}] ${logPrefix} ${task.name} 执行完成。`],
       });
       appendLog(`${logPrefix} ${task.name} 执行成功。`);
-      
+
       // If it's the last task, complete the run
       if (index === tasks.length - 1) {
         setRunState('completed');
@@ -520,9 +520,9 @@ export class PipelineRuntimeService {
       runState: 'stopped',
       finishedAt: nowStamp(),
       tasks: runtime.tasks.map((task) => {
-        if (task.status === 'running') {
-          stopExecutionTerminal(`${flowLabel} / ${moduleKey}`);
+        stopExecutionTerminal(`${flowLabel} / ${moduleKey}`);
 
+        if (task.status === 'running') {
           return {
             ...task,
             status: 'stopped',

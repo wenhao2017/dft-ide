@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { pathExists, readJsonFile, isRecord } from './utils';
+import { pathExists, readJsonFile, isRecord, getFileNameAndExtension, getDirectory } from './utils';
 import { obsService } from './obsService';
 import {
   resolveConfigPath,
@@ -10,6 +10,7 @@ import {
   normalizeConfigFlow,
   getSyncedArtifactPath,
   resolveProjectRoot,
+  DefaultConfigLog,
 } from './workspaceService';
 
 export interface FlowConfigFileInfo {
@@ -318,4 +319,120 @@ export function collectModuleNames(value: unknown, modules: Set<string>): void {
       collectModuleNames(item, modules);
     }
   });
+}
+
+export async function saveDefaultConfigLogs(defaultConfigLog: DefaultConfigLog) {
+  try{
+    const flow = defaultConfigLog.flow;
+    const configsDir = await getFlowConfigsDirectory(flow);
+    await ensureLocalConfigDirectory(configsDir);
+    await ensureLocalConfigDirectory(`${configsDir}/.logs`);
+
+    const scriptPath = await copyLogFile(defaultConfigLog.scriptPath, defaultConfigLog.timemilles || '', configsDir);
+    const designTree = await copyLogFile(defaultConfigLog.designTree, defaultConfigLog.timemilles || '', configsDir);
+    const normTable = await copyLogFile(defaultConfigLog.normTable, defaultConfigLog.timemilles || '', configsDir);
+    const logFile = await moveLogFile(defaultConfigLog.logFile || '', configsDir);
+    const success = await checkExecuteStatus(logFile);
+    const maxHistoryCounts = vscode.workspace.getConfiguration('dftIde').get<number>('maxHistoryCounts', 10);
+
+    const filePath = resolveCfgPath(configsDir, "history");
+    let content = [
+      `{flow: "${flow}"`,
+      `scriptPath: "${scriptPath.replace(/\\/g, '/')}"`,
+      `designTree: "${designTree.replace(/\\/g, '/')}"`,
+      `normTable: "${normTable.replace(/\\/g, '/')}"`,
+      `logFile: "${logFile.replace(/\\/g, '/')}"`,
+      `time: "${defaultConfigLog.timestamp}"`,
+      `success: ${success}}`,
+    ].join(',');
+    if (await pathExists(filePath)) {
+      const data = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
+      let existingContent = Buffer.from(data).toString();
+      const rows = existingContent.split('\n');
+      if (rows.length < maxHistoryCounts) {
+        content +=  "\n" + existingContent;
+      } else {
+        const removed = rows.pop();
+        await removeLogFile(removed || '');
+        rows.forEach(row => {
+          content += "\n" + row;
+        });
+      }
+    }
+    await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), Buffer.from(content, 'utf-8'));
+    return { defaultConfigLog };
+  }catch (error) {
+    vscode.window.showErrorMessage(`${(error as Error).message}`);
+    return undefined;
+  }
+}
+
+export async function copyLogFile(filePath: string, timemilles: string, configsDir: string): Promise<string> {
+  try {
+    const { name, extension } = getFileNameAndExtension(filePath);
+    const fullName = `${configsDir}/.logs/${name}_${timemilles}${extension ? '.' + extension : ''}`;
+    await vscode.workspace.fs.copy(vscode.Uri.file(filePath),
+      vscode.Uri.file(fullName));
+    return fullName;
+  } catch (error) {
+    vscode.window.showErrorMessage(`${(error as Error).message}`);
+    return '';
+  }
+}
+
+export async function moveLogFile(filePath: string, configsDir: string): Promise<string> {
+  try {
+    const { name, extension } = getFileNameAndExtension(filePath);
+    const fullName = `${configsDir}/.logs/${name}${extension ? '.' + extension : ''}`;
+    await vscode.workspace.fs.rename(vscode.Uri.file(filePath),
+      vscode.Uri.file(fullName));
+    return fullName;
+  } catch (error) {
+    vscode.window.showErrorMessage(`${(error as Error).message}`);
+    return '';
+  }
+}
+
+export async function removeLogFile(content: string): Promise<void> {
+  try {
+    const obj: DefaultConfigLog = new Function("return " + `${content}`)();
+    await vscode.workspace.fs.delete(vscode.Uri.file(obj.scriptPath), { recursive: false });
+    await vscode.workspace.fs.delete(vscode.Uri.file(obj.designTree), { recursive: false });
+    await vscode.workspace.fs.delete(vscode.Uri.file(obj.normTable), { recursive: false });
+    await vscode.workspace.fs.delete(vscode.Uri.file(obj.logFile || ''), { recursive: false });
+  } catch (error) {}
+}
+
+export async function checkExecuteStatus(logFile: string): Promise<boolean> {
+  try {
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(logFile));
+    const text = document.getText();
+    const pattern = /\berror\b|\bexception\b/gi;
+    const matches = text.match(pattern);
+    if (matches && matches.length > 0) {
+      return false;
+    } else {
+        return true;
+    }
+  } catch (error) {
+    vscode.window.showErrorMessage(`${(error as Error).message}`);
+    return false;
+  }
+}
+
+export async function getDefaultConfigLogs(flow: 'hibist' | 'sailor' | 'verification') {
+  const configsDir = await getFlowConfigsDirectory(flow);
+  await ensureLocalConfigDirectory(configsDir);
+  const filePath = resolveCfgPath(configsDir, "history");
+
+  let history: DefaultConfigLog[] = [];
+  if (await pathExists(filePath)) {
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+    for (let i = 0; i < document.lineCount; i++) {
+      const line = document.lineAt(i);
+      const obj: DefaultConfigLog = new Function("return " + `${line.text}`)();
+      if(obj.flow) history.push(obj);
+    }
+  }
+  return history;
 }

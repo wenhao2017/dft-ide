@@ -11,13 +11,13 @@ import { obsService } from './services/obsService';
 import { isSpreadsheetFile } from './services/commonWorkbookSyncService';
 import { isPipelineFlowKey, isPipelineFlowKey as _isPipelineFlowKey, PipelineRuntimeService } from './services/pipelineRuntimeService';
 import { getWebviewHtml, InitialWebviewCommand } from './webviewHtml';
+import { SpreadsheetProvider } from "./spreadsheet"
 
 // Import constants
 import {
   VIEW_TYPE,
   GLOBAL_KEY,
   OBS_READONLY_SCHEME,
-  PROJECT_REPOS,
   LOCAL_STATE_DIR_NAME,
 } from './services/constants';
 
@@ -42,6 +42,11 @@ import {
   normalizeConfigFlow,
   getProjectRepoRoot,
   getCurrentWorkspaceProjectInfo,
+  genDefaultConfigs,
+  resolveProjectRepoRoot,
+  ensureLocalConfigDirectory,
+  isDirectoryExists,
+  copyDirectory,
 } from './services/workspaceService';
 
 // Import config services
@@ -53,6 +58,8 @@ import {
   deleteFlowConfigFile,
   generateDefaultFlowConfigs,
   mergeConfigFile,
+  saveDefaultConfigLogs,
+  getDefaultConfigLogs,
   readConfig,
 } from './services/configService';
 
@@ -222,6 +229,11 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('dftIde.whoami', async function (): Promise<string> {
       return os.userInfo().username.toLowerCase();
     })
+  );
+
+  const provider = new SpreadsheetProvider(context);
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider('dftIde.spreadsheet', provider, { webviewOptions: { retainContextWhenHidden: true } })
   );
 
   void initializeDftWorkbench(context);
@@ -1297,11 +1309,35 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'generateDefaultFlowConfigs': {
         const requestId: string = msg.requestId;
         const flow = normalizeConfigFlow(msg.flow);
+        const scriptPath = msg.scriptPath;
         try {
           if (!flow) {
             throw new Error('Unsupported flow for config files.');
           }
-          const result = await generateDefaultFlowConfigs(flow);
+          if (!scriptPath) {
+            throw new Error('Unsupported flow for script files.');
+          }
+          // 根据flow 获取归一化表格文件和design tree, 归一化表格配置都在common.json中，所以传参'data'
+          const filePath = resolveConfigPath('common');
+          if (!filePath) {
+            currentPanel?.webview.postMessage({
+              command: 'generateDefaultFlowConfigsResponse', requestId, data: null
+            });
+            return;
+          }
+
+          const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
+          const data = JSON.parse(Buffer.from(bytes).toString('utf-8'));
+          if(!data[flow]){
+            currentPanel?.webview.postMessage({
+              command: 'generateDefaultFlowConfigsResponse', requestId, data: null
+            });
+            return;
+          }
+          const designTree = data[flow].designTree;
+          const normTable = data[flow].normTable;
+          const logs = await genDefaultConfigs({requestId, flow, scriptPath, designTree ,normTable});
+          const result = await saveDefaultConfigLogs(logs);
           currentPanel?.webview.postMessage({
             command: 'generateDefaultFlowConfigsResponse',
             requestId,
@@ -1750,6 +1786,105 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             requestId,
             success: false,
             error: error instanceof Error ? error.message : String(error)
+          });
+        }
+        return;
+      }
+
+      case 'fetchDefaultConfigLogs': {
+        const requestId: string = msg.requestId;
+        try {
+          const history = await getDefaultConfigLogs(msg.flow);
+          currentPanel?.webview.postMessage({
+            command: 'fetchDefaultConfigLogsResponse', requestId,
+            success: true,
+            history
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'fetchDefaultConfigLogsResponse', requestId,
+            success: false, error: String(err)
+          });
+        }
+        return;
+      }
+
+      case 'initLanderStage': {
+        const requestId: string = msg.requestId;
+        try {
+          const repoRoot = await resolveProjectRepoRoot(msg.flow);
+          const stages = path.join(repoRoot, 'stages');
+          await ensureLocalConfigDirectory(stages);
+
+          const addStage = path.join(stages, msg.addStage);
+          const addExists = await isDirectoryExists(addStage);
+          if (addExists){
+            currentPanel?.webview.postMessage({
+              command: 'initLanderStageResponse', requestId,
+              success: false, error: `stage ${msg.addStage} aready exists`
+            });
+            return;
+          }
+          await ensureLocalConfigDirectory(addStage);
+          if (msg.extendStage) {
+            const extendStage = path.join(stages, msg.extendStage);
+            const extendExists = await isDirectoryExists(extendStage);
+            if (extendExists){
+              await copyDirectory(extendStage, addStage);
+            }
+          }
+          currentPanel?.webview.postMessage({
+            command: 'initLanderStageResponse', requestId,
+            success: true
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'initLanderStageResponse', requestId,
+            success: false, error: String(err)
+          });
+        }
+        return;
+      }
+
+      case 'getLanderStages': {
+        const requestId: string = msg.requestId;
+        try {
+          const repoRoot = await resolveProjectRepoRoot(msg.flow);
+          const stagesDir = path.join(repoRoot, 'stages');
+          const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(stagesDir));
+          const stages = entries
+                .filter(([_, type]) => type === vscode.FileType.Directory)
+                .map(([name]) => name);
+          currentPanel?.webview.postMessage({
+            command: 'getLanderStagesResponse', requestId,
+            success: true,
+            stages
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'getLanderStagesResponse', requestId,
+            success: false, error: String(err)
+          });
+        }
+        return;
+      }
+
+      case 'deleteLanderStage': {
+        const requestId: string = msg.requestId;
+        try {
+          const repoRoot = await resolveProjectRepoRoot(msg.flow);
+          const stagesDir = path.join(repoRoot, 'stages');
+          const stage = path.join(stagesDir, msg.stage);
+          await vscode.workspace.fs.delete(vscode.Uri.file(stage), { recursive: true });
+
+          currentPanel?.webview.postMessage({
+            command: 'deleteLanderStageResponse', requestId,
+            success: true
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'deleteLanderStageResponse', requestId,
+            success: false, error: String(err)
           });
         }
         return;

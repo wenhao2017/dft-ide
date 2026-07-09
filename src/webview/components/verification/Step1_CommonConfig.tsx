@@ -1,18 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import { Badge, Button, Card, Form, message, Select, Space, Spin, } from 'antd';
+import { Badge, Button, Card, Form, message, Modal, Select, Space, Spin, } from 'antd';
 import {
   BranchesOutlined,
   FileAddOutlined,
+  HistoryOutlined,
   RightOutlined,
   SaveOutlined,
 } from '@ant-design/icons';
 import { useVscodePath } from '../../hooks/useVscodePath';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 import PathInput from '../shared/PathInput';
-import { generateDefaultFlowConfigs, getGitInfo, RepoKey } from '../../utils/ipc';
+import { deleteLanderStage, generateDefaultFlowConfigs, getGitInfo, getLanderStages, initLanderStage, RepoKey } from '../../utils/ipc';
 import useWizardStore from '../../store/wizardStore';
 import CollapsibleSection from '../shared/CollapsibleSection';
-import CustomSelect from '../shared/CustomSelect';
+import DefaultConfgHistory from '../design/DefaultConfgHistory';
+import CustomSelect from './StageSelect';
 
 interface Props {
   onNext?: () => void;
@@ -75,12 +77,14 @@ const pageStyle: React.CSSProperties = {
 
 const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
   const project = useVscodePath();
-  const defaultCfg = useVscodePath();
+  const commandCfg = useVscodePath();
 
   const [currentBranch, setCurrentBranch] = useState<string>('');
   const [template, setTemplate] = useState<string>('');
   const [mode, setMode] = useState<string>('');
   const [generating, setGenerating] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+
   const updatePayload = useWizardStore((state) => state.updatePayload);
 
   const { savedData, loading, saving, hasUnsaved, handleSave } = useFlowConfig('verification');
@@ -103,13 +107,13 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
     if (!savedData) return;
     const source = (savedData.step1 as Record<string, unknown> | undefined) ?? savedData;
     if (source.project) project.setValue(String(source.project));
-    if (source.defaultCfg) defaultCfg.setValue(String(source.defaultCfg))
+    if (source.commandCfg) commandCfg.setValue(String(source.commandCfg))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedData]);
 
   const collectFormData = () => ({
     project: project.value,
-    landerCfg: defaultCfg.value,
+    landerCfg: commandCfg.value,
   });
 
   const onSave = () => {
@@ -120,7 +124,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
   const onGenerateDefaults = async () => {
     setGenerating(true);
     try {
-      const result = await generateDefaultFlowConfigs('verification');
+      const result = await generateDefaultFlowConfigs('verification', '');
       if (!result.success) {
         message.error(result.error ?? '生成默认配置失败');
         return;
@@ -129,6 +133,23 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
     } finally {
       setGenerating(false);
     }
+  };
+
+  const initStage = async(
+    addStage: string, extendStage: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const result = await initLanderStage('verification', addStage, extendStage);
+    return result;
+  };
+
+  const deleteStage = async(stage: string): Promise<{ success: boolean; error?: string }> => {
+    const result = await deleteLanderStage('verification', stage);
+    return result;
+  };
+
+  const getStages = async(): Promise<{ success: boolean; stages: string[]; error?: string }> => {
+    const result = await getLanderStages('verification');
+    return result;
   };
 
   return (
@@ -154,8 +175,13 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
 
           <Card size="small" style={{ marginBottom: 14 }} styles={{ body: { padding: 18 } }}>
             <CollapsibleSection title="stage 配置">
+              <div style={{ marginBottom: 12, textAlign: 'right' }}>
+                <Button size="small" icon={<HistoryOutlined />} onClick={() => setHistoryOpen(true)}>
+                  历史记录
+                </Button>
+              </div>
               <Form.Item label="stage">
-                <CustomSelect />
+                <CustomSelect initStage={initStage} deleteStage={deleteStage} getStages={getStages}/>
               </Form.Item>
               <Form.Item label="选择模板">
                 <Select
@@ -175,11 +201,10 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
                   options={modeOptions}
                 />
               </Form.Item>
-              <Form.Item label="配置文件">
+              <Form.Item label="执行脚本">
                 <PathInput
-                  state={defaultCfg}
-                  pathSources={['local']}
-                  placeholder="请选择配置文件"
+                  state={commandCfg}
+                  placeholder="请选择执行脚本"
                   showOpen
                   showSelectFile
                 />
@@ -202,6 +227,35 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
           </div>
         </div>
       </Form>
+
+      <Modal
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '90%' }}>
+            <span style={{ fontSize: 16, fontWeight: 700 }}>配置生成历史记录</span>
+          </div>
+        }
+        open={historyOpen}
+        onCancel={() => {setHistoryOpen(false)}}
+        footer={null}
+        width={1600}
+        style={{ top: 40 }}
+        destroyOnHidden
+      >
+        <div style={{ marginTop: 12, marginBottom: 20 }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderBottom: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
+            paddingBottom: 12,
+            marginBottom: 16
+          }}>
+            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+              <DefaultConfgHistory flowKey={'verification'} />
+            </Space>
+          </div>
+        </div>
+      </Modal>
     </Spin>
   );
 };

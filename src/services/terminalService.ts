@@ -80,6 +80,12 @@ export async function openExecutionTerminal(options: {
       name: title,
       cwd: terminalCwd,
     });
+
+    await new Promise<void>((resolve) => {
+      setTimeout(() => {
+        resolve();
+      }, 1000);
+    });
   }
 
   terminal!.show();

@@ -3,7 +3,7 @@ import { Badge, Button, Card, Col, Form, Radio, Row, Select, Space, Spin, messag
 import {
   BranchesOutlined,
   FileAddOutlined,
-  FileTextOutlined,
+  HistoryOutlined,
   MinusCircleOutlined,
   PlusOutlined,
   RightOutlined,
@@ -16,7 +16,7 @@ import { generateDefaultFlowConfigs, getGitInfo, type RepoKey } from '../../util
 import useWizardStore from '../../store/wizardStore';
 import CollapsibleSection from '../shared/CollapsibleSection';
 import ControlledPathInput from '../shared/ControlledPathInput';
-import Link from 'antd/es/typography/Link';
+import DefaultConfgHistory from './DefaultConfgHistory';
 
 interface Props {
   onNext?: () => void;
@@ -60,6 +60,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
   const [currentBranch, setCurrentBranch] = useState<string>('');
   const [normalizeCfgs, setNormalizeCfgs] = useState<NormalizeCfg[]>([emptyNormalizeCfg()]);
   const [generating, setGenerating] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [normalizeIndex, setNormalizeIndex] = useState<number>(0);
   const updatePayload = useWizardStore((state) => state.updatePayload);
 
@@ -160,14 +161,14 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
   const onGenerateDefaults = async () => {
     setGenerating(true);
     try {
-      const result = await generateDefaultFlowConfigs(flowKey as 'hibist' | 'sailor');
+      const result = await generateDefaultFlowConfigs(flowKey as 'hibist' | 'sailor', normalizeCfgs[normalizeIndex]?.commandCfg ?? '');
       if (!result.success) {
         message.error(result.error ?? '生成默认配置失败');
         return;
       }
       message.success('生成默认配置完成');
     } finally {
-      // setGenerating(false);
+      setGenerating(false);
     }
   };
 
@@ -192,16 +193,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
               />
             </Form.Item>
 
-            {/* <Form.Item label={`common ${category} cfg`}>
-              <PathInput
-                state={sailorCfg}
-                pathSources={['local']}
-                placeholder={`请选择 common ${category} cfg`}
-                showOpen
-                showSelectFile
-              />
-            </Form.Item> */}
-
             <Form.Item label="选择领域">
               <Select
                 value={domainCfg}
@@ -215,6 +206,11 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
 
           <Card size="small" style={{ marginBottom: 14 }} styles={{ body: { padding: 18 } }}>
             <CollapsibleSection title="归一化表格转 cfg">
+              <div style={{ marginBottom: 12, marginRight: '2%', textAlign: 'right' }}>
+                <Button size="small" icon={<HistoryOutlined />} onClick={() => setHistoryOpen(true)}>
+                  鍘嗗彶璁板綍
+                </Button>
+              </div>
               {normalizeCfgs.map((normalizeCfg, index) => (
                 <Row key={index} align="middle" style={{ marginBottom: 16 }}>
                   <Col span={4} style={{ textAlign: 'right', paddingRight: 12 }}>
@@ -265,7 +261,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
           </Card>
 
           <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
-            <Button icon={<FileAddOutlined />} onClick={onGenerateDefaults}>
+            <Button icon={<FileAddOutlined />} loading={generating} onClick={onGenerateDefaults}>
               产生默认配置
             </Button>
             <Badge dot={hasUnsaved} offset={[-4, 4]}>
@@ -283,41 +279,27 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
       <Modal
           title={
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '90%' }}>
-              <span style={{ fontSize: 16, fontWeight: 700 }}>产生配置日志</span>
+              <span style={{ fontSize: 16, fontWeight: 700 }}>配置生成历史记录</span>
             </div>
           }
-          open={generating}
-          onCancel={() => {setGenerating(false)}}
+          open={historyOpen}
+          onCancel={() => {setHistoryOpen(false)}}
           footer={null}
-          width={750}
+          width={1600}
           style={{ top: 40 }}
           destroyOnHidden
         >
           <div style={{ marginTop: 12, marginBottom: 20 }}>
-            {/* Steps bar */}
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
               alignItems: 'center',
               borderBottom: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
               paddingBottom: 12,
               marginBottom: 16
             }}>
               <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                <Space size="large">
-                  <Link>
-                    <FileTextOutlined /> {flowKey}/normalized-table.md
-                  </Link>
-                  <Link>
-                    <FileTextOutlined /> {flowKey}/design_tree.mock.json
-                  </Link>
-                  <Link>
-                    <FileTextOutlined /> {flowKey}/execution.log
-                  </Link>
-                </Space>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-                  <Button onClick={() => setGenerating(false)}>关闭</Button>
-                </div>
+                <DefaultConfgHistory flowKey={flowKey} />
               </Space>
             </div>
           </div>
