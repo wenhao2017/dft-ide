@@ -30,10 +30,10 @@ import { PipelineLink, PipelineTask } from './pipelineMockData';
 import { openExecutionTerminal } from '../../utils/ipc';
 import { useShallow } from 'zustand/react/shallow';
 
-type OverviewRunState = 'idle' | 'running' | 'completed' | 'stopped';
+type OverviewRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
 
 export interface PipelineExecutionRef {
-  handleExternalRun: (keys: string[]) => void;
+  handleExternalRun: (keys: string[], selectedTaskIds?: string[]) => void;
   handleExternalStop: (keys: string[]) => void;
 }
 
@@ -428,11 +428,12 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   useImperativeHandle(ref, () => ({
     handleExternalRun(keys: string[], selectedTaskIds?: string[]) {
       const cleanKeys = keys.filter(Boolean);
-      if (selectedTaskIds && selectedTaskIds.length > 0) {
+      if (selectedTaskIds !== undefined) {
+        const taskIds = selectedTaskIds.length > 0 ? selectedTaskIds : undefined;
         cleanKeys.forEach((moduleKey) => {
           setPeakMetrics((prev) => ({ ...prev, [moduleKey]: { maxCpu: 0, maxMem: 0 } }));
           ensureRuntimeVisible(moduleKey);
-          startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), selectedTaskIds, moduleWorkDirs?.[moduleKey]);
+          startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), taskIds, moduleWorkDirs?.[moduleKey]);
         });
         if (cleanKeys.length === 1) {
           activateModule(cleanKeys[0]);
@@ -784,6 +785,8 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
               ? themeStyles.accent
               : run.runState === 'completed'
                 ? themeStyles.success
+                : run.runState === 'failed'
+                  ? themeStyles.error
                 : run.runState === 'stopped'
                   ? themeStyles.warning
                   : themeStyles.idle;

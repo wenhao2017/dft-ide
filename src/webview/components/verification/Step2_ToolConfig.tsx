@@ -38,7 +38,7 @@ interface Props {
 }
 
 export interface PipelineExecutionRef {
-  handleExternalRun: (keys: string[]) => void;
+  handleExternalRun: (keys: string[], selectedTaskIds?: string[]) => void;
   handleExternalStop: (keys: string[]) => void;
 }
 
@@ -69,7 +69,7 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
   const [taskForm] = Form.useForm();
   const [designForm] = Form.useForm();
   const overviewRef = useRef<OverviewRef>(null);
-  const pendingCommandRef = useRef<{ type: 'run' | 'stop'; keys: string[] } | null>(null);
+  const pendingCommandRef = useRef<{ type: 'run' | 'stop'; keys: string[]; selectedTaskIds?: string[] } | null>(null);
   const selectedAccount = Form.useWatch('clusterGroup', taskForm);
   const selectedQueue = Form.useWatch('clusterQueue', taskForm);
 
@@ -77,15 +77,15 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
   const flowLabel = 'DFTM';
 
   useImperativeHandle(ref, () => ({
-    handleExternalRun(keys: string[]) {
+    handleExternalRun(keys: string[], selectedTaskIds?: string[]) {
       const cleanKeys = keys.filter(Boolean);
       if (!cleanKeys.length) {
         return;
       }
       if (overviewRef.current) {
-        overviewRef.current.handleExternalRun(cleanKeys);
+        overviewRef.current.handleExternalRun(cleanKeys, selectedTaskIds);
       } else {
-        pendingCommandRef.current = { type: 'run', keys: cleanKeys };
+        pendingCommandRef.current = { type: 'run', keys: cleanKeys, selectedTaskIds };
       }
       setActiveTab('execution');
     },
@@ -110,7 +110,7 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
     const command = pendingCommandRef.current;
     pendingCommandRef.current = null;
     if (command.type === 'run') {
-      overviewRef.current.handleExternalRun(command.keys);
+      overviewRef.current.handleExternalRun(command.keys, command.selectedTaskIds);
     } else {
       overviewRef.current.handleExternalStop(command.keys);
     }

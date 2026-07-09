@@ -360,7 +360,8 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   const selectedTask = taskMeta.selectedTask;
   const failedCount = taskMeta.failedCount;
   const runningCount = taskMeta.runningCount;
-  const canStopAll = !readOnly && taskMeta.hasStoppableTask;
+  const canStart = !readOnly && runtime.runState !== 'running';
+  const canStopAll = !readOnly && runtime.runState === 'running' && taskMeta.hasStoppableTask;
 
   if (!visible) {
     return null;
@@ -628,7 +629,7 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
           <Tag color="processing">运行中 {runningCount}</Tag>
           <Tag color={failedCount > 0 ? 'error' : 'success'}>失败 {failedCount}</Tag>
           <Tag>任务 {runtime.tasks.length}</Tag>
-          <Button type="primary" icon={<PlayCircleOutlined />} onClick={startPipelineWithTerminal} disabled={readOnly}>
+          <Button type="primary" icon={<PlayCircleOutlined />} onClick={startPipelineWithTerminal} disabled={!canStart}>
             启动流水线
           </Button>
           <Button danger icon={<StopOutlined />} onClick={stopAll} disabled={!canStopAll}>

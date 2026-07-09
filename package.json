@@ -121,6 +121,11 @@
           "default": "mock",
           "description": "Donau resource loading mode. Mock is the development default; real runs dacct/dqueue/dconfig; auto falls back to mock on command errors."
         },
+        "dftIde.pipeline.shellPath": {
+          "type": "string",
+          "default": "csh",
+          "description": "Shell executable used for DFT pipeline and default-config terminals. The default flow scripts expect csh/tcsh syntax such as source, setenv and $status."
+        },
         "dftIde.lastSelectedProject": {
           "type": "string",
           "default": "",

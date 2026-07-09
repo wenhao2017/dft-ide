@@ -782,55 +782,164 @@ export interface DefaultConfigLog {
   success?: boolean;
 }
 
-export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
-  const terminal = vscode.window.createTerminal({
-    name: 'generate default flow configs'
+type TerminalDataEvent = { terminal: vscode.Terminal; data: string };
+type TerminalShellEndEvent = { terminal: vscode.Terminal; exitCode?: number };
+type WindowWithTerminalEvents = typeof vscode.window & {
+  onDidWriteTerminalData?: (
+    listener: (event: TerminalDataEvent) => unknown
+  ) => vscode.Disposable;
+  onDidEndTerminalShellExecution?: (
+    listener: (event: TerminalShellEndEvent) => unknown
+  ) => vscode.Disposable;
+};
+
+const activeDefaultConfigRuns = new Set<string>();
+const defaultConfigTimeoutMs = 60 * 60 * 1000;
+
+function quoteCshArg(value: string): string {
+  return `"${value.replace(/(["\\$`])/g, '\\$1')}"`;
+}
+
+function getPipelineShellPath(): string {
+  const configured = vscode.workspace.getConfiguration('dftIde').get<string>('pipeline.shellPath', 'csh');
+  return configured.trim() || 'csh';
+}
+
+async function waitForDefaultConfigTerminalReady(terminal: vscode.Terminal): Promise<void> {
+  const terminalApi = vscode.window as WindowWithTerminalEvents;
+  if (!terminalApi.onDidWriteTerminalData) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let disposable: vscode.Disposable | undefined;
+    const timeout = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        disposable?.dispose();
+        resolve();
+      }
+    }, 1500);
+
+    disposable = terminalApi.onDidWriteTerminalData!((event) => {
+      if (event.terminal !== terminal || settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      disposable?.dispose();
+      resolve();
+    });
   });
+}
+
+export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
   const timestamp = dayjs().format('YYYY-MM-DD HH:mm:ss');
   const timemilles = Date.now().toString();
   const directory = getDirectory(defaultConfigLog.scriptPath);
   const logFile = `${directory}/${defaultConfigLog.flow}-${defaultConfigLog.requestId}-${timemilles}.log`;
   defaultConfigLog = {...defaultConfigLog, logFile, timestamp, timemilles};
-  await new Promise<void>((resolve, reject) => {
-    if ('onDidEndTerminalShellExecution' in vscode.window) {
-      const disposable = vscode.window.onDidEndTerminalShellExecution(e => {
-        if (e.terminal === terminal) {
-          disposable.dispose();
-          if (e.exitCode === 0) {
-            terminal.dispose();
-            resolve();
-          } else {
-            reject(new Error('Failed to generate default flow configs. See terminal logs for specific error details'));
-          }
-        }
-      });
-      terminal.sendText(`${defaultConfigLog.scriptPath} ${defaultConfigLog.designTree} ${defaultConfigLog.normTable} | tee ${logFile}`);
-      terminal.show();
-    } else {
-      let output = '';
-      const windowWithTerminalData = vscode.window as typeof vscode.window & {
-        onDidWriteTerminalData: (
-          listener: (event: { terminal: vscode.Terminal; data: string }) => unknown
-        ) => vscode.Disposable;
-      };
-      const disposable = windowWithTerminalData.onDidWriteTerminalData(e => {
-        if (e.terminal === terminal) {
-          output += e.data;
-          const lines = output.replace(/(\r\n|\r)/g, '\n').split('\n');
-          const cloneFinishedIndex = lines.indexOf('CLONE_FINISHED');
-          if (cloneFinishedIndex > 0) {
-            disposable.dispose();
-            terminal.dispose();
-            defaultConfigLog = {...defaultConfigLog, success: true};
-            resolve();
-          }
-        }
-      });
-      terminal.sendText(`${defaultConfigLog.scriptPath} ${defaultConfigLog.designTree} ${defaultConfigLog.normTable} | tee ${logFile} ; echo "CLONE_FINISHED"`);
-      terminal.show();
-    }
+
+  const runKey = defaultConfigLog.flow;
+  if (activeDefaultConfigRuns.has(runKey)) {
+    throw new Error(`${defaultConfigLog.flow} 默认配置生成任务正在运行，请等待当前任务完成。`);
+  }
+  activeDefaultConfigRuns.add(runKey);
+
+  const terminalApi = vscode.window as WindowWithTerminalEvents;
+  if (!terminalApi.onDidWriteTerminalData && !terminalApi.onDidEndTerminalShellExecution) {
+    activeDefaultConfigRuns.delete(runKey);
+    throw new Error('当前 VS Code 环境不支持 terminal 执行完成监控，无法可靠生成默认配置。');
+  }
+
+  const marker = `__DFT_IDE_DEFAULT_CONFIG_END__|${defaultConfigLog.requestId ?? timemilles}|`;
+  const terminal = vscode.window.createTerminal({
+    name: `DFT IDE Default Config / ${defaultConfigLog.flow} / ${defaultConfigLog.requestId ?? timemilles}`,
+    cwd: directory,
+    shellPath: getPipelineShellPath(),
   });
-  return defaultConfigLog;
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let output = '';
+      const usesDataMarker = Boolean(terminalApi.onDidWriteTerminalData);
+      const disposables: vscode.Disposable[] = [];
+      const settle = (error?: Error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        disposables.forEach((item) => item.dispose());
+        activeDefaultConfigRuns.delete(runKey);
+        if (error) {
+          reject(error);
+        } else {
+          defaultConfigLog = {...defaultConfigLog, success: true};
+          terminal.dispose();
+          resolve();
+        }
+      };
+
+      const timeout = setTimeout(() => {
+        settle(new Error('生成默认配置超时，terminal 仍在运行，请检查脚本输出。'));
+      }, defaultConfigTimeoutMs);
+
+      if (terminalApi.onDidWriteTerminalData) {
+        disposables.push(terminalApi.onDidWriteTerminalData((event) => {
+          if (event.terminal !== terminal) {
+            return;
+          }
+          output = `${output}${event.data}`.slice(-20000);
+          const normalized = output.replace(/(\r\n|\r)/g, '\n');
+          const markerIndex = normalized.lastIndexOf(marker);
+          if (markerIndex < 0) {
+            return;
+          }
+          const exitCodeText = normalized.slice(markerIndex + marker.length).match(/-?\d+/)?.[0];
+          const exitCode = exitCodeText === undefined ? 0 : Number(exitCodeText);
+          if (exitCode === 0) {
+            settle();
+          } else {
+            settle(new Error(`生成默认配置脚本执行失败，退出码 ${exitCode}。`));
+          }
+        }));
+      }
+
+      if (terminalApi.onDidEndTerminalShellExecution) {
+        disposables.push(terminalApi.onDidEndTerminalShellExecution((event) => {
+          if (event.terminal !== terminal || event.exitCode === undefined) {
+            return;
+          }
+          if (!usesDataMarker && event.exitCode === 0) {
+            settle();
+            return;
+          }
+          if (event.exitCode !== 0) {
+            settle(new Error(`生成默认配置 terminal 执行失败，退出码 ${event.exitCode}。`));
+          }
+        }));
+      }
+
+      const command = [
+        `${quoteCshArg(defaultConfigLog.scriptPath)} ${quoteCshArg(defaultConfigLog.designTree)} ${quoteCshArg(defaultConfigLog.normTable)} |& tee ${quoteCshArg(logFile)}`,
+        'set dft_ide_default_config_status = $status',
+        `echo "${marker}$dft_ide_default_config_status"`,
+      ].join('; ');
+
+      void waitForDefaultConfigTerminalReady(terminal).then(() => {
+        terminal.sendText(command);
+      });
+      terminal.show();
+    });
+    return defaultConfigLog;
+  } catch (error) {
+    activeDefaultConfigRuns.delete(runKey);
+    throw error;
+  }
 }
 
 export async function isDirectoryExists(dir: string) {

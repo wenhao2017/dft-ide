@@ -123,8 +123,12 @@ const pipelineRuntimeService = new PipelineRuntimeService({
       console.error('Failed to persist pipeline execution history', error);
     });
   },
-  openTerminal: (title, command, cwd) => {
-    void openExecutionTerminal({ title, command, cwd });
+  openTerminal: (title, command, cwd, shellPath) => {
+    return openExecutionTerminal({ title, command, cwd, shellPath }).then(() => undefined);
+  },
+  getPipelineShellPath: () => {
+    const configured = vscode.workspace.getConfiguration('dftIde').get<string>('pipeline.shellPath', 'csh');
+    return configured.trim() || 'csh';
   },
 });
 
@@ -497,7 +501,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           if (msg.command === 'ensurePipelineRuntime') {
             pipelineRuntimeService.ensureRuntime(flowKey, moduleKey, flowLabel);
           } else if (msg.command === 'startPipelineRuntime') {
-            const selectedTaskIds = Array.isArray(msg.selectedTaskIds) ? msg.selectedTaskIds : undefined;
+            const selectedTaskIds = Array.isArray(msg.selectedTaskIds) && msg.selectedTaskIds.length > 0 ? msg.selectedTaskIds : undefined;
             const cwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
             const envConfig = await readConfig(flowKey);
             const taskConfig = await readConfig(`${flowKey}/${moduleKey}/config`);

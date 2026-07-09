@@ -6,7 +6,116 @@ import {
   ensureLocalStateIgnored,
 } from './workspaceService';
 import { runDftLogDiagnosticsDemo } from './diagnosticsService';
-import { PipelineRuntimeHistoryRecord } from './pipelineRuntimeService';
+import type { PipelineRuntimeHistoryRecord } from './pipelineRuntimeService';
+
+type TerminalDataEvent = { terminal: vscode.Terminal; data: string };
+type TerminalShellEndEvent = { terminal: vscode.Terminal; exitCode?: number };
+type WindowWithTerminalData = typeof vscode.window & {
+  onDidWriteTerminalData?: (
+    listener: (event: TerminalDataEvent) => unknown
+  ) => vscode.Disposable;
+  onDidEndTerminalShellExecution?: (
+    listener: (event: TerminalShellEndEvent) => unknown
+  ) => vscode.Disposable;
+};
+
+export interface ExecutionTerminalMonitor {
+  onData?: (data: string, terminal: vscode.Terminal) => void;
+  onShellEnd?: (exitCode: number | undefined, terminal: vscode.Terminal) => void;
+  onClose?: (terminal: vscode.Terminal) => void;
+}
+
+export interface ExecutionTerminalCapabilities {
+  data: boolean;
+  shellEnd: boolean;
+}
+
+const terminalMonitors = new Map<string, Set<ExecutionTerminalMonitor>>();
+let terminalListenersRegistered = false;
+
+export function getExecutionTerminalCapabilities(): ExecutionTerminalCapabilities {
+  const terminalDataApi = vscode.window as WindowWithTerminalData;
+  return {
+    data: typeof terminalDataApi.onDidWriteTerminalData === 'function',
+    shellEnd: typeof terminalDataApi.onDidEndTerminalShellExecution === 'function',
+  };
+}
+
+function ensureTerminalListeners(): void {
+  if (terminalListenersRegistered) {
+    return;
+  }
+  terminalListenersRegistered = true;
+
+  const terminalDataApi = vscode.window as WindowWithTerminalData;
+  terminalDataApi.onDidWriteTerminalData?.((event) => {
+    const monitors = terminalMonitors.get(event.terminal.name);
+    monitors?.forEach((monitor) => monitor.onData?.(event.data, event.terminal));
+  });
+
+  terminalDataApi.onDidEndTerminalShellExecution?.((event) => {
+    const monitors = terminalMonitors.get(event.terminal.name);
+    monitors?.forEach((monitor) => monitor.onShellEnd?.(event.exitCode, event.terminal));
+  });
+
+  vscode.window.onDidCloseTerminal((terminal) => {
+    const monitors = terminalMonitors.get(terminal.name);
+    monitors?.forEach((monitor) => monitor.onClose?.(terminal));
+  });
+}
+
+export function registerExecutionTerminalMonitor(
+  title: string,
+  monitor: ExecutionTerminalMonitor,
+): vscode.Disposable {
+  ensureTerminalListeners();
+  const monitors = terminalMonitors.get(title) ?? new Set<ExecutionTerminalMonitor>();
+  monitors.add(monitor);
+  terminalMonitors.set(title, monitors);
+
+  return {
+    dispose: () => {
+      const current = terminalMonitors.get(title);
+      if (!current) {
+        return;
+      }
+      current.delete(monitor);
+      if (current.size === 0) {
+        terminalMonitors.delete(title);
+      }
+    },
+  };
+}
+
+async function waitForNewTerminalReady(terminal: vscode.Terminal): Promise<void> {
+  const terminalDataApi = vscode.window as WindowWithTerminalData;
+  if (!terminalDataApi.onDidWriteTerminalData) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let disposable: vscode.Disposable | undefined;
+    const timeout = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        disposable?.dispose();
+        resolve();
+      }
+    }, 1500);
+
+    disposable = terminalDataApi.onDidWriteTerminalData!((event) => {
+      if (event.terminal !== terminal || settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      disposable?.dispose();
+      resolve();
+    });
+  });
+}
 
 export function normalizeHistoryFlow(flow: unknown): string {
   const value = typeof flow === 'string' ? flow : 'default';
@@ -53,7 +162,8 @@ export async function openExecutionTerminal(options: {
   command?: string | string[];
   cwd?: string;
   flow?: string;
-}): Promise<void> {
+  shellPath?: string;
+}): Promise<vscode.Terminal> {
   const title = typeof options.title === 'string' && options.title.trim()
     ? options.title.trim()
     : 'DFT IDE Task';
@@ -79,16 +189,17 @@ export async function openExecutionTerminal(options: {
     terminal = vscode.window.createTerminal({
       name: title,
       cwd: terminalCwd,
-    });
-
-    await new Promise<void>((resolve) => {
-      setTimeout(() => {
-        resolve();
-      }, 1000);
+      shellPath: typeof options.shellPath === 'string' && options.shellPath.trim()
+        ? options.shellPath.trim()
+        : undefined,
     });
   }
 
   terminal!.show();
+
+  if (isNew) {
+    await waitForNewTerminalReady(terminal!);
+  }
 
   if (command) {
     if (Array.isArray(options.command)) {
@@ -105,6 +216,8 @@ export async function openExecutionTerminal(options: {
   //     `DFT IDE log diagnostics demo failed: ${error instanceof Error ? error.message : String(error)}`
   //   );
   // });
+
+  return terminal!;
 }
 
 export async function stopExecutionTerminal(title: string) {

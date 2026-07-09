@@ -22,8 +22,8 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
 
-  const handleTreeRun = (keys: string[]) => {
-    executionRef.current?.handleExternalRun(keys);
+  const handleTreeRun = (keys: string[], selectedTaskIds?: string[]) => {
+    executionRef.current?.handleExternalRun(keys, selectedTaskIds);
   };
 
   const handleTreeStop = (keys: string[]) => {

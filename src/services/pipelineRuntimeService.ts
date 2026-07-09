@@ -8,10 +8,10 @@ import {
   pipelineFlowConfigs,
 } from '../webview/components/shared/pipelineMockData';
 import { resolveProjectPath } from './workspaceService';
-import { stopExecutionTerminal } from './terminalService';
+import { getExecutionTerminalCapabilities, registerExecutionTerminalMonitor, stopExecutionTerminal } from './terminalService';
 
 export type PipelineFlowKey = 'hibist' | 'sailor' | 'verification';
-export type PipelineRunState = 'idle' | 'running' | 'completed' | 'stopped';
+export type PipelineRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
 
 export interface PipelineRuntimeSnapshot {
   runId?: string;
@@ -41,7 +41,29 @@ export interface PipelineRuntimeHistoryRecord {
 interface PipelineRuntimeServiceOptions {
   onUpdate: (snapshot: PipelineRuntimeSnapshot) => void;
   onHistory: (record: PipelineRuntimeHistoryRecord) => void;
-  openTerminal: (title: string, command: string | string[], cwd?: string) => void;
+  openTerminal: (title: string, command: string | string[], cwd?: string, shellPath?: string) => Promise<void> | void;
+  getPipelineShellPath?: () => string | undefined;
+}
+
+interface PipelineExecutionSession {
+  runId: string;
+  flowKey: PipelineFlowKey;
+  moduleKey: string;
+  flowLabel: string;
+  logPrefix: string;
+  terminalTitle: string;
+  tasks: PipelineTask[];
+  nextIndex: number;
+  cwd?: string;
+  envConfig?: Record<string, unknown> | null;
+  taskConfig?: Record<string, unknown> | null;
+  shellPath?: string;
+  currentTaskId?: string;
+  buffer: string;
+  seenStarts: Set<string>;
+  seenEnds: Set<string>;
+  monitor?: vscode.Disposable;
+  stopped: boolean;
 }
 
 const timers = new Map<string, ReturnType<typeof setTimeout>[]>();
@@ -58,6 +80,93 @@ function buildPipelineStepSourceCommand(stepCommand: string): string {
   const scriptPath = path.resolve(__dirname, '../scripts');
   const scriptName = stepCommand.split(' ')[0];
   return `source ${path.join(scriptPath, scriptName)}${stepCommand.substring(scriptName.length)}`;
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+}
+
+function isInterruptOutput(value: string): boolean {
+  const normalized = stripAnsi(value).toLowerCase();
+  return normalized.includes('\u0003') ||
+    normalized.includes('^c') ||
+    normalized.includes('keyboardinterrupt');
+}
+
+function buildStepEndMarker(runId: string, taskId: string): string {
+  return `__DFT_IDE_STEP_END__|${runId}|${taskId}|`;
+}
+
+function buildStepCommands(
+  runId: string,
+  task: PipelineTask,
+  index: number,
+  flowKey: PipelineFlowKey,
+  moduleKey: string,
+  envConfig?: Record<string, unknown> | null,
+  taskConfig?: Record<string, unknown> | null,
+): string[] {
+  const commands: string[] = [];
+
+  if (index === 0) {
+    const projectSource = typeof envConfig?.project === 'string' ? envConfig.project.trim() : '';
+    if (projectSource) {
+      commands.push(`source ${projectSource}`);
+    }
+
+    commands.push(`setenv module "${moduleKey}"`);
+    const projectPath = resolveProjectPath(flowKey);
+    if (projectPath) {
+      commands.push(`setenv project_path "${projectPath}"`);
+    }
+
+    const source = taskConfig?.step2 as Record<string, unknown> | undefined;
+    const customConfig = source?.step2Task as Record<string, unknown> | undefined;
+    if (customConfig) {
+      const toolName = String(customConfig.toolName ?? '').trim();
+      const toolVersion = String(customConfig.toolVersion ?? '').trim();
+      if (toolName && toolVersion) {
+        try {
+          fs.statSync(toolVersion);
+          commands.push(`source ${toolVersion}`);
+        } catch {
+          commands.push(`ma ${toolName}/${toolVersion}`);
+        }
+      }
+
+      const clusterGroup = String(customConfig.clusterGroup ?? '').trim();
+      const clusterQueue = String(customConfig.clusterQueue ?? '').trim();
+      const cpu = String(customConfig.cpu ?? '').trim();
+      const memory = String(customConfig.memory ?? '').trim();
+      const clusterExtra = String(customConfig.clusterExtra ?? '').trim();
+      if (clusterGroup) {
+        commands.push(`setenv DONAU_GROUP "${clusterGroup}"`);
+        const queue = clusterQueue ? `-q ${clusterQueue}` : '';
+        let resource = '';
+        if (cpu || memory) {
+          const resources: string[] = [];
+          if (cpu) {
+            resources.push(`cpu=${cpu}`);
+          }
+          if (memory) {
+            resources.push(`mem=${memory}`);
+          }
+          resource = `-R '${resources.join(';')}'`;
+        }
+        const dsub = `dsub -I -A ${clusterGroup} ${queue} ${resource} ${clusterExtra}`;
+        commands.push(`alias dsubrun_I "${dsub}"`);
+      }
+    }
+  }
+
+  const stepCommand = task.command.trim();
+  commands.push(`echo "__DFT_IDE_STEP_START__|${runId}|${task.id}"`);
+  commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
+  commands.push(buildPipelineStepSourceCommand(stepCommand));
+  commands.push('set dft_ide_step_status = $status');
+  commands.push(`echo "${buildStepEndMarker(runId, task.id)}$dft_ide_step_status"`);
+
+  return commands;
 }
 
 export function getPipelineRuntimeKey(flowKey: PipelineFlowKey, moduleKey: string): string {
@@ -415,6 +524,7 @@ function scheduleRuntime(key: string, delay: number, action: () => void) {
 
 export class PipelineRuntimeService {
   private runtimes = new Map<string, PipelineRuntimeSnapshot>();
+  private executionSessions = new Map<string, PipelineExecutionSession>();
 
   constructor(private readonly options: PipelineRuntimeServiceOptions) {}
 
@@ -450,15 +560,51 @@ export class PipelineRuntimeService {
     const key = getPipelineRuntimeKey(flowKey, moduleKey);
     const config = pipelineFlowConfigs[flowKey];
     const runId = `pipeline_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+    const existing = this.runtimes.get(key);
+    if (existing?.runState === 'running') {
+      this.appendLog(key, config.logPrefix, '已有流水线正在运行，请先停止当前运行后再启动。');
+      return existing;
+    }
+
     clearRuntimeTimers(key);
 
     const { tasks: parsedTasks, links: parsedLinks } = loadPipelineConfig(flowKey);
+    const terminalCapabilities = getExecutionTerminalCapabilities();
+    if (!terminalCapabilities.data) {
+      const failedTasks = parsedTasks.map((task, index) => ({
+        ...task,
+        status: index === 0 ? 'failed' as TaskStatus : 'skipped' as TaskStatus,
+        finishedAt: nowText(),
+        logs: index === 0
+          ? [`[${nowText()}] ${config.logPrefix} 当前 VS Code 环境不支持 terminalDataWriteEvent，无法可靠监控流水线步骤。`]
+          : [`[${nowText()}] ${config.logPrefix} 因 terminal 监控能力不可用跳过。`],
+      }));
+      const failedRuntime: PipelineRuntimeSnapshot = {
+        runId,
+        flowKey,
+        moduleKey,
+        flowLabel,
+        tasks: failedTasks,
+        links: parsedLinks,
+        logs: [`[${nowText()}] ${config.logPrefix} 当前 VS Code 环境不支持 terminalDataWriteEvent，流水线未启动。`],
+        selectedTaskId: failedTasks[0]?.id,
+        runState: 'failed',
+        startedAt: nowStamp(),
+        finishedAt: nowStamp(),
+        updatedAt: nowStamp(),
+      };
+      this.runtimes.set(key, failedRuntime);
+      this.notify(key);
+      return failedRuntime;
+    }
 
+    const normalizedSelectedTaskIds = selectedTaskIds && selectedTaskIds.length > 0 ? selectedTaskIds : undefined;
     const initialTasks = parsedTasks.map((t, idx) => {
-      const isSelected = !selectedTaskIds || selectedTaskIds.includes(t.id);
+      const isSelected = !normalizedSelectedTaskIds || normalizedSelectedTaskIds.includes(t.id);
       const isFirstSelected = isSelected && (
-        selectedTaskIds
-          ? t.id === selectedTaskIds[0]
+        normalizedSelectedTaskIds
+          ? t.id === normalizedSelectedTaskIds[0]
           : idx === 0
       );
       return {
@@ -491,27 +637,25 @@ export class PipelineRuntimeService {
 
     const selectedTasksToRun = initialTasks.filter((t) => t.status !== 'skipped');
 
-    runSequentialSimulation(
-      key,
-      selectedTasksToRun,
-      config.logPrefix,
-      flowLabel,
+    this.registerExecutionSession(key, {
+      runId,
       flowKey,
       moduleKey,
+      flowLabel,
+      logPrefix: config.logPrefix,
+      terminalTitle: getPipelineTerminalTitle(flowLabel, moduleKey),
+      tasks: selectedTasksToRun,
+      nextIndex: 0,
       cwd,
       envConfig,
       taskConfig,
-      this.options.openTerminal,
-      (id, patch) => this.patchTask(key, id, patch),
-      (msg) => this.appendLog(key, config.logPrefix, msg),
-      (runState) => {
-        this.updateRuntime(key, (current) => ({
-          ...current,
-          runState,
-          finishedAt: runState === 'completed' || runState === 'stopped' ? nowStamp() : current.finishedAt,
-        }));
-      }
-    );
+      shellPath: this.options.getPipelineShellPath?.() ?? 'csh',
+      buffer: '',
+      seenStarts: new Set<string>(),
+      seenEnds: new Set<string>(),
+      stopped: false,
+    });
+    this.startNextSessionTask(key);
 
     return runtime;
   }
@@ -521,36 +665,7 @@ export class PipelineRuntimeService {
 
     const key = getPipelineRuntimeKey(flowKey, moduleKey);
     const config = pipelineFlowConfigs[flowKey];
-    clearRuntimeTimers(key);
-    stopExecutionTerminal(getPipelineTerminalTitle(flowLabel, moduleKey));
-
-    this.updateRuntime(key, (runtime) => ({
-      ...runtime,
-      runState: 'stopped',
-      finishedAt: nowStamp(),
-      tasks: runtime.tasks.map((task) => {
-        if (task.status === 'running') {
-          return {
-            ...task,
-            status: 'stopped',
-            finishedAt: nowText(),
-            logs: [...task.logs, `[${nowText()}] ${config.logPrefix} 已被“停止全部”中止。`],
-          };
-        }
-
-        if (task.status === 'pending') {
-          return {
-            ...task,
-            status: 'skipped',
-            finishedAt: nowText(),
-            logs: [...task.logs, `[${nowText()}] ${config.logPrefix} 因“停止全部”跳过。`],
-          };
-        }
-
-        return task;
-      }),
-      logs: [...runtime.logs, `[${nowText()}] ${config.logPrefix} 已触发“停止全部”。`],
-    }));
+    this.markRuntimeStopped(key, config.logPrefix, '已触发“停止全部”。', true);
   }
 
   selectTask(flowKey: PipelineFlowKey, moduleKey: string, taskId: string): void {
@@ -560,27 +675,7 @@ export class PipelineRuntimeService {
 
   stopTask(flowKey: PipelineFlowKey, moduleKey: string, taskId: string, flowLabel: string): void {
     const key = getPipelineRuntimeKey(flowKey, moduleKey);
-    const config = pipelineFlowConfigs[flowKey];
-    const logMsg = `[${nowText()}] ${config.logPrefix} 用户手动停止任务。`;
-
-    this.updateRuntime(key, (runtime) => ({
-      ...runtime,
-      tasks: runtime.tasks.map((task) => {
-        if (task.id !== taskId) {
-          return task;
-        }
-
-        stopExecutionTerminal(getPipelineTerminalTitle(flowLabel, moduleKey));
-
-        return {
-          ...task,
-          status: 'stopped',
-          finishedAt: nowText(),
-          logs: [...task.logs, logMsg],
-        };
-      }),
-      logs: [...runtime.logs, `[${nowText()}] ${config.logPrefix} 任务 ${taskId} 已由用户手动停止。`],
-    }));
+    this.markRuntimeStopped(key, pipelineFlowConfigs[flowKey].logPrefix, `任务 ${taskId} 已由用户手动停止。`, true);
   }
 
   rerunTask(flowKey: PipelineFlowKey, moduleKey: string, taskId: string): void {
@@ -612,6 +707,242 @@ export class PipelineRuntimeService {
       });
       this.appendLog(key, config.logPrefix, `任务 ${taskId} 重跑成功。`);
     });
+  }
+
+  private registerExecutionSession(key: string, session: PipelineExecutionSession): void {
+    this.disposeExecutionSession(key);
+    const monitor = registerExecutionTerminalMonitor(session.terminalTitle, {
+      onData: (data) => this.handleTerminalData(key, data),
+      onShellEnd: (exitCode) => this.handleTerminalShellEnd(key, exitCode),
+      onClose: () => this.markRuntimeStopped(key, session.logPrefix, 'Terminal 已关闭，流水线已停止。', false),
+    });
+    session.monitor = monitor;
+    this.executionSessions.set(key, session);
+  }
+
+  private disposeExecutionSession(key: string): void {
+    const session = this.executionSessions.get(key);
+    session?.monitor?.dispose();
+    this.executionSessions.delete(key);
+  }
+
+  private startNextSessionTask(key: string): void {
+    const session = this.executionSessions.get(key);
+    if (!session || session.stopped) {
+      return;
+    }
+
+    if (session.nextIndex >= session.tasks.length) {
+      this.completeRuntime(key, session.logPrefix);
+      return;
+    }
+
+    const index = session.nextIndex;
+    const task = session.tasks[index];
+    session.nextIndex += 1;
+    session.currentTaskId = task.id;
+
+    if (!task.command.trim()) {
+      this.patchTask(key, task.id, {
+        status: 'success',
+        startedAt: nowText(),
+        finishedAt: nowText(),
+        logs: [`[${nowText()}] ${session.logPrefix} ${task.name} 无执行命令，已跳过。`],
+      });
+      this.startNextSessionTask(key);
+      return;
+    }
+
+    this.patchTask(key, task.id, {
+      status: 'running',
+      startedAt: nowText(),
+      finishedAt: undefined,
+    });
+    this.appendLog(key, session.logPrefix, `${task.name} 运行启动。`);
+
+    const commands = buildStepCommands(
+      session.runId,
+      task,
+      index,
+      session.flowKey,
+      session.moduleKey,
+      session.envConfig,
+      session.taskConfig,
+    );
+    void Promise.resolve(
+      this.options.openTerminal(session.terminalTitle, commands, session.cwd, session.shellPath),
+    ).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.finishRuntimeWithFailure(key, session.logPrefix, task.id, -1, `Terminal 启动失败：${message}`);
+    });
+  }
+
+  private handleTerminalData(key: string, data: string): void {
+    const session = this.executionSessions.get(key);
+    if (!session || session.stopped) {
+      return;
+    }
+
+    if (isInterruptOutput(data)) {
+      this.markRuntimeStopped(key, session.logPrefix, 'Terminal 收到 Ctrl+C，中断已同步到流水线。', false);
+      return;
+    }
+
+    session.buffer = stripAnsi(`${session.buffer}${data}`).slice(-30000);
+
+    const startRegex = /__DFT_IDE_STEP_START__\|([^|\s]+)\|([^|\r\n]+)/g;
+    for (const match of session.buffer.matchAll(startRegex)) {
+      const [, runId, taskId] = match;
+      if (runId !== session.runId || session.seenStarts.has(taskId)) {
+        continue;
+      }
+      session.seenStarts.add(taskId);
+      this.patchTask(key, taskId, (task) => ({
+        status: task.status === 'success' ? task.status : 'running',
+        startedAt: task.startedAt ?? nowText(),
+      }));
+    }
+
+    const endRegex = /__DFT_IDE_STEP_END__\|([^|\s]+)\|([^|\r\n]+)\|(-?\d+)/g;
+    for (const match of session.buffer.matchAll(endRegex)) {
+      const [, runId, taskId, exitCodeText] = match;
+      if (runId !== session.runId || session.seenEnds.has(taskId)) {
+        continue;
+      }
+      session.seenEnds.add(taskId);
+      this.handleStepEnd(key, taskId, Number(exitCodeText));
+    }
+  }
+
+  private handleTerminalShellEnd(key: string, exitCode: number | undefined): void {
+    const session = this.executionSessions.get(key);
+    if (!session || session.stopped || exitCode === undefined) {
+      return;
+    }
+
+    if (exitCode === 130 || exitCode === 143) {
+      this.markRuntimeStopped(key, session.logPrefix, 'Terminal 收到 Ctrl+C，中断已同步到流水线。', false);
+    }
+  }
+
+  private handleStepEnd(key: string, taskId: string, exitCode: number): void {
+    const session = this.executionSessions.get(key);
+    if (!session || session.stopped) {
+      return;
+    }
+
+    const task = session.tasks.find((item) => item.id === taskId);
+    if (exitCode === 0) {
+      this.patchTask(key, taskId, (current) => ({
+        status: current.status === 'stopped' ? current.status : 'success',
+        finishedAt: nowText(),
+        logs: [...current.logs, `[${nowText()}] ${session.logPrefix} ${current.name} 执行完成。`],
+      }));
+      this.appendLog(key, session.logPrefix, `${task?.name ?? taskId} 执行成功。`);
+      this.startNextSessionTask(key);
+      return;
+    }
+
+    if (exitCode === 130 || exitCode === 143) {
+      this.markRuntimeStopped(key, session.logPrefix, `${task?.name ?? taskId} 被中断。`, false);
+      return;
+    }
+
+    this.finishRuntimeWithFailure(key, session.logPrefix, taskId, exitCode);
+  }
+
+  private finishRuntimeWithFailure(
+    key: string,
+    logPrefix: string,
+    taskId: string,
+    exitCode: number,
+    message?: string,
+  ): void {
+    clearRuntimeTimers(key);
+    this.disposeExecutionSession(key);
+    if (message) {
+      this.appendLog(key, logPrefix, message);
+    }
+    this.updateRuntime(key, (runtime) => ({
+      ...runtime,
+      runState: 'failed',
+      finishedAt: nowStamp(),
+      tasks: runtime.tasks.map((task) => {
+        if (task.id === taskId) {
+          return {
+            ...task,
+            status: 'failed',
+            finishedAt: nowText(),
+            logs: [...task.logs, `[${nowText()}] ${logPrefix} 执行失败，退出码 ${exitCode}。`],
+          };
+        }
+        if (task.status === 'pending') {
+          return {
+            ...task,
+            status: 'skipped',
+            finishedAt: nowText(),
+            logs: [...task.logs, `[${nowText()}] ${logPrefix} 因前置任务失败跳过。`],
+          };
+        }
+        return task;
+      }),
+      logs: [...runtime.logs, `[${nowText()}] ${logPrefix} 任务 ${taskId} 执行失败，流水线停止推进。`],
+    }));
+  }
+
+  private completeRuntime(key: string, logPrefix: string): void {
+    clearRuntimeTimers(key);
+    this.disposeExecutionSession(key);
+    this.updateRuntime(key, (runtime) => ({
+      ...runtime,
+      runState: 'completed',
+      finishedAt: nowStamp(),
+      logs: [...runtime.logs, `[${nowText()}] ${logPrefix} 流水线执行成功。`],
+    }));
+  }
+
+  private markRuntimeStopped(key: string, logPrefix: string, reason: string, sendInterrupt: boolean): void {
+    const runtime = this.runtimes.get(key);
+    if (!runtime || runtime.runState === 'completed' || runtime.runState === 'failed' || runtime.runState === 'stopped') {
+      return;
+    }
+
+    const session = this.executionSessions.get(key);
+    if (session) {
+      session.stopped = true;
+    }
+
+    clearRuntimeTimers(key);
+    if (sendInterrupt) {
+      stopExecutionTerminal(session?.terminalTitle ?? getPipelineTerminalTitle(runtime.flowLabel, runtime.moduleKey));
+    }
+    this.disposeExecutionSession(key);
+
+    this.updateRuntime(key, (current) => ({
+      ...current,
+      runState: 'stopped',
+      finishedAt: nowStamp(),
+      tasks: current.tasks.map((task) => {
+        if (task.status === 'running') {
+          return {
+            ...task,
+            status: 'stopped',
+            finishedAt: nowText(),
+            logs: [...task.logs, `[${nowText()}] ${logPrefix} ${reason}`],
+          };
+        }
+        if (task.status === 'pending') {
+          return {
+            ...task,
+            status: 'skipped',
+            finishedAt: nowText(),
+            logs: [...task.logs, `[${nowText()}] ${logPrefix} 因流水线停止跳过。`],
+          };
+        }
+        return task;
+      }),
+      logs: [...current.logs, `[${nowText()}] ${logPrefix} ${reason}`],
+    }));
   }
 
   private appendLog(key: string, prefix: string, msg: string): void {
@@ -672,7 +1003,7 @@ export class PipelineRuntimeService {
     if (!runtime.runId || runtime.tasks.length === 0) {
       return;
     }
-    if (runtime.runState !== 'completed' && runtime.runState !== 'stopped') {
+    if (runtime.runState !== 'completed' && runtime.runState !== 'failed' && runtime.runState !== 'stopped') {
       return;
     }
     if (historySavedRunIds.has(runtime.runId)) {

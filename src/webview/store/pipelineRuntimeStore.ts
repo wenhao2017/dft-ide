@@ -17,7 +17,7 @@ import {
 } from '../components/shared/pipelineMockData';
 
 export type PipelineFlowKey = 'hibist' | 'sailor' | 'verification';
-export type PipelineRunState = 'idle' | 'running' | 'completed' | 'stopped';
+export type PipelineRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
 
 export interface PipelineRuntimeSnapshot {
   runId?: string;
@@ -50,7 +50,7 @@ let subscribed = false;
 
 const taskStatusSchema = z.enum(['pending', 'running', 'success', 'failed', 'stopped', 'skipped']);
 const pipelineFlowKeySchema = z.enum(['hibist', 'sailor', 'verification']);
-const pipelineRunStateSchema = z.enum(['idle', 'running', 'completed', 'stopped']);
+const pipelineRunStateSchema = z.enum(['idle', 'running', 'completed', 'failed', 'stopped']);
 const pipelineTaskSchema = z.object({
   id: z.string(),
   name: z.string(),
