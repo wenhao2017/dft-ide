@@ -179,6 +179,46 @@ export async function openObsFileReadOnly(
   return res as { success: boolean; error?: string }
 }
 
+export async function downloadObsPath(
+  path: string,
+  targetType: 'file' | 'folder',
+): Promise<{
+  success: boolean
+  cancelled?: boolean
+  destination?: string
+  downloadedFiles?: number
+  failedFiles?: number
+  error?: string
+}> {
+  const res = await ipcRequest('downloadObsPath', { path, targetType }, 30 * 60_000)
+  return res as {
+    success: boolean
+    cancelled?: boolean
+    destination?: string
+    downloadedFiles?: number
+    failedFiles?: number
+    error?: string
+  }
+}
+
+export interface ObsChildItemDto {
+  key: string
+  name: string
+  path: string
+  type: 'file' | 'folder'
+  size?: string | number
+  updatedAt?: string
+  versionId?: string
+}
+
+export async function listObsChildren(
+  spaceName: string,
+  remotePath: string,
+): Promise<{ success: boolean; items: ObsChildItemDto[]; error?: string }> {
+  const res = await ipcRequest('listObsChildren', { spaceName, remotePath })
+  return res as unknown as { success: boolean; items: ObsChildItemDto[]; error?: string }
+}
+
 export function runVscodeDemo(action: string): void {
   vscode.postMessage({ command: 'vscodeDemo', action })
 }

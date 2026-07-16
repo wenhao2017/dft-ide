@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 describe('ObsService', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    obsService.clearTokenCache();
   });
 
   describe('openViewer', () => {
@@ -67,6 +68,37 @@ describe('ObsService', () => {
       await expect(obsService.openViewer({})).rejects.toThrow(
         'OBS space name is empty'
       );
+    });
+  });
+
+  describe('listChildren', () => {
+    it('reuses an in-flight SpaceToken request and normalizes relative child paths', async () => {
+      const mockFetch = vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes('/api/token')) {
+          return {
+            ok: true,
+            json: async () => ({ code: 1, data: { spaceToken: 'shared-token' } }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            code: 1,
+            data: [{ name: 'gen_cfg.py', path: 'gen_cfg.py', type: 'file', versionId: 'v2' }],
+          }),
+        } as Response;
+      });
+      global.fetch = mockFetch;
+
+      const [first, second] = await Promise.all([
+        obsService.listChildren('test-space', '/scripts/hibist'),
+        obsService.listChildren('test-space', '/scripts/hibist'),
+      ]);
+
+      expect(first[0]).toMatchObject({ path: '/scripts/hibist/gen_cfg.py', versionId: 'v2' });
+      expect(second[0]).toMatchObject({ path: '/scripts/hibist/gen_cfg.py', versionId: 'v2' });
+      expect(mockFetch.mock.calls.filter(([input]) => String(input).includes('/api/token'))).toHaveLength(1);
     });
   });
 });

@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Breadcrumb, Button, Divider, Input, Modal, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Breadcrumb, Button, Divider, Input, Modal, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import {
   CloudDownloadOutlined,
   DatabaseOutlined,
@@ -11,6 +11,7 @@ import {
   SearchOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
+import { downloadObsPath, listObsChildren, type ObsChildItemDto } from '../../utils/ipc';
 
 const { Text, Title } = Typography;
 
@@ -25,56 +26,15 @@ interface ObsViewerProps {
   onSelect?: (path: string) => void;
 }
 
-interface MockObsFile {
+interface ObsFile {
   key: string;
   name: string;
+  path: string;
   type: ObsSelectTarget;
-  size: string;
-  updatedAt: string;
-  owner: string;
-  status: string;
+  size?: string | number;
+  updatedAt?: string;
+  versionId?: string;
 }
-
-const mockObsFiles: MockObsFile[] = [
-  {
-    key: '1',
-    name: 'common-data',
-    type: 'folder',
-    size: '-',
-    updatedAt: '2026-05-09 22:15',
-    owner: 'DFT Platform',
-    status: 'Synced',
-  },
-  {
-    key: '2',
-    name: 'design-tree',
-    type: 'folder',
-    size: '-',
-    updatedAt: '2026-05-09 21:42',
-    owner: 'Design Team',
-    status: 'Synced',
-  },
-  {
-    key: '3',
-    name: 'normalized-table.json',
-    type: 'file',
-    size: '128 KB',
-    updatedAt: '2026-05-08 19:10',
-    owner: 'DFT Platform',
-    status: 'Ready',
-  },
-  {
-    key: '4',
-    name: 'verification-template.tar.gz',
-    type: 'file',
-    size: '24.8 MB',
-    updatedAt: '2026-05-07 17:36',
-    owner: 'Verification Team',
-    status: 'Ready',
-  },
-];
-
-const folders = ['Root', 'common-data', 'design-tree', 'verification', 'reports'];
 
 const ObsViewer: React.FC<ObsViewerProps> = ({
   open,
@@ -85,11 +45,56 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
   onSelect,
 }) => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [downloading, setDownloading] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [currentPath, setCurrentPath] = useState('/root');
+  const [items, setItems] = useState<ObsFile[]>([]);
+  const [search, setSearch] = useState('');
+
+  const loadPath = useCallback(async (remotePath: string) => {
+    setLoading(true);
+    try {
+      const result = await listObsChildren(spaceName, remotePath);
+      if (!result.success) {
+        message.error(result.error ?? 'Failed to load OBS directory');
+        return;
+      }
+      setCurrentPath(remotePath);
+      setItems(result.items.map((item: ObsChildItemDto) => ({ ...item })));
+      setSelectedRowKeys([]);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Failed to load OBS directory');
+    } finally {
+      setLoading(false);
+    }
+  }, [spaceName]);
+
+  useEffect(() => {
+    if (open) {
+      void loadPath('/root');
+    }
+  }, [open, loadPath]);
 
   const selectedItem = useMemo(
-    () => mockObsFiles.find((item) => item.key === selectedRowKeys[0]),
-    [selectedRowKeys]
+    () => items.find((item) => item.key === selectedRowKeys[0]),
+    [items, selectedRowKeys]
   );
+  const visibleItems = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return query ? items.filter((item) => item.name.toLowerCase().includes(query)) : items;
+  }, [items, search]);
+  const folderItems = useMemo(() => items.filter((item) => item.type === 'folder'), [items]);
+  const breadcrumbItems = useMemo(() => {
+    const segments = currentPath.split('/').filter(Boolean);
+    return [
+      { title: 'OBS' },
+      { title: spaceName, onClick: () => void loadPath('/root') },
+      ...segments.map((segment, index) => ({
+        title: segment,
+        onClick: () => void loadPath(`/${segments.slice(0, index + 1).join('/')}`),
+      })),
+    ];
+  }, [currentPath, loadPath, spaceName]);
 
   const canSelect = Boolean(selectTarget && selectedItem?.type === selectTarget);
   const title = selectTarget
@@ -102,6 +107,27 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
     }
     onSelect?.(toObsPath(spaceName, selectedItem));
     onCancel();
+  };
+
+  const handleDownload = async () => {
+    if (!selectedItem) return;
+    setDownloading(true);
+    try {
+      const result = await downloadObsPath(toObsPath(spaceName, selectedItem), selectedItem.type);
+      if (result.cancelled) return;
+      if (!result.success) {
+        message.error(result.error ?? 'OBS download failed');
+        return;
+      }
+      const suffix = typeof result.downloadedFiles === 'number'
+        ? ` (${result.downloadedFiles} files${result.failedFiles ? `, ${result.failedFiles} failed` : ''})`
+        : '';
+      message.success(`OBS download completed${suffix}`);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'OBS download failed');
+    } finally {
+      setDownloading(false);
+    }
   };
 
   return (
@@ -367,25 +393,32 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
             }}
           >
             <Space direction="vertical" size={8} className="dft-obs-folder-list" style={{ width: '100%' }}>
-              {folders.map((item, index) => (
+              <Button
+                type={currentPath === '/root' ? 'primary' : 'text'}
+                icon={<HomeOutlined />}
+                style={{ width: '100%', justifyContent: 'flex-start' }}
+                onClick={() => void loadPath('/root')}
+              >
+                Root
+              </Button>
+              {folderItems.map((item) => (
                 <Button
-                  key={item}
-                  type={index === 0 ? 'primary' : 'text'}
-                  icon={index === 0 ? <HomeOutlined /> : <FolderOpenOutlined />}
+                  key={item.key}
+                  type="text"
+                  icon={<FolderOpenOutlined />}
                   style={{ width: '100%', justifyContent: 'flex-start' }}
+                  onClick={() => void loadPath(item.path)}
                 >
-                  {item}
+                  {item.name}
                 </Button>
               ))}
             </Space>
             <Divider className="dft-obs-stats" style={{ margin: '14px 0' }} />
             <Space className="dft-obs-stats" direction="vertical" size={4}>
               <Text type="secondary">Bucket</Text>
-              <Text strong>dft-public-data</Text>
+              <Text strong>{spaceName}</Text>
               <Text type="secondary">Objects</Text>
-              <Text strong>1,284</Text>
-              <Text type="secondary">Used</Text>
-              <Text strong>36.2 GB</Text>
+              <Text strong>{items.length}</Text>
             </Space>
           </div>
 
@@ -395,17 +428,24 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
             >
               <div style={{ minWidth: 0 }}>
                 <Breadcrumb
-                  items={[
-                    { title: 'OBS' },
-                    { title: spaceName },
-                    { title: 'root' },
-                  ]}
+                  items={breadcrumbItems}
                 />
               </div>
               <div className="dft-obs-actions">
-                <Input className="dft-obs-search" prefix={<SearchOutlined />} placeholder="Search objects" />
+                <Input
+                  className="dft-obs-search"
+                  prefix={<SearchOutlined />}
+                  placeholder="Search objects"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
                 <Tooltip title="Refresh">
-                  <Button className="dft-obs-icon-button" icon={<ReloadOutlined />} />
+                  <Button
+                    className="dft-obs-icon-button"
+                    icon={<ReloadOutlined />}
+                    loading={loading}
+                    onClick={() => void loadPath(currentPath)}
+                  />
                 </Tooltip>
                 {!readOnly && (
                   <Tooltip title="Upload">
@@ -413,7 +453,12 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
                   </Tooltip>
                 )}
                 <Tooltip title="Download">
-                  <Button icon={<CloudDownloadOutlined />}><span className="dft-obs-action-label">Download</span></Button>
+                  <Button
+                    icon={<CloudDownloadOutlined />}
+                    disabled={!selectedItem}
+                    loading={downloading}
+                    onClick={() => void handleDownload()}
+                  ><span className="dft-obs-action-label">Download</span></Button>
                 </Tooltip>
                 {!readOnly && (
                   <Tooltip title="Delete">
@@ -423,10 +468,11 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
               </div>
             </div>
 
-            <Table<MockObsFile>
+            <Table<ObsFile>
               className="dft-obs-table"
               size="small"
               pagination={false}
+              loading={loading}
               scroll={{ x: 720 }}
               rowSelection={{
                 type: 'radio',
@@ -444,6 +490,10 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
                   }
                 },
                 onDoubleClick: () => {
+                  if (record.type === 'folder' && selectTarget !== 'folder') {
+                    void loadPath(record.path);
+                    return;
+                  }
                   if (!selectTarget || record.type !== selectTarget) {
                     return;
                   }
@@ -451,7 +501,7 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
                   onCancel();
                 },
               })}
-              dataSource={mockObsFiles}
+              dataSource={visibleItems}
               columns={[
                 {
                   title: 'Name',
@@ -469,12 +519,11 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
                 },
                 { title: 'Size', dataIndex: 'size', width: 82 },
                 { title: 'Updated', dataIndex: 'updatedAt', width: 150 },
-                { title: 'Owner', dataIndex: 'owner', width: 132 },
                 {
-                  title: 'Status',
-                  dataIndex: 'status',
-                  width: 90,
-                  render: (status: string) => <Tag color="green">{status}</Tag>,
+                  title: 'Version',
+                  dataIndex: 'versionId',
+                  width: 120,
+                  render: (versionId?: string) => versionId ? <Tag color="green">{versionId}</Tag> : <Text type="secondary">-</Text>,
                 },
               ]}
             />
@@ -499,9 +548,9 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
   );
 };
 
-function toObsPath(spaceName: string, item: MockObsFile): string {
+function toObsPath(spaceName: string, item: ObsFile): string {
   const suffix = item.type === 'folder' ? '/' : '';
-  return `obs://${spaceName}/root/${item.name}${suffix}`;
+  return `obs://${spaceName}${item.path.replace(/\/+$/, '')}${suffix}`;
 }
 
 export default ObsViewer;

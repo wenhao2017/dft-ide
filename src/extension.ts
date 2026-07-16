@@ -8,6 +8,7 @@ import { promisify } from 'util';
 import { submitJob, queryJobStatus, getDonauResources } from './services/donauService';
 import { gitService } from './services/gitService';
 import { obsService } from './services/obsService';
+import { obsTrackingService } from './services/obsTrackingService';
 import { isSpreadsheetFile } from './services/commonSyncArtifacts';
 import { isPipelineFlowKey, isPipelineFlowKey as _isPipelineFlowKey, PipelineRuntimeService } from './services/pipelineRuntimeService';
 import { getWebviewHtml, InitialWebviewCommand } from './webviewHtml';
@@ -158,6 +159,7 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   context.subscriptions.push(dftDiagnostics);
+  obsTrackingService.initialize(context);
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(OBS_READONLY_SCHEME, {
       provideTextDocumentContent: (uri) =>
@@ -689,6 +691,106 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             command: 'openObsFileReadOnlyResponse',
             requestId,
             success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
+      case 'downloadObsPath': {
+        const requestId: string = msg.requestId;
+        try {
+          const obsPath = typeof msg.path === 'string' ? msg.path : '';
+          const targetType = msg.targetType === 'folder' ? 'folder' : 'file';
+          const obsUri = vscode.Uri.parse(obsPath, true);
+          if (obsUri.scheme !== 'obs' || !obsUri.authority || !obsUri.path) {
+            throw new Error('Invalid OBS path.');
+          }
+          const spaceName = decodeURIComponent(obsUri.authority);
+          const remotePath = decodeURIComponent(obsUri.path);
+          const defaultRoot = resolveProjectRoot() ?? os.homedir();
+
+          if (targetType === 'file') {
+            const fileName = path.posix.basename(remotePath);
+            const destination = await vscode.window.showSaveDialog({
+              defaultUri: vscode.Uri.file(path.join(defaultRoot, fileName)),
+              saveLabel: 'Download from OBS',
+            });
+            if (!destination) {
+              currentPanel?.webview.postMessage({
+                command: 'downloadObsPathResponse', requestId, success: false, cancelled: true
+              });
+              return;
+            }
+            await obsTrackingService.downloadFile(spaceName, remotePath, destination, {
+              overwriteUntracked: true,
+            });
+            currentPanel?.webview.postMessage({
+              command: 'downloadObsPathResponse', requestId, success: true, destination: destination.fsPath
+            });
+            return;
+          }
+
+          const selected = await vscode.window.showOpenDialog({
+            defaultUri: vscode.Uri.file(defaultRoot),
+            canSelectFiles: false,
+            canSelectFolders: true,
+            canSelectMany: false,
+            openLabel: 'Select download location',
+          });
+          if (!selected?.[0]) {
+            currentPanel?.webview.postMessage({
+              command: 'downloadObsPathResponse', requestId, success: false, cancelled: true
+            });
+            return;
+          }
+          const folderName = path.posix.basename(remotePath.replace(/\/+$/, '')) || spaceName;
+          const destination = vscode.Uri.file(path.join(selected[0].fsPath, folderName));
+          const result = await obsTrackingService.downloadDirectory(spaceName, remotePath, destination);
+          currentPanel?.webview.postMessage({
+            command: 'downloadObsPathResponse',
+            requestId,
+            success: result.failedFiles === 0,
+            destination: destination.fsPath,
+            downloadedFiles: result.successFiles,
+            failedFiles: result.failedFiles,
+            error: result.failedFiles > 0 ? `${result.failedFiles} OBS files failed to download.` : undefined,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'downloadObsPathResponse',
+            requestId,
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
+      case 'listObsChildren': {
+        const requestId: string = msg.requestId;
+        try {
+          const spaceName = typeof msg.spaceName === 'string' ? msg.spaceName.trim() : '';
+          const remotePath = typeof msg.remotePath === 'string' ? msg.remotePath.trim() : '/';
+          if (!spaceName) {
+            throw new Error('OBS space name is empty.');
+          }
+          const items = await obsService.listChildren(spaceName, remotePath);
+          currentPanel?.webview.postMessage({
+            command: 'listObsChildrenResponse',
+            requestId,
+            success: true,
+            items: items.map((item, index) => ({
+              ...item,
+              key: `${item.path}:${index}`,
+            })),
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'listObsChildrenResponse',
+            requestId,
+            success: false,
+            items: [],
             error: err instanceof Error ? err.message : String(err),
           });
         }

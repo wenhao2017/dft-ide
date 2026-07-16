@@ -101,6 +101,7 @@ const vscodeMock = {
       };
     },
     fs: {
+      createDirectory: vi.fn(async () => {}),
       stat: vi.fn(async (uri: any) => {
         const filePath = path.resolve(uri.fsPath);
         // If it exists as a file key or directory key

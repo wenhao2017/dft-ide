@@ -41,12 +41,11 @@ export interface ObsChildItem {
   size?: string | number;
   updatedAt?: string;
   versionId?: string;
+  etag?: string;
 }
 
 export interface ObsDownloadFileOptions {
   versionId?: string;
-  recordVersion?: boolean;
-  versionManifestUri?: vscode.Uri;
 }
 
 export interface ObsDownloadedFileResult {
@@ -56,14 +55,6 @@ export interface ObsDownloadedFileResult {
   versionId?: string;
   updatedAt?: string;
   etag?: string;
-}
-
-export interface ObsDirectoryDownloadResult {
-  totalFiles: number;
-  successFiles: number;
-  failedFiles: number;
-  downloadedItems: ObsDownloadedFileResult[];
-  manifestUri: vscode.Uri;
 }
 
 interface ObsApiResponse<T> {
@@ -90,11 +81,21 @@ interface ObsConfig {
   getSpaceTokenPath: string;
   viewerUrlTemplate: string;
   w3id: string;
+  requestTimeoutMs: number;
+  tokenCacheMs: number;
 }
 
 const USER_AGENT = 'ObsOperator/1.0';
 
 export class ObsService {
+  private readonly tokenCache = new Map<string, { token: string; expiresAt: number }>();
+  private readonly tokenRequests = new Map<string, Promise<string>>();
+
+  clearTokenCache(): void {
+    this.tokenCache.clear();
+    this.tokenRequests.clear();
+  }
+
   async openViewer(options: OpenObsViewerOptions): Promise<{ url: string; spaceName: string }> {
     const config = this.getConfig();
     const spaceName = this.resolveSpaceName(options);
@@ -129,7 +130,7 @@ export class ObsService {
     }
     const url = this.buildUrl(config.obsPage, OBS_GET_FILE_DETAILS, queryParams);
 
-    const response = await fetch(url, {
+    const response = await this.fetchWithTimeout(url, {
       method: 'GET',
       headers: {
         'User-Agent': USER_AGENT,
@@ -178,7 +179,7 @@ export class ObsService {
       filepath: normalizedPath,
     });
 
-    const response = await fetch(url, {
+    const response = await this.fetchWithTimeout(url, {
       method: 'GET',
       headers: {
         'User-Agent': USER_AGENT,
@@ -213,7 +214,7 @@ export class ObsService {
       filepath: normalizedPath,
     });
 
-    const response = await fetch(url, {
+    const response = await this.fetchWithTimeout(url, {
       method: 'GET',
       headers: {
         'User-Agent': USER_AGENT,
@@ -223,21 +224,29 @@ export class ObsService {
     });
 
     if (!response.ok) {
-      return [];
+      throw new Error(`OBS list children failed: HTTP ${response.status}`);
     }
     const body = (await response.json()) as ObsApiResponse<any>;
     if (body.code !== 1 || !body.data) {
-      return [];
+      throw new Error(this.formatObsError('OBS list children failed', body));
     }
     const list = Array.isArray(body.data) ? body.data : (body.data.children || body.data.list || []);
-    return list.map((item: any) => ({
-      name: item.name || item.filename || '',
-      path: item.path || item.filepath || `${normalizedPath.replace(/\/$/, '')}/${item.name}`,
-      type: item.type === 'folder' || item.isDir ? 'folder' : 'file',
-      size: item.size,
-      updatedAt: item.updatedAt || item.updateTime,
-      versionId: item.versionId || item.version,
-    }));
+    return list.map((item: any) => {
+      const name = item.name || item.filename || '';
+      const rawPath = String(item.path || item.filepath || name);
+      const childPath = rawPath.startsWith('/')
+        ? rawPath
+        : `${normalizedPath.replace(/\/$/, '')}/${rawPath.replace(/^\/+/, '')}`;
+      return {
+        name,
+        path: childPath,
+        type: item.type === 'folder' || item.isDir ? 'folder' : 'file',
+        size: item.size,
+        updatedAt: item.updatedAt || item.updateTime,
+        versionId: item.versionId || item.version,
+        etag: item.etag,
+      };
+    });
   }
 
   /**
@@ -262,7 +271,7 @@ export class ObsService {
     }
     const url = this.buildUrl(config.obsPage, OBS_DOWNLOAD_FILE, queryParams);
 
-    const response = await fetch(url, {
+    const response = await this.fetchWithTimeout(url, {
       method: 'GET',
       headers: {
         'User-Agent': USER_AGENT,
@@ -294,7 +303,7 @@ export class ObsService {
     const headerUpdatedAt = response.headers.get('last-modified') || new Date().toISOString();
 
     let resolvedVersionId = headerVersionId;
-    if (!resolvedVersionId && options?.recordVersion !== false) {
+    if (!resolvedVersionId) {
       try {
         const detail = await this.getFileDetailInfo(spaceName, normalizedPath, options?.versionId);
         if (detail.versionId) {
@@ -314,88 +323,7 @@ export class ObsService {
       updatedAt: headerUpdatedAt,
     };
 
-    // 默认或指定记录版本时，在下载文件同目录下生成版本元数据记录文件（如 .filename.version.json）
-    if (options?.recordVersion ?? true) {
-      const manifestUri = options?.versionManifestUri || vscode.Uri.file(`${localDestUri.fsPath}.version.json`);
-      try {
-        await vscode.workspace.fs.writeFile(manifestUri, Buffer.from(JSON.stringify(result, null, 2), 'utf-8'));
-      } catch (writeErr) {
-        console.warn(`[DFT IDE] 写入版本记录文件失败: ${manifestUri.fsPath}`, writeErr);
-      }
-    }
-
     return result;
-  }
-
-  /**
-   * 批量下载整个 OBS 目录（递归拉取目录下所有文件与子目录，并为每个文件记录版本号，生成汇总清单）
-   */
-  async downloadDirectory(
-    spaceName: string,
-    remoteDirPath: string,
-    localDestDirUri: vscode.Uri,
-    options?: { recordVersions?: boolean; versionIdMap?: Record<string, string> }
-  ): Promise<ObsDirectoryDownloadResult> {
-    await vscode.workspace.fs.createDirectory(localDestDirUri);
-
-    const children = await this.listChildren(spaceName, remoteDirPath);
-    const downloadedItems: ObsDownloadedFileResult[] = [];
-    let successFiles = 0;
-    let failedFiles = 0;
-
-    for (const child of children) {
-      if (child.type === 'file') {
-        const childDestUri = vscode.Uri.file(`${localDestDirUri.fsPath}/${child.name}`);
-        try {
-          const targetVersionId = options?.versionIdMap?.[child.path] || child.versionId;
-          const res = await this.downloadFile(spaceName, child.path, childDestUri, {
-            versionId: targetVersionId,
-            recordVersion: options?.recordVersions ?? true,
-          });
-          downloadedItems.push(res);
-          successFiles++;
-        } catch (err) {
-          console.warn(`[DFT IDE] 批量下载 OBS 目录文件失败: ${child.path}`, err);
-          failedFiles++;
-        }
-      } else if (child.type === 'folder') {
-        const subDirDestUri = vscode.Uri.file(`${localDestDirUri.fsPath}/${child.name}`);
-        try {
-          const subResult = await this.downloadDirectory(spaceName, child.path, subDirDestUri, options);
-          downloadedItems.push(...subResult.downloadedItems);
-          successFiles += subResult.successFiles;
-          failedFiles += subResult.failedFiles;
-        } catch (err) {
-          console.warn(`[DFT IDE] 批量下载 OBS 子目录失败: ${child.path}`, err);
-        }
-      }
-    }
-
-    const manifestUri = vscode.Uri.file(`${localDestDirUri.fsPath}/_obs_directory_versions.json`);
-    if (options?.recordVersions ?? true) {
-      const manifestContent = {
-        spaceName,
-        remoteDirPath,
-        downloadedAt: new Date().toISOString(),
-        totalFiles: successFiles + failedFiles,
-        successFiles,
-        failedFiles,
-        files: downloadedItems,
-      };
-      try {
-        await vscode.workspace.fs.writeFile(manifestUri, Buffer.from(JSON.stringify(manifestContent, null, 2), 'utf-8'));
-      } catch (err) {
-        console.warn(`[DFT IDE] 写入目录多版本汇总清单失败: ${manifestUri.fsPath}`, err);
-      }
-    }
-
-    return {
-      totalFiles: successFiles + failedFiles,
-      successFiles,
-      failedFiles,
-      downloadedItems,
-      manifestUri,
-    };
   }
 
   private getConfig(): ObsConfig {
@@ -413,6 +341,8 @@ export class ObsService {
       getSpaceTokenPath: getSpaceTokenPath || OBS_GET_SPACE_TOKEN,
       viewerUrlTemplate: config.get<string>('viewerUrlTemplate', '').trim(),
       w3id: config.get<string>('w3id', '').trim(),
+      requestTimeoutMs: Math.max(1_000, config.get<number>('requestTimeoutSeconds', 15) * 1_000),
+      tokenCacheMs: Math.max(5_000, config.get<number>('tokenCacheSeconds', 60) * 1_000),
     };
   }
 
@@ -426,13 +356,35 @@ export class ObsService {
   }
 
   private async getSpaceToken(config: ObsConfig, spaceName: string): Promise<string> {
+    const cacheKey = `${config.obsPage}\n${config.groupName}\n${spaceName}`;
+    const cached = this.tokenCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.token;
+    }
+
+    const pending = this.tokenRequests.get(cacheKey);
+    if (pending) {
+      return pending;
+    }
+
+    const request = this.requestSpaceToken(config, spaceName).then((token) => {
+      this.tokenCache.set(cacheKey, { token, expiresAt: Date.now() + config.tokenCacheMs });
+      return token;
+    }).finally(() => {
+      this.tokenRequests.delete(cacheKey);
+    });
+    this.tokenRequests.set(cacheKey, request);
+    return request;
+  }
+
+  private async requestSpaceToken(config: ObsConfig, spaceName: string): Promise<string> {
     this.assertTokenConfig(config);
 
     const url = this.buildUrl(config.obsPage, config.getSpaceTokenPath, {
       group: config.groupName,
       name: spaceName,
     });
-    const response = await fetch(url, {
+    const response = await this.fetchWithTimeout(url, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -451,6 +403,22 @@ export class ObsService {
     }
 
     return body.data.spaceToken;
+  }
+
+  private async fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+    const config = this.getConfig();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), config.requestTimeoutMs);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`OBS request timed out after ${config.requestTimeoutMs / 1_000}s.`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   private assertTokenConfig(config: ObsConfig): void {

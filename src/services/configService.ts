@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { pathExists, readJsonFile, isRecord, getFileNameAndExtension, getDirectory } from './utils';
-import { obsService } from './obsService';
+import { obsTrackingService } from './obsTrackingService';
 import {
   resolveConfigPath,
   resolveProjectRepoRoot,
@@ -170,11 +170,20 @@ export async function downLoadObsScripts(flow: 'hibist' | 'sailor' | 'verificati
   if (scriptSpace && remoteScriptPath) {
     try {
       for (const filename of remoteScriptFiles){
+        if (typeof filename !== 'string' || path.basename(filename) !== filename) {
+          throw new Error(`Invalid OBS script file name: ${String(filename)}`);
+        }
         const localScriptPath = path.join(configsDir, filename);
-        await obsService.downloadFile(scriptSpace, path.join(remoteScriptPath, filename), vscode.Uri.file(localScriptPath));
-        await fs.chmod(localScriptPath, 0o777, ()=>{
-          console.log(`[DFT IDE] 成功从 OBS 空间 [${scriptSpace}] 下载转换脚本 [${localScriptPath}] 至: ${configsDir}`);
+        const remoteFilePath = path.posix.join(remoteScriptPath.replace(/\\/g, '/'), filename);
+        await obsTrackingService.downloadFile(scriptSpace, remoteFilePath, vscode.Uri.file(localScriptPath), {
+          overwriteUntracked: true,
         });
+        try {
+          await fs.promises.chmod(localScriptPath, 0o755);
+        } catch (error) {
+          console.warn(`[DFT IDE] OBS script downloaded but chmod failed: ${localScriptPath}`, error);
+        }
+        console.log(`[DFT IDE] OBS script downloaded from [${scriptSpace}] to: ${localScriptPath}`);
       }
       return configsDir;
     } catch (err) {

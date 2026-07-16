@@ -403,6 +403,7 @@ export async function initProjectWorkspace(project: DftProject): Promise<string>
 
   const localStateUri = vscode.Uri.joinPath(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR);
   await vscode.workspace.fs.createDirectory(localStateUri);
+  await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(localStateUri, 'obs'));
   await writeDefaultLocalState(localStateUri, repos);
 
   await ensureLocalStateIgnored(projectRoot.fsPath, localStateUri.fsPath);
@@ -450,6 +451,7 @@ export async function prepareProjectWorkspace(
 
   const localStateUri = vscode.Uri.joinPath(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR);
   await vscode.workspace.fs.createDirectory(localStateUri);
+  await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(localStateUri, 'obs'));
   await ensureLocalStateIgnored(projectRoot.fsPath, localStateUri.fsPath);
 
   const workspaceFile = vscode.Uri.joinPath(projectRoot, 'dft-ide.code-workspace');

@@ -91,6 +91,14 @@
       {
         "command": "dftIde.restoreLayout",
         "title": "DFT IDE: Restore VS Code Layout"
+      },
+      {
+        "command": "dftIde.checkObsUpdates",
+        "title": "DFT IDE: Check OBS File Updates"
+      },
+      {
+        "command": "dftIde.manageObsUpdates",
+        "title": "DFT IDE: Manage OBS File Updates"
       }
     ],
     "configuration": {
@@ -209,6 +217,46 @@
           "type": "string",
           "default": "",
           "description": "Optional OBS space name override. Leave empty to use the active project name or workspace name."
+        },
+        "dftIde.obs.autoCheckUpdates": {
+          "type": "boolean",
+          "default": true,
+          "description": "Check tracked OBS files for newer remote versions in the background."
+        },
+        "dftIde.obs.checkIntervalMinutes": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 60,
+          "description": "Background OBS update-check interval in minutes."
+        },
+        "dftIde.obs.startupCheckDelaySeconds": {
+          "type": "number",
+          "default": 10,
+          "minimum": 3,
+          "maximum": 300,
+          "description": "Delay before the first background OBS update check."
+        },
+        "dftIde.obs.maxConcurrentRequests": {
+          "type": "number",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 8,
+          "description": "Maximum concurrent OBS requests used by background update checks and directory downloads."
+        },
+        "dftIde.obs.requestTimeoutSeconds": {
+          "type": "number",
+          "default": 15,
+          "minimum": 3,
+          "maximum": 120,
+          "description": "Timeout for individual OBS HTTP requests."
+        },
+        "dftIde.obs.tokenCacheSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 5,
+          "maximum": 600,
+          "description": "Short-lived in-memory SpaceToken cache used to reduce repeated token requests."
         },
         "dftIde.layout.autoApply": {
           "type": "boolean",
