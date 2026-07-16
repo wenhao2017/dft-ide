@@ -258,8 +258,19 @@ const App: React.FC = () => {
 
           .dft-flow-sidebar {
             flex: 0 0 auto;
+            width: fit-content;
+            max-width: 320px;
+
             display: flex;
             flex-direction: column;
+
+            overflow: hidden;
+          }
+
+          .dft-flow-sidebar * {
+            max-width: 100%;
+            overflow-wrap: break-word;
+            word-break: break-word;
           }
 
           .dft-flow-main {
@@ -267,6 +278,15 @@ const App: React.FC = () => {
             flex: 1 1 auto;
             display: flex;
             flex-direction: column;
+            min-height: 0;
+          }
+
+          .dft-flow-content {
+            flex: 1 1 auto;
+            min-width: 0;
+
+            overflow-y: auto;
+            overflow-x: hidden;
           }
 
           .dft-stepbar {
@@ -300,12 +320,17 @@ const App: React.FC = () => {
             flex: 1;
             min-width: 0;
             min-height: 360px;
+
+            display: flex;
+            flex-direction: row;
+            gap: 12px;
+
             border-radius: 8px;
             border: 1px solid var(--vscode-panel-border, rgba(127,127,127,0.22));
             padding: 14px;
             background: var(--vscode-editor-background);
-            overflow-x: auto;
-            scrollbar-width: thin;
+
+            overflow: hidden;
           }
 
           .dft-flow-card .ant-form-item {

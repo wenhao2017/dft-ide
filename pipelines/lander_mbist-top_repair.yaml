@@ -26,9 +26,9 @@
   command: "run_flow_lander gen_pdl_env"
   description: 生成setup pdl文件
 
-- id: gen_hibist_excel
-  name: gen_hibist_excel
-  command: "run_flow_lander gen_hibist_excel"
+- id: gen_dftm_excel
+  name: gen_dftm_excel
+  command: "run_flow_lander gen_dftm_excel"
   description: 产生全芯片的mbist信息
 
 - id: gen_mbist_setting

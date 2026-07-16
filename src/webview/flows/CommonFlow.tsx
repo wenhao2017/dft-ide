@@ -574,6 +574,13 @@ const CommonFlow: React.FC = () => {
             throw new Error(res.error || '同步应用失败');
           }
 
+          if (syncDirection === 'dataToTarget') {
+            const tgtDesignPath = res.artifacts.find(obj => obj.key === 'designTree')?.target;
+            if (tgtDesignPath) targetDesignTree.setValue(tgtDesignPath);
+            const tgtTablePath = res.artifacts.find(obj => obj.key === 'normTable')?.target;
+            if (tgtTablePath) targetNormTable.setValue(tgtTablePath);
+          }
+
           setSyncReport(res.report);
           setWizardStep(2);
           message.success('同步已应用到目标路径');
@@ -824,7 +831,7 @@ const CommonFlow: React.FC = () => {
             state={targetNormTable}
             pathSources={['local']}
             localRootPath={selectedTargetInfo.repoRoot}
-            placeholder={`请输入或选择 ${targetName} 中的归一化表格文件`}
+            placeholder={`请输入或选择 ${targetName} 中的归一化表格文件/目录`}
             showSelectFile
             showSelectFolder={syncDirection === 'dataToTarget'}
             showOpen

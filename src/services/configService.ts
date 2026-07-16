@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { pathExists, readJsonFile, isRecord, getFileNameAndExtension, getDirectory } from './utils';
 import { obsService } from './obsService';
 import {
@@ -64,12 +65,24 @@ export async function listFlowConfigFiles(flow: 'hibist' | 'sailor' | 'verificat
   const configs: FlowConfigFileInfo[] = [];
 
   for (const [name, type] of entries) {
-    if (type !== vscode.FileType.File || path.extname(name).toLowerCase() !== '.cfg') {
-      continue;
+    if (type === vscode.FileType.Directory) {
+      const subEntries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(path.join(configsDir, name)));
+      for (const [subName, subType] of subEntries) {
+        if (subType !== vscode.FileType.File || path.extname(subName).toLowerCase() !== '.cfg') {
+          continue;
+        }
+        const filePath = path.join(configsDir, name, subName);
+        const stat = await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+        configs.push(toFlowConfigFileInfo(filePath, stat));
+      }
+    } else if (type === vscode.FileType.File) {
+      if (path.extname(name).toLowerCase() !== '.cfg') {
+        continue;
+      }
+      const filePath = path.join(configsDir, name);
+      const stat = await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+      configs.push(toFlowConfigFileInfo(filePath, stat));
     }
-    const filePath = path.join(configsDir, name);
-    const stat = await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
-    configs.push(toFlowConfigFileInfo(filePath, stat));
   }
 
   configs.sort((a, b) => a.moduleName.localeCompare(b.moduleName));
@@ -143,61 +156,40 @@ export async function deleteFlowConfigFile(
   await vscode.workspace.fs.delete(vscode.Uri.file(resolveCfgPath(configsDir, moduleName)));
 }
 
-export async function generateDefaultFlowConfigs(flow: 'hibist' | 'sailor' | 'verification'): Promise<{
-  configs: FlowConfigFileInfo[];
-  configsDir: string;
-  created: number;
-}> {
+export async function downLoadObsScripts(flow: 'hibist' | 'sailor' | 'verification'): Promise<string> {
   const configsDir = await getFlowConfigsDirectory(flow);
   await ensureLocalConfigDirectory(configsDir);
 
   // 1. 去特定空间下载转换脚本（具体空间与路径在 package.json 预留，可留空后填）
   const obsConfig = vscode.workspace.getConfiguration('dftIde.obs');
   const scriptSpace = obsConfig.get<string>('scriptSpace', '').trim();
-  const scriptPaths = obsConfig.get<Record<string, string>>('scriptPaths', {});
-  const remoteScriptPath = scriptPaths?.[flow]?.trim() || '';
+  const scriptPaths = obsConfig.get<Record<string, Record<string, any>>>('scriptPaths', {});
+  const remoteScriptPath = scriptPaths?.[flow]?.dir.trim() || '';
+  const remoteScriptFiles = scriptPaths?.[flow]?.files || [];
 
   if (scriptSpace && remoteScriptPath) {
-    const scriptsDir = path.join(path.dirname(configsDir), 'scripts');
-    await ensureLocalConfigDirectory(scriptsDir);
-    const scriptFileName = path.basename(remoteScriptPath) || `${flow}_convert_script`;
-    const localScriptPath = path.join(scriptsDir, scriptFileName);
     try {
-      await obsService.downloadFile(scriptSpace, remoteScriptPath, vscode.Uri.file(localScriptPath));
-      console.log(`[DFT IDE] 成功从 OBS 空间 [${scriptSpace}] 下载转换脚本 [${remoteScriptPath}] 至: ${localScriptPath}`);
+      for (const filename of remoteScriptFiles){
+        const localScriptPath = path.join(configsDir, filename);
+        await obsService.downloadFile(scriptSpace, path.join(remoteScriptPath, filename), vscode.Uri.file(localScriptPath));
+        await fs.chmod(localScriptPath, 0o777, ()=>{
+          console.log(`[DFT IDE] 成功从 OBS 空间 [${scriptSpace}] 下载转换脚本 [${localScriptPath}] 至: ${configsDir}`);
+        });
+      }
+      return configsDir;
     } catch (err) {
       console.warn(`[DFT IDE] 从 OBS 空间 [${scriptSpace}] 下载转换脚本失败:`, err);
+      return '';
     }
   } else {
     console.info(`[DFT IDE] 尚未配置 dftIde.obs.scriptSpace 或 scriptPaths.${flow}，预留空项待填`);
+    return '';
   }
-
-  // 2. 为当前工程模块生成基础配置架构
-  const modules = await readModulesFromNormalizedTable(flow);
-  let created = 0;
-
-  for (const moduleName of modules) {
-    const filePath = resolveCfgPath(configsDir, moduleName);
-    if (await pathExists(filePath)) {
-      continue;
-    }
-    const content = [
-      `# Auto-generated default ${flow} config`,
-      `module = ${moduleName}`,
-      `flow = ${flow}`,
-      ''
-    ].join('\n');
-    await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), Buffer.from(content, 'utf-8'));
-    created += 1;
-  }
-
-  const listed = await listFlowConfigFiles(flow);
-  return { ...listed, created };
 }
 
 export function resolveCfgPath(configsDir: string, moduleName: string): string {
   const clean = sanitizeCfgModuleName(moduleName);
-  return path.join(configsDir, `${clean}.cfg`);
+  return path.join(configsDir, clean, `${clean}.sailor.cfg`);
 }
 
 export function sanitizeCfgModuleName(value: string): string {
@@ -220,14 +212,21 @@ export async function makeUniqueCfgModuleName(configsDir: string, base: string):
 
 export function toFlowConfigFileInfo(filePath: string, stat: vscode.FileStat): FlowConfigFileInfo {
   const fileName = path.basename(filePath);
-  const moduleName = path.basename(fileName, '.cfg');
-  const repoRoot = path.dirname(path.dirname(filePath));
+  let moduleName = path.basename(fileName, '.cfg');
+  let workPath = path.dirname(path.dirname(filePath));
+  if (path.extname(moduleName).toLowerCase() === '.sailor') {
+    moduleName = path.basename(moduleName, '.sailor');
+    workPath = path.join(path.dirname(workPath), 'work');
+  } else {
+    workPath = path.join(workPath, 'work');
+  }
+
   return {
     key: moduleName,
     moduleName,
     fileName,
     filePath,
-    workDir: path.join(repoRoot, moduleName),
+    workDir: path.join(workPath, moduleName),
     updatedAt: stat.mtime,
     size: stat.size
   };
@@ -325,14 +324,11 @@ export async function saveDefaultConfigLogs(defaultConfigLog: DefaultConfigLog) 
   try{
     const flow = defaultConfigLog.flow;
     const configsDir = await getFlowConfigsDirectory(flow);
-    await ensureLocalConfigDirectory(configsDir);
-    await ensureLocalConfigDirectory(`${configsDir}/.logs`);
 
     const scriptPath = await copyLogFile(defaultConfigLog.scriptPath, defaultConfigLog.timemilles || '', configsDir);
     const designTree = await copyLogFile(defaultConfigLog.designTree, defaultConfigLog.timemilles || '', configsDir);
     const normTable = await copyLogFile(defaultConfigLog.normTable, defaultConfigLog.timemilles || '', configsDir);
-    const logFile = await moveLogFile(defaultConfigLog.logFile || '', configsDir);
-    const success = await checkExecuteStatus(logFile);
+    const success = await checkExecuteStatus(defaultConfigLog.logFile || '');
     const maxHistoryCounts = vscode.workspace.getConfiguration('dftIde').get<number>('maxHistoryCounts', 10);
 
     const filePath = resolveCfgPath(configsDir, "history");
@@ -341,7 +337,7 @@ export async function saveDefaultConfigLogs(defaultConfigLog: DefaultConfigLog) 
       `scriptPath: "${scriptPath.replace(/\\/g, '/')}"`,
       `designTree: "${designTree.replace(/\\/g, '/')}"`,
       `normTable: "${normTable.replace(/\\/g, '/')}"`,
-      `logFile: "${logFile.replace(/\\/g, '/')}"`,
+      `logFile: "${defaultConfigLog.logFile?.replace(/\\/g, '/')}"`,
       `time: "${defaultConfigLog.timestamp}"`,
       `success: ${success}}`,
     ].join(',');

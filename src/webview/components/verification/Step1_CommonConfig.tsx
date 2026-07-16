@@ -10,11 +10,11 @@ import {
 import { useVscodePath } from '../../hooks/useVscodePath';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 import PathInput from '../shared/PathInput';
-import { deleteLanderStage, generateDefaultFlowConfigs, getGitInfo, getLanderStages, initLanderStage, RepoKey } from '../../utils/ipc';
+import { appendLanderStage, generateDefaultFlowConfigs, getGitInfo, getLanderStages, removeLanderStage, RepoKey } from '../../utils/ipc';
 import useWizardStore from '../../store/wizardStore';
 import CollapsibleSection from '../shared/CollapsibleSection';
 import DefaultConfgHistory from '../design/DefaultConfgHistory';
-import CustomSelect from './StageSelect';
+import StageSelect from './StageSelect';
 
 interface Props {
   onNext?: () => void;
@@ -23,11 +23,11 @@ interface Props {
 const templateOptions = [
   {
     value: 1,
-    label:'网络'
+    label:'联接'
   },
   {
     value: 2,
-    label:'连接'
+    label:'无线终端'
   },
   {
     value: 3,
@@ -80,11 +80,11 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
   const commandCfg = useVscodePath();
 
   const [currentBranch, setCurrentBranch] = useState<string>('');
-  const [template, setTemplate] = useState<string>('');
-  const [mode, setMode] = useState<string>('');
+  const [stage, setStage] = useState<string>('');
+  const [template, setTemplate] = useState<number>();
   const [generating, setGenerating] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-
+  const [repoRoot, setRepoRoot] = useState<string>('');
   const updatePayload = useWizardStore((state) => state.updatePayload);
 
   const { savedData, loading, saving, hasUnsaved, handleSave } = useFlowConfig('verification');
@@ -95,6 +95,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
         if (res && res.branch) {
           const branchName = res.branch as string;
           setCurrentBranch(branchName);
+          setRepoRoot(res.repoRoot as string);
           updatePayload({ gitBranch: branchName });
         } else {
           setCurrentBranch('Not in a git repo');
@@ -107,18 +108,22 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
     if (!savedData) return;
     const source = (savedData.step1 as Record<string, unknown> | undefined) ?? savedData;
     if (source.project) project.setValue(String(source.project));
-    if (source.commandCfg) commandCfg.setValue(String(source.commandCfg))
+    if (source.commandCfg) commandCfg.setValue(String(source.commandCfg));
+    if (source.stage) setStage(String(source.stage));
+    if (source.template) setTemplate(Number(source.template));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedData]);
 
   const collectFormData = () => ({
     project: project.value,
-    landerCfg: commandCfg.value,
+    stage,
+    template,
+    commandCfg: commandCfg.value,
   });
 
   const onSave = () => {
     const data = collectFormData();
-    void handleSave({ data });
+    void handleSave({ moduleKey: 'verification', step1: data });
   };
 
   const onGenerateDefaults = async () => {
@@ -135,19 +140,19 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
     }
   };
 
-  const initStage = async(
-    addStage: string, extendStage: string
+  const appendStage = async(
+    addValue: string, extendValue: string
   ): Promise<{ success: boolean; error?: string }> => {
-    const result = await initLanderStage('verification', addStage, extendStage);
+    const result = await appendLanderStage('verification', addValue, extendValue);
     return result;
   };
 
-  const deleteStage = async(stage: string): Promise<{ success: boolean; error?: string }> => {
-    const result = await deleteLanderStage('verification', stage);
+  const removeStage = async(removeValue: string): Promise<{ success: boolean; error?: string }> => {
+    const result = await removeLanderStage('verification', removeValue);
     return result;
   };
 
-  const getStages = async(): Promise<{ success: boolean; stages: string[]; error?: string }> => {
+  const listStages = async(): Promise<{ success: boolean; stages: string[]; error?: string }> => {
     const result = await getLanderStages('verification');
     return result;
   };
@@ -166,6 +171,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
               <PathInput
                 state={project}
                 pathSources={['local']}
+                localRootPath={repoRoot}
                 placeholder="请选择 project.cshrc"
                 showOpen
                 showSelectFile
@@ -181,7 +187,13 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
                 </Button>
               </div>
               <Form.Item label="stage">
-                <CustomSelect initStage={initStage} deleteStage={deleteStage} getStages={getStages}/>
+                <StageSelect
+                  currentStage={stage}
+                  setCurrentStage={setStage}
+                  appendStage={appendStage}
+                  removeStage={removeStage}
+                  listStages={listStages}
+                />
               </Form.Item>
               <Form.Item label="选择模板">
                 <Select
@@ -192,18 +204,11 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
                   options={templateOptions}
                 />
               </Form.Item>
-              <Form.Item label="选择模式">
-                <Select
-                  value={mode}
-                  onChange={(value) => setMode(value)}
-                  allowClear
-                  placeholder="请选择模式"
-                  options={modeOptions}
-                />
-              </Form.Item>
               <Form.Item label="执行脚本">
                 <PathInput
                   state={commandCfg}
+                  pathSources={['local']}
+                  localRootPath={repoRoot}
                   placeholder="请选择执行脚本"
                   showOpen
                   showSelectFile

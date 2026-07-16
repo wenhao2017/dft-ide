@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Badge, Button, Card, Col, Form, Radio, Row, Select, Space, Spin, message, RadioChangeEvent, Modal } from 'antd';
+import { Badge, Button, Card, Col, Form, Radio, Row, Select, Space, Spin, message, RadioChangeEvent, Modal, Flex, Typography, Checkbox } from 'antd';
 import {
   BranchesOutlined,
   FileAddOutlined,
@@ -17,6 +17,8 @@ import useWizardStore from '../../store/wizardStore';
 import CollapsibleSection from '../shared/CollapsibleSection';
 import ControlledPathInput from '../shared/ControlledPathInput';
 import DefaultConfgHistory from './DefaultConfgHistory';
+
+const { Text } = Typography;
 
 interface Props {
   onNext?: () => void;
@@ -37,11 +39,11 @@ const pageStyle: React.CSSProperties = {
 const domainOptions = [
   {
     value: 1,
-    label:'网络'
+    label:'联接'
   },
   {
     value: 2,
-    label:'连接'
+    label:'无线终端'
   },
   {
     value: 3,
@@ -53,15 +55,16 @@ const emptyNormalizeCfg = (): NormalizeCfg => ({ commandCfg: '', jsonCfg: '' });
 
 const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => {
   const flowKey = category.toLowerCase();
-  const project = useVscodePath();
-  const workPath = useVscodePath();
-  const [domainCfg, setDomainCfg] = useState<number>(1);
-
   const [currentBranch, setCurrentBranch] = useState<string>('');
+
+  const project = useVscodePath();
+  const [domainCfg, setDomainCfg] = useState<number>(1);
   const [normalizeCfgs, setNormalizeCfgs] = useState<NormalizeCfg[]>([emptyNormalizeCfg()]);
+  const [selectedNormalizeIndexes, setSelectedNormalizeIndexes] = useState<number[]>([0]);
+
+  const [repoRoot, setRepoRoot] = useState<string>('');
   const [generating, setGenerating] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [normalizeIndex, setNormalizeIndex] = useState<number>(0);
   const updatePayload = useWizardStore((state) => state.updatePayload);
 
   const { savedData, loading, saving, hasUnsaved, handleSave } =
@@ -73,6 +76,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
         if (res && res.branch) {
           const branchName = res.branch as string;
           setCurrentBranch(branchName);
+          setRepoRoot(res.repoRoot as string);
           updatePayload({ gitBranch: branchName });
         } else {
           setCurrentBranch('Not in a git repo');
@@ -82,10 +86,10 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
   }, [updatePayload, flowKey]);
 
   useEffect(() => {
+    clearForm();
     if (!savedData) return;
     const source = (savedData.step1 as Record<string, unknown> | undefined) ?? savedData;
     if (source.project) project.setValue(String(source.project));
-    if (source.workPath) workPath.setValue(String(source.workPath));
     if (source.domainCfg) setDomainCfg(Number(source.domainCfg))
 
     if (Array.isArray(source.normalizeCfgs)) {
@@ -101,21 +105,22 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
         .filter((item): item is NormalizeCfg => Boolean(item));
       const normalizedCfgs = nextCfgs.length > 0 ? nextCfgs : [emptyNormalizeCfg()];
       setNormalizeCfgs(normalizedCfgs);
-      if (typeof source.normalizeIndex === 'number') {
-        setNormalizeIndex(Math.max(0, Math.min(source.normalizeIndex, normalizedCfgs.length - 1)));
+      if (Array.isArray(source.selectedNormalizeIndexes)) {
+        setSelectedNormalizeIndexes(
+          source.selectedNormalizeIndexes.filter(
+            (index): index is number => typeof index === 'number',
+          ),
+        );
       }
-    } else if (typeof source.normalizeIndex === 'number') {
-      setNormalizeIndex(Math.max(0, source.normalizeIndex));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedData, moduleKey]);
 
   const collectFormData = () => ({
     project: project.value,
-    workPath: workPath.value,
     domainCfg,
     normalizeCfgs,
-    normalizeIndex,
+    selectedNormalizeIndexes,
   });
 
   const onSave = () => {
@@ -127,8 +132,11 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
     void handleSave({ moduleKey, step1: data });
   };
 
-  const handleRadioChange = (e: RadioChangeEvent) => {
-    setNormalizeIndex(Number(e.target.value));
+  const clearForm = () => {
+    project.setValue("");
+    setDomainCfg(1);
+    setNormalizeCfgs([emptyNormalizeCfg()]);
+    setSelectedNormalizeIndexes([0]);
   };
 
   const addNormalizeCfg = () => {
@@ -140,10 +148,8 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
       const next = prev.filter((_, itemIndex) => itemIndex !== index);
       return next.length > 0 ? next : [emptyNormalizeCfg()];
     });
-    setNormalizeIndex((prev) => {
-      if (index < prev) return prev - 1;
-      if (index === prev) return 0;
-      return prev;
+    setSelectedNormalizeIndexes((prev: number[]) => {
+      return prev.filter(i => i !== index);
     });
   };
 
@@ -161,15 +167,24 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
   const onGenerateDefaults = async () => {
     setGenerating(true);
     try {
-      const result = await generateDefaultFlowConfigs(flowKey as 'hibist' | 'sailor', normalizeCfgs[normalizeIndex]?.commandCfg ?? '');
-      if (!result.success) {
-        message.error(result.error ?? '生成默认配置失败');
-        return;
+      for(const index of selectedNormalizeIndexes){
+        if (normalizeCfgs[index].commandCfg) {
+          await generateDefaultFlowConfigs(flowKey as 'hibist' | 'sailor', normalizeCfgs[index].commandCfg);
+        }
       }
-      message.success('生成默认配置完成');
     } finally {
       setGenerating(false);
     }
+  };
+
+  const handleCheckboxChange = (index: number, checked: boolean) => {
+    setSelectedNormalizeIndexes((prev: number[]) => {
+      if (checked) {
+        return [...prev, index];
+      } else {
+        return prev.filter(i => i !== index);
+      }
+    });
   };
 
   return (
@@ -187,6 +202,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
               <PathInput
                 state={project}
                 pathSources={['local']}
+                localRootPath={repoRoot}
                 placeholder="请选择 project.cshrc"
                 showOpen
                 showSelectFile
@@ -206,27 +222,33 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
 
           <Card size="small" style={{ marginBottom: 14 }} styles={{ body: { padding: 18 } }}>
             <CollapsibleSection title="归一化表格转 cfg">
-              <div style={{ marginBottom: 12, marginRight: '2%', textAlign: 'right' }}>
-                <Button size="small" icon={<HistoryOutlined />} onClick={() => setHistoryOpen(true)}>
-                  鍘嗗彶璁板綍
+              <Flex justify="space-between" align="center" style={{ marginBottom: 12 }}>
+                <Text strong>执行脚本</Text>
+                <Button
+                  size="small"
+                  icon={<HistoryOutlined />}
+                  onClick={() => setHistoryOpen(true)}
+                >
+                  历史记录
                 </Button>
-              </div>
-              {normalizeCfgs.map((normalizeCfg, index) => (
-                <Row key={index} align="middle" style={{ marginBottom: 16 }}>
-                  <Col span={4} style={{ textAlign: 'right', paddingRight: 12 }}>
-                    <Space size={6}>
-                      <span>执行脚本</span>
-                      <Radio checked={normalizeIndex === index} onChange={handleRadioChange} value={index} />
-                    </Space>
-                  </Col>
-                  <Col span={20} className="dft-path-input">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
-                      <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+              </Flex>
+              <Flex vertical gap={12}>
+                {normalizeCfgs.map((normalizeCfg, index) => {
+                  const isSelected = selectedNormalizeIndexes.includes(index);
+                  return (
+                    <Flex key={index} align="center" gap={8}>
+                      <Checkbox
+                        checked={isSelected}
+                        onChange={(e) => handleCheckboxChange(index, e.target.checked)}
+                        style={{ flexShrink: 0 }}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
                         <ControlledPathInput
                           value={normalizeCfg.commandCfg}
                           onChange={(value) => setNormalCfg(index, value, 1)}
                           placeholder="请选择执行脚本"
                           pathSources={['local']}
+                          localRootPath={repoRoot}
                           showSelectFile
                           showOpen
                         />
@@ -234,29 +256,26 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
                       <Button
                         type="text"
                         danger
+                        size="small"
                         icon={<MinusCircleOutlined />}
                         onClick={() => removeNormalizeCfg(index)}
-                        style={{ flex: '0 0 auto' }}
+                        style={{ flexShrink: 0 }}
+                        disabled={normalizeCfgs.length <= 1} // 至少保留一项
                       />
-                    </div>
-                  </Col>
-                  {/* <Col span={11} className="dft-path-input">
-                    <ControlledPathInput
-                      value={normalizeCfg.jsonCfg}
-                      onChange={(value) => setNormalCfg(index, value, 2)}
-                      placeholder="请选择json文件"
-                      pathSources={['local']}
-                      showSelectFile
-                      showOpen
-                    />
-                  </Col> */}
-                </Row>
-              ))}
-              <div style={{ textAlign: 'center' }}>
-                <Button style={{ minWidth: 200 }} type="dashed" onClick={() => addNormalizeCfg()} icon={<PlusOutlined />}>
-                  添加
+                    </Flex>
+                  )
+                })}
+              </Flex>
+              <Flex justify="center" style={{ marginTop: 16 }}>
+                <Button
+                  type="dashed"
+                  onClick={addNormalizeCfg}
+                  icon={<PlusOutlined />}
+                  style={{ width: '100%', maxWidth: 300 }}
+                >
+                  添加执行脚本
                 </Button>
-              </div>
+              </Flex>
             </CollapsibleSection>
           </Card>
 

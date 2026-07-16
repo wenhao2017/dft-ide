@@ -12,7 +12,9 @@ import { isSpreadsheetFile } from './services/commonSyncArtifacts';
 import { isPipelineFlowKey, isPipelineFlowKey as _isPipelineFlowKey, PipelineRuntimeService } from './services/pipelineRuntimeService';
 import { getWebviewHtml, InitialWebviewCommand } from './webviewHtml';
 import { SpreadsheetProvider } from "./spreadsheet"
-
+import {
+  handleGetLanderModePipelines,
+} from './ipc/landerPipelineIpc';
 // Import constants
 import {
   VIEW_TYPE,
@@ -42,11 +44,11 @@ import {
   normalizeConfigFlow,
   getProjectRepoRoot,
   getCurrentWorkspaceProjectInfo,
-  genDefaultConfigs,
   resolveProjectRepoRoot,
   ensureLocalConfigDirectory,
   isDirectoryExists,
   copyDirectory,
+  genDefaultConfigs,
 } from './services/workspaceService';
 
 // Import config services
@@ -56,11 +58,11 @@ import {
   duplicateFlowConfigFile,
   renameFlowConfigFile,
   deleteFlowConfigFile,
-  generateDefaultFlowConfigs,
   mergeConfigFile,
   saveDefaultConfigLogs,
   getDefaultConfigLogs,
   readConfig,
+  downLoadObsScripts,
 } from './services/configService';
 
 // Import design tree services
@@ -1321,11 +1323,11 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           if (!scriptPath) {
             throw new Error('Unsupported flow for script files.');
           }
-          // 根据flow 获取归一化表格文件和design tree, 归一化表格配置都在common.json中，所以传参'data'
+          // 根据flow 获取归一化表格文件和design tree, 归一化表格配置都在common.json中，所以传参'common'
           const filePath = resolveConfigPath('common');
           if (!filePath) {
             currentPanel?.webview.postMessage({
-              command: 'generateDefaultFlowConfigsResponse', requestId, data: null
+              command: 'generateDefaultFlowConfigsResponse', requestId, success: false, error: '获取归一化表格和designTree配置失败'
             });
             return;
           }
@@ -1334,14 +1336,22 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           const data = JSON.parse(Buffer.from(bytes).toString('utf-8'));
           if(!data[flow]){
             currentPanel?.webview.postMessage({
-              command: 'generateDefaultFlowConfigsResponse', requestId, data: null
+              command: 'generateDefaultFlowConfigsResponse', requestId, success: false, error: '获取归一化表格和designTree失败'
             });
             return;
           }
           const designTree = data[flow].designTree;
           const normTable = data[flow].normTable;
-          const logs = await genDefaultConfigs({requestId, flow, scriptPath, designTree ,normTable});
-          const result = await saveDefaultConfigLogs(logs);
+          // 从obs获取python脚本
+          const configDirectory = await downLoadObsScripts(flow);
+          if (!configDirectory) {
+            currentPanel?.webview.postMessage({
+              command: 'generateDefaultFlowConfigsResponse', requestId, success: false, error: '从obs获取py脚本失败'
+            });
+            return;
+          }
+          const configLog = await genDefaultConfigs({requestId, flow, scriptPath, configDirectory, designTree ,normTable});
+          const result = await saveDefaultConfigLogs(configLog);
           currentPanel?.webview.postMessage({
             command: 'generateDefaultFlowConfigsResponse',
             requestId,
@@ -1353,8 +1363,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             command: 'generateDefaultFlowConfigsResponse',
             requestId,
             success: false,
-            configs: [],
-            created: 0,
             error: String(err)
           });
         }
@@ -1813,32 +1821,29 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
-      case 'initLanderStage': {
+      case 'appendLanderStage': {
         const requestId: string = msg.requestId;
         try {
           const repoRoot = await resolveProjectRepoRoot(msg.flow);
-          const stages = path.join(repoRoot, 'stages');
-          await ensureLocalConfigDirectory(stages);
-
-          const addStage = path.join(stages, msg.addStage);
+          const addStage = path.join(repoRoot, msg.addStage);
           const addExists = await isDirectoryExists(addStage);
           if (addExists){
             currentPanel?.webview.postMessage({
-              command: 'initLanderStageResponse', requestId,
+              command: 'appendLanderStageResponse', requestId,
               success: false, error: `stage ${msg.addStage} aready exists`
             });
             return;
           }
           await ensureLocalConfigDirectory(addStage);
           if (msg.extendStage) {
-            const extendStage = path.join(stages, msg.extendStage);
+            const extendStage = path.join(repoRoot, msg.extendStage);
             const extendExists = await isDirectoryExists(extendStage);
             if (extendExists){
               await copyDirectory(extendStage, addStage);
             }
           }
           currentPanel?.webview.postMessage({
-            command: 'initLanderStageResponse', requestId,
+            command: 'appendLanderStageResponse', requestId,
             success: true
           });
         } catch (err) {
@@ -1854,10 +1859,9 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         const requestId: string = msg.requestId;
         try {
           const repoRoot = await resolveProjectRepoRoot(msg.flow);
-          const stagesDir = path.join(repoRoot, 'stages');
-          const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(stagesDir));
+          const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(repoRoot));
           const stages = entries
-                .filter(([_, type]) => type === vscode.FileType.Directory)
+                .filter(([name, type]) => (type === vscode.FileType.Directory && !name.startsWith('.')))
                 .map(([name]) => name);
           currentPanel?.webview.postMessage({
             command: 'getLanderStagesResponse', requestId,
@@ -1873,24 +1877,31 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
-      case 'deleteLanderStage': {
+      case 'removeLanderStage': {
         const requestId: string = msg.requestId;
         try {
           const repoRoot = await resolveProjectRepoRoot(msg.flow);
-          const stagesDir = path.join(repoRoot, 'stages');
-          const stage = path.join(stagesDir, msg.stage);
+          const stage = path.join(repoRoot, msg.stage);
           await vscode.workspace.fs.delete(vscode.Uri.file(stage), { recursive: true });
-
           currentPanel?.webview.postMessage({
-            command: 'deleteLanderStageResponse', requestId,
+            command: 'removeLanderStageResponse', requestId,
             success: true
           });
         } catch (err) {
           currentPanel?.webview.postMessage({
-            command: 'deleteLanderStageResponse', requestId,
+            command: 'removeLanderStageResponse', requestId,
             success: false, error: String(err)
           });
         }
+        return;
+      }
+
+      case 'getLanderModePipelines': {
+        await handleGetLanderModePipelines(
+          context,
+          currentPanel,
+          msg,
+        );
         return;
       }
 

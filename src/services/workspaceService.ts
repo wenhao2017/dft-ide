@@ -543,9 +543,9 @@ export async function writeDefaultLocalState(localStateUri: vscode.Uri, repos: {
   localPath: string,
 }[]) {
   for (const repo of repos) {
-    if (repo.key === 'data') continue;
+    const fileName = repo.key === 'data' ? 'common' : repo.key;
 
-    const stateUri = vscode.Uri.joinPath(localStateUri, repo.key + '.json');
+    const stateUri = vscode.Uri.joinPath(localStateUri, fileName + '.json');
     let content = '{}';
     try {
       const bytes = await vscode.workspace.fs.readFile(stateUri);
@@ -555,14 +555,53 @@ export async function writeDefaultLocalState(localStateUri: vscode.Uri, repos: {
     }
     const stateObject = JSON.parse(content);
 
-    if (!stateObject.project) {
-      const cshrcFilePath = path.join(repo.localPath, 'project.cshrc');
-      const isExists = await pathExists(cshrcFilePath);
-      if (isExists) stateObject.project = cshrcFilePath;
+    if (repo.key === 'data') {
+      for (const repoKey of PROJECT_REPOS) {
+        const localPath = repos.find(obj => obj.key === repoKey)?.localPath;
+        if (!localPath) continue;
+
+        let item = stateObject[repoKey];
+        if (item == null) {
+          item = {}
+        }
+        if (!item.designTree) {
+          const designTreePath = path.join(localPath, 'design_tree.xlsx');
+          const isExists = await pathExists(designTreePath);
+          if (isExists) {
+            item.designTree = designTreePath;
+          } else if (repoKey !== 'data') {
+            item.designTree = localPath;
+          }
+        }
+        if (!item.normTable) {
+          const normTablePath = path.join(localPath, 'normalized_table.xlsx');
+          const isExists = await pathExists(normTablePath);
+          if (isExists) {
+            item.normTable = normTablePath;
+          } else if (repoKey !== 'data') {
+            item.normTable = localPath;
+          }
+        }
+        stateObject[repoKey] = item;
+      }
+
+      await writeFile(stateUri, JSON.stringify(stateObject, null, 2));
+    } else {
+      if (!stateObject.project) {
+        const cshrcFilePath = path.join(repo.localPath, 'project.cshrc');
+        const isExists = await pathExists(cshrcFilePath);
+        if (isExists) {
+          stateObject.project = cshrcFilePath;
+          await writeFile(stateUri, JSON.stringify(stateObject, null, 2));
+        }
+      }
     }
 
-    await writeFileIfMissing(stateUri, JSON.stringify(stateObject, null, 2));
   }
+}
+
+export async function writeFile(uri: vscode.Uri, content: string): Promise<void> {
+  await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf-8'));
 }
 
 export async function writeFileIfMissing(uri: vscode.Uri, content: string): Promise<void> {
@@ -639,7 +678,7 @@ export function getProjectRepoRoot(repo: 'hibist' | 'sailor' | 'data' | 'verific
 
 export async function getFlowConfigsDirectory(flow: 'hibist' | 'sailor' | 'verification'): Promise<string> {
   const repoRoot = await resolveProjectRepoRoot(flow);
-  return path.join(repoRoot, 'configs');
+  return path.join(repoRoot, `${flow}/cfg`);
 }
 
 export async function resolveProjectRepoRoot(repo: 'hibist' | 'sailor' | 'data' | 'verification'): Promise<string> {
@@ -779,6 +818,7 @@ export interface DefaultConfigLog {
   timemilles?: string;
   timestamp?: string;
   logFile?: string;
+  configDirectory: string;
   success?: boolean;
 }
 
@@ -838,8 +878,8 @@ async function waitForDefaultConfigTerminalReady(terminal: vscode.Terminal): Pro
 export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
   const timestamp = dayjs().format('YYYY-MM-DD HH:mm:ss');
   const timemilles = Date.now().toString();
-  const directory = getDirectory(defaultConfigLog.scriptPath);
-  const logFile = `${directory}/${defaultConfigLog.flow}-${defaultConfigLog.requestId}-${timemilles}.log`;
+  await ensureLocalConfigDirectory(`${defaultConfigLog.configDirectory}/.logs`);
+  const logFile = `${defaultConfigLog.configDirectory}/.logs/${defaultConfigLog.flow}-${defaultConfigLog.requestId}-${timemilles}.log`;
   defaultConfigLog = {...defaultConfigLog, logFile, timestamp, timemilles};
 
   const runKey = defaultConfigLog.flow;
@@ -857,7 +897,7 @@ export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
   const marker = `__DFT_IDE_DEFAULT_CONFIG_END__|${defaultConfigLog.requestId ?? timemilles}|`;
   const terminal = vscode.window.createTerminal({
     name: `DFT IDE Default Config / ${defaultConfigLog.flow} / ${defaultConfigLog.requestId ?? timemilles}`,
-    cwd: directory,
+    cwd: defaultConfigLog.configDirectory,
     shellPath: getPipelineShellPath(),
   });
 
@@ -879,7 +919,7 @@ export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
           reject(error);
         } else {
           defaultConfigLog = {...defaultConfigLog, success: true};
-          terminal.dispose();
+          // terminal.dispose();
           resolve();
         }
       };
@@ -925,7 +965,7 @@ export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
       }
 
       const command = [
-        `${quoteCshArg(defaultConfigLog.scriptPath)} ${quoteCshArg(defaultConfigLog.designTree)} ${quoteCshArg(defaultConfigLog.normTable)} |& tee ${quoteCshArg(logFile)}`,
+        `${quoteCshArg(defaultConfigLog.scriptPath)} ${quoteCshArg(defaultConfigLog.designTree)} ${quoteCshArg(defaultConfigLog.normTable)} | tee ${quoteCshArg(logFile)}`,
         'set dft_ide_default_config_status = $status',
         `echo "${marker}$dft_ide_default_config_status"`,
       ].join('; ');
@@ -935,11 +975,11 @@ export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
       });
       terminal.show();
     });
-    return defaultConfigLog;
   } catch (error) {
     activeDefaultConfigRuns.delete(runKey);
     throw error;
   }
+  return defaultConfigLog;
 }
 
 export async function isDirectoryExists(dir: string) {

@@ -8,21 +8,22 @@ interface Option {
 }
 
 interface StageSelectProps {
-  initStage: (addStage: string, extendStage: string) => Promise<{ success: boolean; error?: string }>;
-  deleteStage: (stage: string) => Promise<{ success: boolean; error?: string }>;
-  getStages: () => Promise<{ success: boolean; stages: string[]; error?: string }>;
+  currentStage: string;
+  setCurrentStage: (stage: string) => void;
+  appendStage: (addValue: string, extendValue: string) => Promise<{ success: boolean; error?: string }>;
+  removeStage: (removeValue: string) => Promise<{ success: boolean; error?: string }>;
+  listStages: () => Promise<{ success: boolean; stages: string[]; error?: string }>;
 }
 
-const StageSelect: React.FC<StageSelectProps> = ({ initStage, deleteStage, getStages }) => {
+const StageSelect: React.FC<StageSelectProps> = ( {currentStage, setCurrentStage, appendStage, removeStage, listStages }) => {
   const [options, setOptions] = useState<Option[]>([]);
-  const [currentStage, setCurrentStage] = useState('');
-  const [delStage, setDelStage] = useState('');
-  const [addStage, setAddStage] = useState('');
-  const [extendStage, setExtendStage] = useState('');
+  const [removeValue, setRemoveValue] = useState('');
+  const [addValue, setAddValue] = useState('');
+  const [extendValue, setExtendValue] = useState('');
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
-    getStages().then((res) => {
+    listStages().then((res) => {
       if (res && res.stages) {
         setOptions(res.stages.map(item => {
           return {label: item, value: item} as Option;
@@ -35,13 +36,13 @@ const StageSelect: React.FC<StageSelectProps> = ({ initStage, deleteStage, getSt
   }, []);
 
   const handleAddOption = async () => {
-    if (addStage.trim() !== '') {
-      const newOption: Option = { label: addStage, value: addStage };
-      const result = await initStage(addStage, extendStage);
+    if (addValue.trim() !== '') {
+      const newOption: Option = { label: addValue, value: addValue };
+      const result = await appendStage(addValue, extendValue);
       if (result.success) {
         setOptions([...options, newOption]);
-        setAddStage('');
-        setExtendStage('');
+        setAddValue('');
+        setExtendValue('');
         message.success(`添加stage成功`);
       }else {
         message.error(result.error ?? '添加stage失败');
@@ -50,11 +51,11 @@ const StageSelect: React.FC<StageSelectProps> = ({ initStage, deleteStage, getSt
   };
 
   const handleDeleteStage: PopconfirmProps['onConfirm'] = async (e) => {
-    const result = await deleteStage(delStage);
+    const result = await removeStage(removeValue);
     if (result.success) {
-      setOptions(options => options.filter(option => option.value !== delStage));
+      setOptions(options => options.filter(option => option.value !== removeValue));
       setCurrentStage('');
-      message.success(`删除stage ${delStage}成功`);
+      message.success(`删除stage ${removeValue}成功`);
     }else {
       message.error(result.error ?? '删除stage ${delStage}失败');
     }
@@ -106,7 +107,7 @@ const StageSelect: React.FC<StageSelectProps> = ({ initStage, deleteStage, getSt
                     type="text"
                     danger
                     icon={<MinusCircleOutlined />}
-                    onClick={() => { setDelStage(opt.label) }}
+                    onClick={() => { setRemoveValue(opt.label) }}
                     style={{ flex: '0 0 auto', width: '2%' }}
                   />
                 </Popconfirm>
@@ -117,16 +118,16 @@ const StageSelect: React.FC<StageSelectProps> = ({ initStage, deleteStage, getSt
           <Space style={{ padding: '0 8px 4px' }}>
             <Input
               placeholder="添加stage"
-              value={addStage}
-              onChange={(e) => setAddStage(e.target.value)}
+              value={addValue}
+              onChange={(e) => setAddValue(e.target.value)}
               onPressEnter={handleAddOption}
             />
             继承于
             <Select
               style={{ minWidth: 200 }}
               options={options}
-              value={extendStage}
-              onChange={value => setExtendStage(value)}
+              value={extendValue}
+              onChange={value => setExtendValue(value)}
               onMouseDown={preventDefault}
             />
             <Button type="primary" icon={<PlusOutlined />} onClick={handleAddOption}>

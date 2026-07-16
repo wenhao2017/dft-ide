@@ -6,65 +6,82 @@
  * 单向的通知（如 openFile）直接用 vscode.postMessage。
  */
 
-import vscode from './vscode';
-import { DftProject } from '../services/projectService';
-import { z } from 'zod';
-
+import vscode from './vscode'
+import { DftProject } from '../services/projectService'
+import { z } from 'zod'
+import type { LanderStep } from '../components/verification/mode/types'
+import { CommonSyncArtifact } from '../../services/commonSyncArtifacts'
 export interface DefaultConfigLog {
-  requestId?: string;
-  flow: 'hibist' | 'sailor' | 'verification';
-  scriptPath: string;
-  designTree: string;
-  normTable: string;
-  timemilles?: string;
-  timestamp?: string;
-  time?: string;
-  logFile?: string;
-  success?: boolean;
+  requestId?: string
+  flow: 'hibist' | 'sailor' | 'verification'
+  scriptPath: string
+  designTree: string
+  normTable: string
+  timemilles?: string
+  timestamp?: string
+  time?: string
+  logFile?: string
+  success?: boolean
 }
 
-let _reqId = 0;
+let _reqId = 0
 /** 等待响应的 Promise 回调池：key = `{command}Response:{requestId}` */
-const pendingCallbacks = new Map<string, (data: Record<string, unknown>) => void>();
+const pendingCallbacks = new Map<
+  string,
+  (data: Record<string, unknown>) => void
+>()
 
 // 全局一次性注册消息监听，收到 extension 响应后派发给对应的 Promise
 window.addEventListener('message', (event: MessageEvent) => {
-  const msg = event.data as Record<string, unknown>;
-  if (!msg || typeof msg.requestId !== 'string') return;
+  const msg = event.data as Record<string, unknown>
+  if (!msg || typeof msg.requestId !== 'string') return
 
-  const key = `${String(msg.command)}:${msg.requestId}`;
-  const cb = pendingCallbacks.get(key);
+  const key = `${String(msg.command)}:${msg.requestId}`
+  const cb = pendingCallbacks.get(key)
   if (cb) {
-    pendingCallbacks.delete(key);
-    cb(msg);
+    pendingCallbacks.delete(key)
+    cb(msg)
   }
-});
+})
 
 /**
  * 向 extension 发送请求并等待响应。
  * extension 需要回复命令名为 `${command}Response`，并携带相同的 requestId。
  */
-function ipcRequest(
+function ipcRequest<TResponse extends Record<string, unknown>>(
   command: string,
   payload: Record<string, unknown> = {},
-  timeoutMs = 120_000
-): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    const id = String(++_reqId);
-    const responseKey = `${command}Response:${id}`;
+  timeoutMs = 120_000,
+): Promise<TResponse> {
+  return new Promise<TResponse>((resolve, reject) => {
+    const requestId = String(++_reqId)
+
+    const responseKey = `${command}Response:${requestId}`
 
     const timer = setTimeout(() => {
-      pendingCallbacks.delete(responseKey);
-      reject(new Error(`IPC timeout: ${command} (${id})`));
-    }, timeoutMs);
+      pendingCallbacks.delete(responseKey)
+
+      reject(new Error(`IPC timeout: ${command} (${requestId})`))
+    }, timeoutMs)
 
     pendingCallbacks.set(responseKey, (data) => {
-      clearTimeout(timer);
-      resolve(data);
-    });
+      clearTimeout(timer)
 
-    vscode.postMessage({ command, requestId: id, ...payload });
-  });
+      pendingCallbacks.delete(responseKey)
+
+      resolve(data as TResponse)
+    })
+
+    /**
+     * payload 放前面，避免外部传入的 command/requestId
+     * 覆盖内部生成的值。
+     */
+    vscode.postMessage({
+      ...payload,
+      command,
+      requestId,
+    })
+  })
 }
 
 // ─── 公开 API ──────────────────────────────────────────────
@@ -74,56 +91,58 @@ function ipcRequest(
  */
 export async function getCurrentUser(): Promise<string> {
   const res = await ipcRequest('getCurrentUser')
-  return res.user ? res.user as string : '';
+  return res.user ? (res.user as string) : ''
 }
 
 /**
  * 获取当前环境的 Git 信息 (分支、修改状态等)
  */
 export interface DonauAccount {
-  name: string;
-  submitName: string;
-  runningJobsLimit: number;
-  runningJobsCount: number;
-  pendingJobsLimit: number;
-  pendingJobsCount: number;
-  sstoppedJobsCount: number;
+  name: string
+  submitName: string
+  runningJobsLimit: number
+  runningJobsCount: number
+  pendingJobsLimit: number
+  pendingJobsCount: number
+  sstoppedJobsCount: number
 }
 
 export interface DonauQueue {
-  name: string;
-  submitName: string;
-  status: string;
-  runningJobsLimit: number;
-  runningJobsCount: number;
-  pendingJobsCount: number;
-  sstoppedJobsCount: number;
-  description?: string;
+  name: string
+  submitName: string
+  status: string
+  runningJobsLimit: number
+  runningJobsCount: number
+  pendingJobsCount: number
+  sstoppedJobsCount: number
+  description?: string
 }
 
 export async function getDonauResources(): Promise<{
-  success: boolean;
-  source: 'mock' | 'real';
-  accounts: DonauAccount[];
-  queues: DonauQueue[];
-  fallbackReason?: string;
-  error?: string;
-  cancelled?: boolean;
+  success: boolean
+  source: 'mock' | 'real'
+  accounts: DonauAccount[]
+  queues: DonauQueue[]
+  fallbackReason?: string
+  error?: string
+  cancelled?: boolean
 }> {
-  const res = await ipcRequest('getDonauResources', {}, 120_000);
+  const res = await ipcRequest('getDonauResources', {}, 120_000)
   return res as unknown as {
-    success: boolean;
-    source: 'mock' | 'real';
-    accounts: DonauAccount[];
-    queues: DonauQueue[];
-    fallbackReason?: string;
-    error?: string;
-    cancelled?: boolean;
-  };
+    success: boolean
+    source: 'mock' | 'real'
+    accounts: DonauAccount[]
+    queues: DonauQueue[]
+    fallbackReason?: string
+    error?: string
+    cancelled?: boolean
+  }
 }
 
-export async function getGitInfo(repo: RepoKey): Promise<Record<string, unknown>> {
-  return await ipcRequest('getGitInfo', { repo });
+export async function getGitInfo(
+  repo: RepoKey,
+): Promise<Record<string, unknown>> {
+  return await ipcRequest('getGitInfo', { repo })
 }
 
 /**
@@ -132,13 +151,13 @@ export async function getGitInfo(repo: RepoKey): Promise<Record<string, unknown>
  */
 export async function selectPath(
   targetType: 'file' | 'folder' = 'file',
-  rootPath?: string
+  rootPath?: string,
 ): Promise<string | null> {
-  const res = await ipcRequest('selectPath', { targetType, rootPath });
+  const res = await ipcRequest('selectPath', { targetType, rootPath })
   if (typeof res.error === 'string') {
-    throw new Error(res.error);
+    throw new Error(res.error)
   }
-  return typeof res.path === 'string' ? res.path : null;
+  return typeof res.path === 'string' ? res.path : null
 }
 
 /**
@@ -146,54 +165,77 @@ export async function selectPath(
  * 这是单向通知，不等待响应。
  */
 export function openFileInEditor(path: string): void {
-  vscode.postMessage({ command: 'openFile', path });
+  vscode.postMessage({ command: 'openFile', path })
 }
 
 export function openFileReadonly(path: string): void {
-  vscode.postMessage({ command: 'openFileReadonly', path });
+  vscode.postMessage({ command: 'openFileReadonly', path })
 }
 
-export async function openObsFileReadOnly(path: string): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('openObsFileReadOnly', { path });
-  return res as { success: boolean; error?: string };
+export async function openObsFileReadOnly(
+  path: string,
+): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('openObsFileReadOnly', { path })
+  return res as { success: boolean; error?: string }
 }
 
 export function runVscodeDemo(action: string): void {
-  vscode.postMessage({ command: 'vscodeDemo', action });
+  vscode.postMessage({ command: 'vscodeDemo', action })
 }
 
-export async function openObsViewer(
+export async function openObsViewer(spaceName?: string): Promise<{
+  success: boolean
+  url?: string
   spaceName?: string
-): Promise<{ success: boolean; url?: string; spaceName?: string; error?: string }> {
-  const res = await ipcRequest('openObsViewer', { spaceName });
-  return res as { success: boolean; url?: string; spaceName?: string; error?: string };
+  error?: string
+}> {
+  const res = await ipcRequest('openObsViewer', { spaceName })
+  return res as {
+    success: boolean
+    url?: string
+    spaceName?: string
+    error?: string
+  }
 }
 
-export async function openProjectWorkspace(
-  rootPath: string
-): Promise<{ success: boolean; opened?: boolean; alreadyOpen?: boolean; targetPath?: string; error?: string }> {
-  const res = await ipcRequest('openProjectWorkspace', { rootPath });
-  return res as { success: boolean; opened?: boolean; alreadyOpen?: boolean; targetPath?: string; error?: string };
+export async function openProjectWorkspace(rootPath: string): Promise<{
+  success: boolean
+  opened?: boolean
+  alreadyOpen?: boolean
+  targetPath?: string
+  error?: string
+}> {
+  const res = await ipcRequest('openProjectWorkspace', { rootPath })
+  return res as {
+    success: boolean
+    opened?: boolean
+    alreadyOpen?: boolean
+    targetPath?: string
+    error?: string
+  }
 }
 
 export async function prepareProjectWorkspace(
   projectName: string,
-  projectKey: string
+  projectKey: string,
 ): Promise<{
-  success: boolean;
-  rootPath?: string;
-  workspacePath?: string;
-  repos?: Array<{ key: string; gitlabProjectName: string; localPath: string }>;
-  error?: string;
+  success: boolean
+  rootPath?: string
+  workspacePath?: string
+  repos?: Array<{ key: string; gitlabProjectName: string; localPath: string }>
+  error?: string
 }> {
-  const res = await ipcRequest('prepareProjectWorkspace', { projectName, projectKey });
+  const res = await ipcRequest('prepareProjectWorkspace', {
+    projectName,
+    projectKey,
+  })
   return res as {
-    success: boolean;
-    rootPath?: string;
-    workspacePath?: string;
-    repos?: Array<{ key: string; gitlabProjectName: string; localPath: string }>;
-    error?: string;
-  };
+    success: boolean
+    rootPath?: string
+    workspacePath?: string
+    repos?: Array<{ key: string; gitlabProjectName: string; localPath: string }>
+    error?: string
+  }
 }
 
 /**
@@ -203,10 +245,10 @@ export async function prepareProjectWorkspace(
  */
 export async function saveConfig(
   flow: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
 ): Promise<{ success: boolean; filePath?: string; error?: string }> {
-  const res = await ipcRequest('saveConfig', { flow, data });
-  return res as { success: boolean; filePath?: string; error?: string };
+  const res = await ipcRequest('saveConfig', { flow, data })
+  return res as { success: boolean; filePath?: string; error?: string }
 }
 
 /**
@@ -214,49 +256,54 @@ export async function saveConfig(
  * @param flow  要读取的流程配置文件
  */
 export async function readConfig(
-  flow: string
+  flow: string,
 ): Promise<Record<string, unknown> | null> {
-  const res = await ipcRequest('readConfig', { flow });
-  if (res.error) return null;
-  return res.data as Record<string, unknown> ?? null;
+  const res = await ipcRequest('readConfig', { flow })
+  if (res.error) return null
+  return (res.data as Record<string, unknown>) ?? null
 }
 
-export async function readDesignTree(flow?: 'hibist' | 'sailor' | 'verification'): Promise<Record<string, unknown> | null> {
-  const res = await ipcRequest('readDesignTree', flow ? { flow } : {});
-  if (res.error) return null;
-  return res.data as Record<string, unknown> ?? null;
+export async function readDesignTree(
+  flow?: 'hibist' | 'sailor' | 'verification',
+): Promise<Record<string, unknown> | null> {
+  const res = await ipcRequest('readDesignTree', flow ? { flow } : {})
+  if (res.error) return null
+  return (res.data as Record<string, unknown>) ?? null
 }
 
-export type RepoKey = 'data' | 'hibist' | 'sailor' | 'verification';
+export type RepoKey = 'data' | 'hibist' | 'sailor' | 'verification'
 
 export interface RepoGitInfo {
-  repo: RepoKey;
-  repoRoot?: string;
-  branch?: string;
-  upstream?: string;
-  hasChanges?: boolean;
-  changedCount?: number;
-  changedFiles?: GitChangedFileInfo[];
-  error?: string;
+  repo: RepoKey
+  repoRoot?: string
+  branch?: string
+  upstream?: string
+  hasChanges?: boolean
+  changedCount?: number
+  changedFiles?: GitChangedFileInfo[]
+  error?: string
 }
 
 export async function getRepoGitInfo(repo: RepoKey): Promise<RepoGitInfo> {
-  const res = await ipcRequest('getRepoGitInfo', { repo });
-  return res as unknown as RepoGitInfo;
+  const res = await ipcRequest('getRepoGitInfo', { repo })
+  return res as unknown as RepoGitInfo
 }
 
-export async function getProjectRepoGitInfo(): Promise<{ repos: RepoGitInfo[]; error?: string }> {
-  const res = await ipcRequest('getProjectRepoGitInfo');
-  return res as { repos: RepoGitInfo[]; error?: string };
+export async function getProjectRepoGitInfo(): Promise<{
+  repos: RepoGitInfo[]
+  error?: string
+}> {
+  const res = await ipcRequest('getProjectRepoGitInfo')
+  return res as { repos: RepoGitInfo[]; error?: string }
 }
 
 export async function runRepoGitAction(options: {
-  repo: RepoKey;
-  action: 'pull' | 'push' | 'fetch' | 'checkout' | 'createBranch' | 'openScm';
-  branchName?: string;
+  repo: RepoKey
+  action: 'pull' | 'push' | 'fetch' | 'checkout' | 'createBranch' | 'openScm'
+  branchName?: string
 }): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('runRepoGitAction', options, 120_000);
-  return res as { success: boolean; error?: string };
+  const res = await ipcRequest('runRepoGitAction', options, 120_000)
+  return res as { success: boolean; error?: string }
 }
 
 export type RepoCloudSubmitState =
@@ -268,132 +315,184 @@ export type RepoCloudSubmitState =
   | 'gitOperationInProgress'
   | 'noRepo'
   | 'noRemote'
-  | 'error';
+  | 'error'
 
 export interface RepoCloudSubmitResult {
-  success: boolean;
-  state: RepoCloudSubmitState;
-  repo: RepoKey;
-  repoRoot?: string;
-  branch?: string;
-  upstream?: string;
-  changedCount?: number;
-  conflictFiles?: GitChangedFileInfo[];
-  commitMessage?: string;
-  error?: string;
+  success: boolean
+  state: RepoCloudSubmitState
+  repo: RepoKey
+  repoRoot?: string
+  branch?: string
+  upstream?: string
+  changedCount?: number
+  conflictFiles?: GitChangedFileInfo[]
+  commitMessage?: string
+  error?: string
 }
 
 export async function submitRepoToCloud(options: {
-  repo: RepoKey;
-  message?: string;
-  pullBeforePush?: boolean;
+  repo: RepoKey
+  message?: string
+  pullBeforePush?: boolean
 }): Promise<RepoCloudSubmitResult> {
-  const res = await ipcRequest('submitRepoToCloud', options, 180_000);
-  return res as unknown as RepoCloudSubmitResult;
+  const res = await ipcRequest('submitRepoToCloud', options, 180_000)
+  return res as unknown as RepoCloudSubmitResult
 }
 
 export async function syncCommonArtifacts(options: {
-  targetRepo: RepoKey;
-  designTree?: string;
-  normTable?: string;
-  message?: string;
-  push?: boolean;
+  targetRepo: RepoKey
+  designTree?: string
+  normTable?: string
+  message?: string
+  push?: boolean
 }): Promise<{
-  success: boolean;
-  commitMessage?: string;
-  files?: Array<{ label: string; path: string; overwritten: boolean }>;
-  error?: string;
+  success: boolean
+  commitMessage?: string
+  files?: Array<{ label: string; path: string; overwritten: boolean }>
+  error?: string
 }> {
-  const res = await ipcRequest('syncCommonArtifacts', options, 120_000);
+  const res = await ipcRequest('syncCommonArtifacts', options, 120_000)
   return res as {
-    success: boolean;
-    commitMessage?: string;
-    files?: Array<{ label: string; path: string; overwritten: boolean }>;
-    error?: string;
-  };
+    success: boolean
+    commitMessage?: string
+    files?: Array<{ label: string; path: string; overwritten: boolean }>
+    error?: string
+  }
 }
 
 export async function saveDesignTree(
   flow: string,
-  data: Record<string, unknown>
-): Promise<{ success: boolean; filePath?: string; mode?: string; error?: string }> {
-  const res = await ipcRequest('saveDesignTree', { flow, data });
-  return res as { success: boolean; filePath?: string; mode?: string; error?: string };
+  data: Record<string, unknown>,
+): Promise<{
+  success: boolean
+  filePath?: string
+  mode?: string
+  error?: string
+}> {
+  const res = await ipcRequest('saveDesignTree', { flow, data })
+  return res as {
+    success: boolean
+    filePath?: string
+    mode?: string
+    error?: string
+  }
 }
 
 export interface FlowConfigFileInfo {
-  key: string;
-  moduleName: string;
-  fileName: string;
-  filePath: string;
-  workDir: string;
-  updatedAt?: number;
-  size?: number;
+  key: string
+  moduleName: string
+  fileName: string
+  filePath: string
+  workDir: string
+  updatedAt?: number
+  size?: number
 }
 
 export async function listFlowConfigFiles(
-  flow: 'hibist' | 'sailor' | 'verification'
-): Promise<{ success: boolean; configs: FlowConfigFileInfo[]; configsDir?: string; error?: string }> {
-  const res = await ipcRequest('listFlowConfigFiles', { flow });
-  return res as unknown as { success: boolean; configs: FlowConfigFileInfo[]; configsDir?: string; error?: string };
+  flow: 'hibist' | 'sailor' | 'verification',
+): Promise<{
+  success: boolean
+  configs: FlowConfigFileInfo[]
+  configsDir?: string
+  error?: string
+}> {
+  const res = await ipcRequest('listFlowConfigFiles', { flow })
+  return res as unknown as {
+    success: boolean
+    configs: FlowConfigFileInfo[]
+    configsDir?: string
+    error?: string
+  }
 }
 
 export async function createFlowConfigFile(
   flow: 'hibist' | 'sailor' | 'verification',
-  moduleName: string
+  moduleName: string,
 ): Promise<{ success: boolean; config?: FlowConfigFileInfo; error?: string }> {
-  const res = await ipcRequest('createFlowConfigFile', { flow, moduleName });
-  return res as unknown as { success: boolean; config?: FlowConfigFileInfo; error?: string };
+  const res = await ipcRequest('createFlowConfigFile', { flow, moduleName })
+  return res as unknown as {
+    success: boolean
+    config?: FlowConfigFileInfo
+    error?: string
+  }
 }
 
 export async function duplicateFlowConfigFile(
   flow: 'hibist' | 'sailor' | 'verification',
-  moduleName: string
+  moduleName: string,
 ): Promise<{ success: boolean; config?: FlowConfigFileInfo; error?: string }> {
-  const res = await ipcRequest('duplicateFlowConfigFile', { flow, moduleName });
-  return res as unknown as { success: boolean; config?: FlowConfigFileInfo; error?: string };
+  const res = await ipcRequest('duplicateFlowConfigFile', { flow, moduleName })
+  return res as unknown as {
+    success: boolean
+    config?: FlowConfigFileInfo
+    error?: string
+  }
 }
 
 export async function renameFlowConfigFile(
   flow: 'hibist' | 'sailor' | 'verification',
   moduleName: string,
-  nextModuleName: string
+  nextModuleName: string,
 ): Promise<{ success: boolean; config?: FlowConfigFileInfo; error?: string }> {
-  const res = await ipcRequest('renameFlowConfigFile', { flow, moduleName, nextModuleName });
-  return res as unknown as { success: boolean; config?: FlowConfigFileInfo; error?: string };
+  const res = await ipcRequest('renameFlowConfigFile', {
+    flow,
+    moduleName,
+    nextModuleName,
+  })
+  return res as unknown as {
+    success: boolean
+    config?: FlowConfigFileInfo
+    error?: string
+  }
 }
 
 export async function deleteFlowConfigFile(
   flow: 'hibist' | 'sailor' | 'verification',
-  moduleName: string
+  moduleName: string,
 ): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('deleteFlowConfigFile', { flow, moduleName });
-  return res as { success: boolean; error?: string };
+  const res = await ipcRequest('deleteFlowConfigFile', { flow, moduleName })
+  return res as { success: boolean; error?: string }
 }
 
 export async function generateDefaultFlowConfigs(
-  flow: 'hibist' | 'sailor' | 'verification', scriptPath: string
-): Promise<{ success: boolean; configs: FlowConfigFileInfo[]; configsDir?: string; created: number; error?: string }> {
-  const res = await ipcRequest('generateDefaultFlowConfigs', { flow, scriptPath });
-  return res as unknown as { success: boolean; configs: FlowConfigFileInfo[]; configsDir?: string; created: number; error?: string };
+  flow: 'hibist' | 'sailor' | 'verification',
+  scriptPath: string,
+): Promise<{
+  success: boolean
+  configs: FlowConfigFileInfo[]
+  configsDir?: string
+  created: number
+  error?: string
+}> {
+  const res = await ipcRequest('generateDefaultFlowConfigs', {
+    flow,
+    scriptPath,
+  })
+  return res as unknown as {
+    success: boolean
+    configs: FlowConfigFileInfo[]
+    configsDir?: string
+    created: number
+    error?: string
+  }
 }
 
 export interface LocalConfigInfo {
-  configuredPath: string;
-  effectivePath: string | null;
-  defaultPath: string | null;
-  isDefault: boolean;
-  error?: string;
-  lastSelectedProject?: string;
+  configuredPath: string
+  effectivePath: string | null
+  defaultPath: string | null
+  isDefault: boolean
+  error?: string
+  lastSelectedProject?: string
 }
 
 export interface WorkspaceProjectInfo {
-  success: boolean;
-  projectRoot: string | null;
-  projectName: string | null;
-  workspaceName: string | null;
-  folders: Array<{ name: string; path: string }>;
-  error?: string;
+  success: boolean
+  projectRoot: string | null
+  projectName: string | null
+  workspaceName: string | null
+  folders: Array<{ name: string; path: string }>
+  error?: string
 }
 
 const localConfigInfoSchema = z.object({
@@ -403,45 +502,67 @@ const localConfigInfoSchema = z.object({
   isDefault: z.boolean().default(true),
   error: z.string().optional(),
   lastSelectedProject: z.string().optional(),
-});
+})
 
 const workspaceProjectInfoSchema = z.object({
   success: z.boolean().default(false),
   projectRoot: z.string().nullable().default(null),
   projectName: z.string().nullable().default(null),
   workspaceName: z.string().nullable().default(null),
-  folders: z.array(z.object({ name: z.string(), path: z.string() })).default([]),
+  folders: z
+    .array(z.object({ name: z.string(), path: z.string() }))
+    .default([]),
   error: z.string().optional(),
-});
+})
 
 export async function getLocalConfigInfo(): Promise<LocalConfigInfo> {
-  const res = await ipcRequest('getLocalConfigInfo');
-  const parsed = localConfigInfoSchema.safeParse(res);
+  const res = await ipcRequest('getLocalConfigInfo')
+  const parsed = localConfigInfoSchema.safeParse(res)
   return parsed.success
     ? parsed.data
-    : { configuredPath: '', effectivePath: null, defaultPath: null, isDefault: true, error: 'Invalid local config response' };
+    : {
+        configuredPath: '',
+        effectivePath: null,
+        defaultPath: null,
+        isDefault: true,
+        error: 'Invalid local config response',
+      }
 }
 
 export async function getWorkspaceProjectInfo(): Promise<WorkspaceProjectInfo> {
-  const res = await ipcRequest('getWorkspaceProjectInfo');
-  const parsed = workspaceProjectInfoSchema.safeParse(res);
+  const res = await ipcRequest('getWorkspaceProjectInfo')
+  const parsed = workspaceProjectInfoSchema.safeParse(res)
   return parsed.success
     ? parsed.data
-    : { success: false, projectRoot: null, projectName: null, workspaceName: null, folders: [], error: 'Invalid workspace response' };
+    : {
+        success: false,
+        projectRoot: null,
+        projectName: null,
+        workspaceName: null,
+        folders: [],
+        error: 'Invalid workspace response',
+      }
 }
 
 export async function setLocalConfigPath(
-  path: string
+  path: string,
 ): Promise<{ success: boolean; error?: string } & LocalConfigInfo> {
-  const res = await ipcRequest('setLocalConfigPath', { path });
-  return res as unknown as { success: boolean; error?: string } & LocalConfigInfo;
+  const res = await ipcRequest('setLocalConfigPath', { path })
+  return res as unknown as {
+    success: boolean
+    error?: string
+  } & LocalConfigInfo
 }
 
 export async function enterProjectWorkspace(
-  project: DftProject
+  project: DftProject,
 ): Promise<{ success: boolean; projectPath?: string; error?: string }> {
-  const res = await ipcRequest('enterProjectWorkspace', { project }, 300_000);
-  return res as unknown as { success: boolean; projectPath?: string; error?: string };
+  const res = await ipcRequest('enterProjectWorkspace', { project }, 300_000)
+  return res as unknown as {
+    success: boolean
+    projectPath?: string
+    error?: string
+  }
 }
 
 /**
@@ -453,10 +574,10 @@ export async function enterProjectWorkspace(
 export async function syncGit(
   flow: string,
   message?: string,
-  push = false
+  push = false,
 ): Promise<{ success: boolean; commitMessage?: string; error?: string }> {
-  const res = await ipcRequest('syncGit', { flow, message, push });
-  return res as { success: boolean; commitMessage?: string; error?: string };
+  const res = await ipcRequest('syncGit', { flow, message, push })
+  return res as { success: boolean; commitMessage?: string; error?: string }
 }
 
 // ─── 优化 2: 路径有效性验证 ────────────────────────────────────
@@ -467,10 +588,26 @@ export async function syncGit(
  */
 export async function validatePath(
   targetPath: string,
-  rootPath?: string
-): Promise<{ exists: boolean; isFile: boolean; isDirectory: boolean; withinRoot?: boolean; error?: string }> {
-  const res = await ipcRequest('validatePath', { path: targetPath, rootPath }, 5_000);
-  return res as { exists: boolean; isFile: boolean; isDirectory: boolean; withinRoot?: boolean; error?: string };
+  rootPath?: string,
+): Promise<{
+  exists: boolean
+  isFile: boolean
+  isDirectory: boolean
+  withinRoot?: boolean
+  error?: string
+}> {
+  const res = await ipcRequest(
+    'validatePath',
+    { path: targetPath, rootPath },
+    5_000,
+  )
+  return res as {
+    exists: boolean
+    isFile: boolean
+    isDirectory: boolean
+    withinRoot?: boolean
+    error?: string
+  }
 }
 
 // ─── 优化 3: 任务取消 ──────────────────────────────────────────
@@ -480,36 +617,36 @@ export async function validatePath(
  * @param jobId  任务 ID
  */
 export async function cancelTask(
-  jobId: string
+  jobId: string,
 ): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('cancelTask', { jobId });
-  return res as { success: boolean; error?: string };
+  const res = await ipcRequest('cancelTask', { jobId })
+  return res as { success: boolean; error?: string }
 }
 
 // ─── 优化 4: Git changed files (diff 预览) ─────────────────────
 
 export interface GitChangedFileInfo {
-  path: string;
-  type: 'index' | 'workingTree' | 'merge' | 'unknown';
+  path: string
+  type: 'index' | 'workingTree' | 'merge' | 'unknown'
 }
 
 /**
  * 获取当前仓库的变更文件列表，供 Webview 展示 diff 预览。
  */
 export async function getGitChangedFiles(): Promise<{
-  files: GitChangedFileInfo[];
-  branch?: string;
-  error?: string;
+  files: GitChangedFileInfo[]
+  branch?: string
+  error?: string
 }> {
-  const res = await ipcRequest('getGitChangedFiles');
-  return res as { files: GitChangedFileInfo[]; branch?: string; error?: string };
+  const res = await ipcRequest('getGitChangedFiles')
+  return res as { files: GitChangedFileInfo[]; branch?: string; error?: string }
 }
 
 /**
  * 打开 VS Code Source Control（SCM）视图。
  */
 export function openSourceControl(): void {
-  vscode.postMessage({ command: 'openSourceControl' });
+  vscode.postMessage({ command: 'openSourceControl' })
 }
 
 // ─── 优化 5: 专注模式切换 ──────────────────────────────────────
@@ -518,31 +655,31 @@ export function openSourceControl(): void {
  * 切换 VS Code 布局的专注模式（隐藏/恢复活动栏、菜单栏等）。
  */
 export async function toggleZenMode(
-  enable: boolean
+  enable: boolean,
 ): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('toggleZenMode', { enable });
-  return res as { success: boolean; error?: string };
+  const res = await ipcRequest('toggleZenMode', { enable })
+  return res as { success: boolean; error?: string }
 }
 
 export async function openExecutionTerminal(options: {
-  title: string;
-  cmd?: string;
-  cwd?: string;
+  title: string
+  cmd?: string
+  cwd?: string
 }): Promise<{ success: boolean; error?: string }> {
-  vscode.postMessage({ command: 'openExecutionTerminal', ...options });
-  return { success: true };
+  vscode.postMessage({ command: 'openExecutionTerminal', ...options })
+  return { success: true }
 }
 
 export interface ExecutionHistoryRecord {
-  id: string;
-  flow: string;
-  status: 'success' | 'error' | 'cancelled';
-  logs: string[];
-  executedAt: number;
-  flowKey?: 'hibist' | 'sailor' | 'verification';
-  moduleKey?: string;
-  flowLabel?: string;
-  runtimeSnapshot?: unknown;
+  id: string
+  flow: string
+  status: 'success' | 'error' | 'cancelled'
+  logs: string[]
+  executedAt: number
+  flowKey?: 'hibist' | 'sailor' | 'verification'
+  moduleKey?: string
+  flowLabel?: string
+  runtimeSnapshot?: unknown
 }
 
 const executionHistoryRecordSchema = z.object({
@@ -555,196 +692,236 @@ const executionHistoryRecordSchema = z.object({
   moduleKey: z.string().optional(),
   flowLabel: z.string().optional(),
   runtimeSnapshot: z.unknown().optional(),
-});
+})
 
 const executionHistoryResponseSchema = z.object({
   success: z.boolean(),
   history: z.array(executionHistoryRecordSchema).default([]),
   error: z.string().optional(),
-});
+})
 
 /**
  * 保存执行记录到本地 .dft-ide/local-state/history。
  */
 export async function saveExecutionHistory(
   flow: string,
-  record: Omit<ExecutionHistoryRecord, 'id' | 'executedAt'>
+  record: Omit<ExecutionHistoryRecord, 'id' | 'executedAt'>,
 ): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('saveExecutionHistory', { flow, record });
-  return res as { success: boolean; error?: string };
+  const res = await ipcRequest('saveExecutionHistory', { flow, record })
+  return res as { success: boolean; error?: string }
 }
 
 /**
  * 获取某个流程的历史执行记录列表（最多返回最新的 500 条）。
  */
-export async function getExecutionHistory(
-  flow: string
-): Promise<{ success: boolean; history: ExecutionHistoryRecord[]; error?: string }> {
-  const res = await ipcRequest('getExecutionHistory', { flow });
-  const parsed = executionHistoryResponseSchema.safeParse(res);
-  return parsed.success ? parsed.data : { success: false, history: [], error: 'Invalid execution history response' };
+export async function getExecutionHistory(flow: string): Promise<{
+  success: boolean
+  history: ExecutionHistoryRecord[]
+  error?: string
+}> {
+  const res = await ipcRequest('getExecutionHistory', { flow })
+  const parsed = executionHistoryResponseSchema.safeParse(res)
+  return parsed.success
+    ? parsed.data
+    : {
+        success: false,
+        history: [],
+        error: 'Invalid execution history response',
+      }
 }
 
-export async function getPipelineRuntimes(): Promise<{ success: boolean; snapshots: unknown[]; error?: string }> {
-  const res = await ipcRequest('getPipelineRuntimes');
-  return res as { success: boolean; snapshots: unknown[]; error?: string };
+export async function getPipelineRuntimes(): Promise<{
+  success: boolean
+  snapshots: unknown[]
+  error?: string
+}> {
+  const res = await ipcRequest('getPipelineRuntimes')
+  return res as { success: boolean; snapshots: unknown[]; error?: string }
 }
 
 export async function ensurePipelineRuntime(options: {
-  flowKey: 'hibist' | 'sailor' | 'verification';
-  moduleKey: string;
-  flowLabel: string;
+  flowKey: 'hibist' | 'sailor' | 'verification'
+  moduleKey: string
+  flowLabel: string
 }): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('ensurePipelineRuntime', options);
-  return res as { success: boolean; error?: string };
+  const res = await ipcRequest('ensurePipelineRuntime', options)
+  return res as { success: boolean; error?: string }
 }
 
 export async function startPipelineRuntime(options: {
-  flowKey: 'hibist' | 'sailor' | 'verification';
-  moduleKey: string;
-  flowLabel: string;
-  selectedTaskIds?: string[];
-  cwd?: string;
+  flowKey: 'hibist' | 'sailor' | 'verification'
+  moduleKey: string
+  flowLabel: string
+  selectedTaskIds?: string[]
+  cwd?: string
 }): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('startPipelineRuntime', options);
-  return res as { success: boolean; error?: string };
+  const res = await ipcRequest('startPipelineRuntime', options)
+  return res as { success: boolean; error?: string }
 }
 
 export async function stopPipelineRuntime(options: {
-  flowKey: 'hibist' | 'sailor' | 'verification';
-  moduleKey: string;
-  flowLabel: string;
+  flowKey: 'hibist' | 'sailor' | 'verification'
+  moduleKey: string
+  flowLabel: string
 }): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('stopPipelineRuntime', options);
-  return res as { success: boolean; error?: string };
+  const res = await ipcRequest('stopPipelineRuntime', options)
+  return res as { success: boolean; error?: string }
 }
 
 export async function selectPipelineTask(options: {
-  flowKey: 'hibist' | 'sailor' | 'verification';
-  moduleKey: string;
-  taskId: string;
+  flowKey: 'hibist' | 'sailor' | 'verification'
+  moduleKey: string
+  taskId: string
 }): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('selectPipelineTask', options);
-  return res as { success: boolean; error?: string };
+  const res = await ipcRequest('selectPipelineTask', options)
+  return res as { success: boolean; error?: string }
 }
 
 export async function stopPipelineTask(options: {
-  flowKey: 'hibist' | 'sailor' | 'verification';
-  moduleKey: string;
-  taskId: string;
-  flowLabel: string;
+  flowKey: 'hibist' | 'sailor' | 'verification'
+  moduleKey: string
+  taskId: string
+  flowLabel: string
 }): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('stopPipelineTask', options);
-  return res as { success: boolean; error?: string };
+  const res = await ipcRequest('stopPipelineTask', options)
+  return res as { success: boolean; error?: string }
 }
 
 export async function rerunPipelineTask(options: {
-  flowKey: 'hibist' | 'sailor' | 'verification';
-  moduleKey: string;
-  taskId: string;
+  flowKey: 'hibist' | 'sailor' | 'verification'
+  moduleKey: string
+  taskId: string
 }): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('rerunPipelineTask', options);
-  return res as { success: boolean; error?: string };
+  const res = await ipcRequest('rerunPipelineTask', options)
+  return res as { success: boolean; error?: string }
 }
 
 /**
  * 打开 GitLab 仓库主页。
  */
 export async function openGitlabHost(
-  repoGitName: string
+  repoGitName: string,
 ): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('openGitlabHost', { repoGitName });
-  return res as { success: boolean; error?: string };
+  const res = await ipcRequest('openGitlabHost', { repoGitName })
+  return res as { success: boolean; error?: string }
 }
 
 export async function openExternalUrl(
-  externalUrl: string
+  externalUrl: string,
 ): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('openExternalUrl', { externalUrl });
-  return res as { success: boolean; error?: string };
+  const res = await ipcRequest('openExternalUrl', { externalUrl })
+  return res as { success: boolean; error?: string }
 }
 
 export async function getBranches(
-  repo: RepoKey
+  repo: RepoKey,
 ): Promise<{ success: boolean; error?: string; branches?: any }> {
-  const res = await ipcRequest('getBranches', { repo });
-  return res as { success: boolean; error?: string; branches?: any };
+  const res = await ipcRequest('getBranches', { repo })
+  return res as { success: boolean; error?: string; branches?: any }
 }
 
 export async function prepareCommonArtifactSync(options: {
-  targetRepo: string;
-  sourceDesignTree: string;
-  sourceNormTable: string;
-  targetDesignTree: string;
-  targetNormTable: string;
-  direction: string;
+  targetRepo: string
+  sourceDesignTree: string
+  sourceNormTable: string
+  targetDesignTree: string
+  targetNormTable: string
+  direction: string
 }): Promise<{
-  success: boolean;
-  precheck: any;
-  diffSummary: any;
-  diffItems: any[];
-  availableStrategies: string[];
-  error?: string;
+  success: boolean
+  precheck: any
+  diffSummary: any
+  diffItems: any[]
+  availableStrategies: string[]
+  error?: string
 }> {
-  const res = await ipcRequest('prepareCommonArtifactSync', options, 10 * 60_000);
-  return res as any;
+  const res = await ipcRequest(
+    'prepareCommonArtifactSync',
+    options,
+    10 * 60_000,
+  )
+  return res as any
 }
 
 export async function applyCommonArtifactSync(options: {
-  targetRepo: string;
-  strategy: string;
-  direction: string;
-  sourceDesignTree: string;
-  sourceNormTable: string;
-  targetDesignTree: string;
-  targetNormTable: string;
-  decisions: any[];
-  stageAfterApply?: boolean;
+  targetRepo: string
+  strategy: string
+  direction: string
+  sourceDesignTree: string
+  sourceNormTable: string
+  targetDesignTree: string
+  targetNormTable: string
+  decisions: any[]
+  stageAfterApply?: boolean
 }): Promise<{
-  success: boolean;
-  report: string;
-  files: any[];
-  error?: string;
+  success: boolean
+  report: string
+  artifacts: CommonSyncArtifact[]
+  files: any[]
+  error?: string
 }> {
-  const res = await ipcRequest('applyCommonArtifactSync', options, 10 * 90_000);
-  return res as any;
+  const res = await ipcRequest('applyCommonArtifactSync', options, 10 * 90_000)
+  return res as any
 }
 
 export async function openVsCodeDiff(options: {
-  sourcePath: string;
-  targetPath: string;
-  title: string;
+  sourcePath: string
+  targetPath: string
+  title: string
 }): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('openVsCodeDiff', options);
-  return res as any;
+  const res = await ipcRequest('openVsCodeDiff', options)
+  return res as any
 }
 
 export async function fetchDefaultConfigLogs(
-  flow: 'hibist' | 'sailor' | 'verification'
-): Promise<{ success: boolean; history: DefaultConfigLog[];}> {
-  const res = await ipcRequest('fetchDefaultConfigLogs', { flow });
-  return res as unknown as { success: boolean; history: DefaultConfigLog[]; };
+  flow: 'hibist' | 'sailor' | 'verification',
+): Promise<{ success: boolean; history: DefaultConfigLog[] }> {
+  const res = await ipcRequest('fetchDefaultConfigLogs', { flow })
+  return res as unknown as { success: boolean; history: DefaultConfigLog[] }
 }
 
-export async function initLanderStage(
+export async function appendLanderStage(
   flow: 'verification',
   addStage: string,
   extendStage: string,
 ): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('initLanderStage', { flow, addStage, extendStage });
-  return res as any;
+  const res = await ipcRequest('appendLanderStage', {
+    flow,
+    addStage,
+    extendStage,
+  })
+  return res as any
 }
 
 export async function getLanderStages(
   flow: 'verification',
 ): Promise<{ success: boolean; stages: string[]; error?: string }> {
-  const res = await ipcRequest('getLanderStages', { flow });
-  return res as any;
+  const res = await ipcRequest('getLanderStages', { flow })
+  return res as any
 }
 
-export async function deleteLanderStage(
-  flow: 'verification', stage: string
+export async function removeLanderStage(
+  flow: 'verification',
+  stage: string,
 ): Promise<{ success: boolean; error?: string }> {
-  const res = await ipcRequest('deleteLanderStage', { flow, stage });
-  return res as any;
+  const res = await ipcRequest('removeLanderStage', { flow, stage })
+  return res as any
+}
+
+export interface GetLanderModePipelinesResult extends Record<string, unknown> {
+  success: boolean
+
+  preMode: string
+
+  steps: LanderStep[]
+
+  error?: string
+}
+
+export async function getLanderModePipelines(
+  preMode: string,
+): Promise<GetLanderModePipelinesResult> {
+  return ipcRequest<GetLanderModePipelinesResult>('getLanderModePipelines', {
+    preMode,
+  })
 }

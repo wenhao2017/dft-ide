@@ -1,12 +1,12 @@
-#!/bin/csh
+#!/bin/csh -f
 
-set log_path = "$project_path/logs/$module"
+set log_path = "$project_path/sailor/work/$module/log"
 if (! -e $log_path) then
     mkdir -p $log_path
 endif
 
 set step = $1
-set cfg_file = "$project_path/configs/$module.cfg"
+set cfg_file = "$project_path/sailor/cfg/$module/$module.sailor.cfg"
 set log_file = "$log_path/$step.log"
 set dsub = `alias dsubrun_I`
 if ("$dsub" == "") then

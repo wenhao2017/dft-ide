@@ -28,8 +28,6 @@ const FlowShell: React.FC<FlowShellProps> = ({
 
   return (
     <div className="dft-flow-shell">
-      {sidebar && <aside className="dft-flow-sidebar">{sidebar}</aside>}
-
       <div className="dft-flow-main">
         <div className="dft-stepbar">
           <Steps
@@ -45,7 +43,15 @@ const FlowShell: React.FC<FlowShellProps> = ({
         </div>
 
         <div className="dft-flow-card">
-          <div style={{ width: '100%', minWidth: 0 }}>{activeStep.content}</div>
+          {sidebar && (
+            <aside className="dft-flow-sidebar">
+              {sidebar}
+            </aside>
+          )}
+
+          <div className="dft-flow-content">
+            {activeStep.content}
+          </div>
         </div>
       </div>
     </div>

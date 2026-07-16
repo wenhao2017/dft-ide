@@ -13,6 +13,7 @@ interface ControlledPathInputProps {
   pathSources?: PathSource[];
   size?: 'small' | 'middle' | 'large';
   showValidation?: boolean;
+  localRootPath?: string;
 }
 
 const ControlledPathInput: React.FC<ControlledPathInputProps> = ({

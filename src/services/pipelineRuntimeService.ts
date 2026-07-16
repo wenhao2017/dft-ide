@@ -76,10 +76,16 @@ function getPipelineTerminalTitle(flowLabel: string, moduleKey: string): string 
   return `${flowLabel} / ${moduleKey}`;
 }
 
-function buildPipelineStepSourceCommand(stepCommand: string): string {
-  const scriptPath = path.resolve(__dirname, '../scripts');
+function buildPipelineStepSourceCommand(projectPath: string | undefined, stepCommand: string): string {
+  let scriptPath = '';
   const scriptName = stepCommand.split(' ')[0];
-  return `source ${path.join(scriptPath, scriptName)}${stepCommand.substring(scriptName.length)}`;
+  if (projectPath) {
+    scriptPath = path.join(path.dirname(projectPath), ".dft-ide", "local-state", "scripts", scriptName);
+  }
+  if (!scriptPath || !fs.existsSync(scriptPath)) {
+    scriptPath = path.resolve(__dirname, '../scripts', scriptName);
+  }
+  return `source ${scriptPath}${stepCommand.substring(scriptName.length)}`;
 }
 
 function stripAnsi(value: string): string {
@@ -105,8 +111,9 @@ function buildStepCommands(
   moduleKey: string,
   envConfig?: Record<string, unknown> | null,
   taskConfig?: Record<string, unknown> | null,
-): string[] {
+): string | string[] {
   const commands: string[] = [];
+  const projectPath = resolveProjectPath(flowKey);
 
   if (index === 0) {
     const projectSource = typeof envConfig?.project === 'string' ? envConfig.project.trim() : '';
@@ -115,7 +122,6 @@ function buildStepCommands(
     }
 
     commands.push(`setenv module "${moduleKey}"`);
-    const projectPath = resolveProjectPath(flowKey);
     if (projectPath) {
       commands.push(`setenv project_path "${projectPath}"`);
     }
@@ -162,9 +168,19 @@ function buildStepCommands(
   const stepCommand = task.command.trim();
   commands.push(`echo "__DFT_IDE_STEP_START__|${runId}|${task.id}"`);
   commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
-  commands.push(buildPipelineStepSourceCommand(stepCommand));
+  commands.push(buildPipelineStepSourceCommand(projectPath, stepCommand));
   commands.push('set dft_ide_step_status = $status');
   commands.push(`echo "${buildStepEndMarker(runId, task.id)}$dft_ide_step_status"`);
+
+  if (projectPath) {
+    const targetDir = path.join(path.dirname(projectPath), ".dft-ide", "local-state", "run_flow", flowKey, moduleKey);
+    fs.mkdirSync(targetDir, { recursive: true });
+    const targetFile = path.join(targetDir, task.name);
+    const scriptContent = commands.map(cmd => cmd.trim()).join('\n');
+    fs.writeFileSync(targetFile, `#!/bin/csh -f\n${scriptContent}\n`);
+    fs.chmodSync(targetFile, 0o755);
+    return `source ${targetFile}`;
+  }
 
   return commands;
 }
@@ -292,6 +308,13 @@ function getYamlFileName(flowKey: PipelineFlowKey): string {
 }
 
 function getYamlPath(flowKey: PipelineFlowKey): string | undefined {
+  const projectPath = resolveProjectPath(flowKey);
+  if (projectPath) {
+    const yamlPath = path.join(path.dirname(projectPath), ".dft-ide", "local-state", "pipelines", getYamlFileName(flowKey));
+    if (fs.existsSync(yamlPath)) {
+      return yamlPath;
+    }
+  }
   const root = path.resolve(__dirname, '../');
   if (!root) return undefined;
   return path.join(root, 'pipelines', getYamlFileName(flowKey));
@@ -382,6 +405,7 @@ function runSequentialSimulation(
       });
       const stepCommand = task.command.trim();
       if (stepCommand) {
+        const projectPath = resolveProjectPath(flowKey);
         let commands: string[] = [];
         if (index === 0) {
           // a. 加载环境配置
@@ -392,7 +416,6 @@ function runSequentialSimulation(
           // 模块名称
           commands.push(`setenv module "${moduleKey}"`);
           // 项目路径
-          const projectPath = resolveProjectPath(flowKey);
           if (projectPath) {
             commands.push(`setenv project_path "${projectPath}"`);
           }
@@ -445,7 +468,7 @@ function runSequentialSimulation(
         }
         commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
         // d. 步骤命令
-        commands.push(buildPipelineStepSourceCommand(stepCommand));
+        commands.push(buildPipelineStepSourceCommand(projectPath, stepCommand));
 
         openTerminal(getPipelineTerminalTitle(flowLabel, moduleKey), commands, cwd);
       }
@@ -695,7 +718,7 @@ export class PipelineRuntimeService {
       const stepCommand = task.command.trim();
       let commands: string[] = [];
       commands.push(`echo "=== [DFT IDE] Rerun Step: ${task.name || task.id} ==="`);
-      commands.push(buildPipelineStepSourceCommand(stepCommand));
+      commands.push(buildPipelineStepSourceCommand(resolveProjectPath(flowKey), stepCommand));
       this.options.openTerminal(getPipelineTerminalTitle(runtime.flowLabel, moduleKey), commands);
     }
 

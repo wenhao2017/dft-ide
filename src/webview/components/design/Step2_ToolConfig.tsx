@@ -374,7 +374,7 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
             // },
             {
               key: 'execution',
-              label: '执行配置',
+              label: '配置执行',
               children: (
                 <PipelineExecutionOverview
                   ref={overviewRef}

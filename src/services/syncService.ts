@@ -441,6 +441,7 @@ export async function applyCommonArtifactSyncToRepo(options: SyncApplyOptions) {
   return {
     success: true,
     report,
+    artifacts,
     files: changedFiles.map((file) => ({
         label: file.label,
         path: vscode.workspace.asRelativePath(file.path),

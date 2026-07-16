@@ -18,6 +18,7 @@ import {
   SettingOutlined,
   TeamOutlined,
   ThunderboltOutlined,
+  RedoOutlined,
 } from '@ant-design/icons';
 import {
   getCurrentUser,
@@ -650,12 +651,16 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
           style={{ height: '100%', borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
           styles={{body: {padding: 0}}}
         >
-          <div style={{ padding: '14px 18px', borderBottom: `1px solid ${cardBorder}` }}>
-            <Input.Search
+          <div style={{ padding: '14px 18px', borderBottom: `1px solid ${cardBorder}`, display: 'flex', gap: 12 }}>
+            <Input
               allowClear
               placeholder="搜索项目、角色或负责人"
               value={projectKeyword}
               onChange={(event) => setProjectKeyword(event.target.value)}
+            />
+            <Button
+              icon={<RedoOutlined />}
+              onClick={fetchProjectData}
             />
           </div>
           {projectError && (

@@ -37,7 +37,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
       content: <Step1CommonConfig onNext={nextStep} category={category} />,
     },
     {
-      title: '执行配置',
+      title: '配置执行',
       description: '版本与资源',
       content: (
         <Step2ToolConfig
@@ -52,19 +52,6 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
         />
       ),
     },
-    // {
-    //   title: '执行配置',
-    //   description: '脚本与任务',
-    //   content: (
-    //     <Step3Execution
-    //       moduleKey={selectedModule}
-    //       onNext={nextStep}
-    //       onPrev={prevStep}
-    //       category={category}
-    //       moduleKeys={executionModuleKeys}
-    //     />
-    //   ),
-    // },
     {
       title: '结果查看',
       description: '报告与日志',

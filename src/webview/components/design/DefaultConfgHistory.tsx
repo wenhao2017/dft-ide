@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, Button, Empty, Space, Table, Tag } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
-import { fetchDefaultConfigLogs, type DefaultConfigLog } from '../../utils/ipc';
+import { fetchDefaultConfigLogs, DefaultConfigLog, openFileReadonly } from '../../utils/ipc';
+import Link from 'antd/es/typography/Link';
 
 interface Props {
   flowKey: string;
@@ -74,21 +75,41 @@ const DefaultConfgHistory: React.FC<Props> = ({ flowKey }) => {
             title: '执行脚本',
             dataIndex: 'scriptPath',
             ellipsis: true,
+            render: (value: string) => {
+              return (
+                <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+              );
+            },
           },
           {
             title: 'Design Tree',
             dataIndex: 'designTree',
             ellipsis: true,
+            render: (value: string) => {
+              return (
+                <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+              );
+            },
           },
           {
             title: '归一化表格',
             dataIndex: 'normTable',
             ellipsis: true,
+            render: (value: string) => {
+              return (
+                <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+              );
+            },
           },
           {
             title: '日志',
             dataIndex: 'logFile',
             ellipsis: true,
+            render: (value: string) => {
+              return (
+                <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+              );
+            },
           },
         ]}
       />

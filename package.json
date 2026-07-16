@@ -158,15 +158,40 @@
         },
         "dftIde.obs.scriptSpace": {
           "type": "string",
-          "default": "",
+          "default": "DFX_MTC001",
           "description": "OBS space name where conversion scripts are stored (leave empty to configure later)."
         },
         "dftIde.obs.scriptPaths": {
           "type": "object",
           "default": {
-            "hibist": "",
-            "sailor": "",
-            "verification": ""
+            "hibist": {
+              "dir": "scripts/hibist",
+              "files": [
+                "gen_cfg.py",
+                "gen_design_tree_xls2flow.py",
+                "gen_dft_sig_xls2flow.py",
+                "Pre_check.py",
+                "XFlow_read_xls.py",
+                "eco_table.py",
+                "sailor_cfg_demo.json"
+              ]
+            },
+            "sailor": {
+              "dir": "scripts/sailor",
+              "files": [
+                "gen_cfg.py",
+                "gen_design_tree_xls2flow.py",
+                "gen_dft_sig_xls2flow.py"
+              ]
+            },
+            "verification": {
+              "dir": "scripts/verification",
+              "files": [
+                "gen_cfg.py",
+                "gen_design_tree_xls2flow.py",
+                "gen_dft_sig_xls2flow.py"
+              ]
+            }
           },
           "description": "Remote file paths of conversion scripts in the script space for each flow."
         },
@@ -243,6 +268,7 @@
     "react-hook-form": "^7.56.3",
     "x-data-spreadsheet": "^1.1.9",
     "xlsx": "^0.18.5",
+    "yaml": "^2.9.0",
     "zod": "^3.24.4",
     "zustand": "^5.0.5"
   },
@@ -254,6 +280,7 @@
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.25.3",
     "npm-run-all": "^4.1.5",
+    "prettier": "^3.9.5",
     "typescript": "^5.3.3",
     "vitest": "^1.6.0"
   }

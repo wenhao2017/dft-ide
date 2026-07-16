@@ -24,7 +24,7 @@ interface Props {
   onPrev: () => void;
 }
 
-const Step4Result: React.FC<Props> = ({ onNext, onPrev }) => {
+const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
   const activeProject = useWizardStore((s) => s.activeProject);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRecords, setHistoryRecords] = useState<ExecutionHistoryRecord[]>([]);
@@ -162,4 +162,4 @@ function isPipelineRuntimeSnapshot(value: unknown): value is PipelineRuntimeSnap
     && Array.isArray(candidate.logs);
 }
 
-export default Step4Result;
+export default Step3Result;

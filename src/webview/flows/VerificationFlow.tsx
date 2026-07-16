@@ -1,50 +1,94 @@
-import React, {  useState } from 'react';
-import Step1CommonConfig from '../components/verification/Step1_CommonConfig';
+import React, { useRef, useState } from 'react'
 
-import ConfigExecution from '../components/verification/ConfigExecution';
+import Step1CommonConfig from '../components/verification/Step1_CommonConfig'
+import Step2ToolConfig, {
+  PipelineExecutionRef,
+} from '../components/verification/Step2_ToolConfig'
+import Step3Result from '../components/verification/Step3_Result'
+import Step4Cloud from '../components/verification/Step4_Cloud'
+import FlowShell from '../components/shared/FlowShell'
 
-import Step4Result from '../components/verification/Step4_Result';
-import FlowShell from '../components/shared/FlowShell';
-import Step5Cloud from '../components/verification/Step5_Cloud';
+import ModePanel from '../components/verification/mode/ModePanel'
 
+import type {
+  ModePanelItem,
+  ModePanelTab,
+  ModeRunPayload,
+} from '../components/verification/mode/types'
 
 const VerificationFlow: React.FC = () => {
-  const [currentStep, setCurrentStep] = useState(0);
+  const [currentStep, setCurrentStep] = useState(0)
+  const [selectedModule, setSelectedModule] = useState('')
+  const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>([])
+  const [moduleWorkDirs] = useState<Record<string, string>>({})
+  const [, setLastRunPayload] = useState<ModeRunPayload>()
 
+  const executionRef = useRef<PipelineExecutionRef>(null)
 
-  const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
-  const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
+  const nextStep = () => {
+    setCurrentStep((prev) => Math.min(prev + 1, 3))
+  }
 
+  const prevStep = () => {
+    setCurrentStep((prev) => Math.max(prev - 1, 0))
+  }
 
-  const initialConfig = {
-    tc: [
-      { name: "Compute_TC_A" },
-      { name: "Storage_TC_B" },
-      { name: "Network_TC_C" },
-    ],
-    subattr: [
-      { name: "attr_capacity_limit" },
-      { name: "attr_io_threshold" },
-      { name: "attr_latency_mode" },
-    ],
-    groups: [
-      {
-        name: "Root_Cluster_01",
-        tc: ["Compute_TC_A", "Storage_TC_B"],
-        subattr: ["attr_capacity_limit", "attr_io_threshold"],
-      },
-      {
-        name: "Archive_Node_02",
-      },
-    ],
+  const handleSelect = (tab: ModePanelTab, item?: ModePanelItem) => {
+    if (tab === 'mode') {
+      setSelectedModule(item?.name ?? '')
+    }
+  }
+
+  const handleCheckedChange = (tab: ModePanelTab, keys: string[]) => {
+    if (tab === 'mode') {
+      setExecutionModuleKeys(keys)
+    }
+  }
+
+  const handleRun = (payload: ModeRunPayload) => {
+    setLastRunPayload(payload)
+    setSelectedModule(payload.mode.name)
+    setExecutionModuleKeys([payload.mode.name])
+
+    executionRef.current?.handleExternalRun([payload.mode.name])
+  }
+
+  const handleStop = (keys: string[]) => {
+    executionRef.current?.handleExternalStop(keys)
   }
 
   const steps = [
-    { title: '公共配置', description: '环境与出口', content: <Step1CommonConfig onNext={nextStep} /> },
-    { title: '配置和执行', description: '仿真工具链', content: <ConfigExecution initialConfig={initialConfig} /> },
-    { title: '结果页', description: '日志与报告', content: <Step4Result onNext={nextStep} onPrev={prevStep} /> },
-    { title: '端云协同', description: '共享与复用', content: <Step5Cloud onPrev={prevStep} /> },
-  ];
+    {
+      title: '公共配置',
+      description: '环境与出口',
+      content: <Step1CommonConfig onNext={nextStep} />,
+    },
+    {
+      title: '工具配置',
+      description: '仿真工具链',
+      content: (
+        <Step2ToolConfig
+          ref={executionRef}
+          moduleKey={selectedModule}
+          onModuleSelect={setSelectedModule}
+          onNext={nextStep}
+          onPrev={prevStep}
+          moduleKeys={executionModuleKeys}
+          moduleWorkDirs={moduleWorkDirs}
+        />
+      ),
+    },
+    {
+      title: '结果页',
+      description: '日志与报告',
+      content: <Step3Result onNext={nextStep} onPrev={prevStep} />,
+    },
+    {
+      title: '端云协同',
+      description: '共享与复用',
+      content: <Step4Cloud onPrev={prevStep} />,
+    },
+  ]
 
   return (
     <FlowShell
@@ -55,8 +99,21 @@ const VerificationFlow: React.FC = () => {
       steps={steps}
       current={currentStep}
       onStepChange={setCurrentStep}
+      sidebar={
+        currentStep !== 0 ? (
+          <ModePanel
+            accent="#059669"
+            initialTab="mode"
+            title="模式与参数配置"
+            onSelect={handleSelect}
+            onCheckedChange={handleCheckedChange}
+            onRun={handleRun}
+            onStop={handleStop}
+          />
+        ) : undefined
+      }
     />
-  );
-};
+  )
+}
 
-export default VerificationFlow;
+export default VerificationFlow

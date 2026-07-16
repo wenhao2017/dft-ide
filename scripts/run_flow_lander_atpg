@@ -1,4 +1,4 @@
-#!/bin/csh
+#!/bin/csh -f
 
 set log_path = "$project_path/logs/$module"
 if (! -e $log_path) then
