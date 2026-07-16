@@ -11,7 +11,6 @@ const METADATA_SCHEMA_VERSION = 1;
 const DEFAULT_CHECK_INTERVAL_MINUTES = 3;
 const DEFAULT_STARTUP_DELAY_SECONDS = 10;
 const DEFAULT_CONCURRENCY = 4;
-const SNOOZE_MINUTES = 10;
 
 export type ObsTrackingPolicy = 'latest' | 'pinned';
 
@@ -76,6 +75,11 @@ interface ObsLocalIndexFile {
 
 interface UpdateQuickPickItem extends vscode.QuickPickItem {
   update: ObsPendingUpdate;
+}
+
+interface SnoozeQuickPickItem extends vscode.QuickPickItem {
+  durationMs?: number;
+  ignoreCurrentVersion?: boolean;
 }
 
 export class ObsLocalModificationError extends Error {
@@ -463,12 +467,29 @@ export class ObsTrackingService implements vscode.Disposable {
     } else if (action === '全部更新') {
       await this.updateFiles(updates);
     } else if (action === '稍后提醒') {
-      const until = Date.now() + SNOOZE_MINUTES * 60_000;
+      const choice = await vscode.window.showQuickPick<SnoozeQuickPickItem>([
+        { label: '30 分钟', description: '30 分钟内不再自动提示', durationMs: 30 * 60_000 },
+        { label: '2 小时', description: '2 小时内不再自动提示', durationMs: 2 * 60 * 60_000 },
+        { label: '1 天', description: '24 小时内不再自动提示', durationMs: 24 * 60 * 60_000 },
+        { label: '7 天', description: '7 天内不再自动提示', durationMs: 7 * 24 * 60 * 60_000 },
+        {
+          label: '当前版本不再提醒',
+          description: '远端出现更新版本后会再次提示',
+          ignoreCurrentVersion: true,
+        },
+      ], {
+        title: '暂停 OBS 更新提醒',
+        placeHolder: '选择暂停提醒的时间',
+      });
+      if (!choice) return;
+      const until = choice.durationMs ? Date.now() + choice.durationMs : undefined;
       for (const update of updates) {
         const entry = this.entries.get(normalizeLocalPath(update.metadataPath));
         if (entry) {
           entry.snoozedUntil = until;
-          entry.lastNotifiedVersionId = undefined;
+          entry.lastNotifiedVersionId = choice.ignoreCurrentVersion
+            ? updateIdentity(update)
+            : undefined;
         }
       }
       this.scheduleFlush();
