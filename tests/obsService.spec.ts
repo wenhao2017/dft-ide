@@ -126,4 +126,96 @@ describe('ObsService', () => {
       )).toBe(true);
     });
   });
+
+  describe('getFileDetailInfo', () => {
+    it('returns exists=false only for FILE_NOT_EXIST', async () => {
+      global.fetch = vi.fn(async (input: string | URL | Request) => {
+        if (String(input).includes('/api/v1/space/group/getSpaceToken')) {
+          return {
+            ok: true,
+            json: async () => ({ code: 1, data: { spaceToken: 'token' } }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          headers: { get: () => null },
+          json: async () => ({ message: 'FILE_NOT_EXIST' }),
+        } as unknown as Response;
+      });
+
+      await expect(obsService.getFileDetailInfo('space', '/deleted.py')).resolves.toEqual({
+        exists: false,
+        filepath: '/deleted.py',
+      });
+    });
+
+    it('does not misclassify another backend error as a remote deletion', async () => {
+      global.fetch = vi.fn(async (input: string | URL | Request) => {
+        if (String(input).includes('/api/v1/space/group/getSpaceToken')) {
+          return {
+            ok: true,
+            json: async () => ({ code: 1, data: { spaceToken: 'token' } }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          headers: { get: () => null },
+          json: async () => ({ code: 500, message: 'SPACE_TOKEN_EXPIRED' }),
+        } as unknown as Response;
+      });
+
+      await expect(obsService.getFileDetailInfo('space', '/file.py')).rejects.toThrow(
+        'OBS file detail failed: SPACE_TOKEN_EXPIRED'
+      );
+    });
+  });
+
+  describe('downloadFile', () => {
+    it('treats a JSON response as an error even when HTTP status is successful', async () => {
+      global.fetch = vi.fn(async (input: string | URL | Request) => {
+        if (String(input).includes('/api/v1/space/group/getSpaceToken')) {
+          return {
+            ok: true,
+            json: async () => ({ code: 1, data: { spaceToken: 'token' } }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          headers: { get: (name: string) => name === 'content-type' ? 'application/json' : null },
+          json: async () => ({ code: 500, message: 'FILE_NOT_EXIST' }),
+        } as unknown as Response;
+      });
+
+      await expect(obsService.downloadFile('space', '/missing.py', vscode.Uri.file('/tmp/missing.py')))
+        .rejects.toThrow('不存在该文件');
+    });
+
+    it('uses a known MD5 without issuing a second detail request', async () => {
+      const md5 = 'e10adc3949ba59abbe56e057f20f883e';
+      const mockFetch = vi.fn(async (input: string | URL | Request) => {
+        if (String(input).includes('/api/v1/space/group/getSpaceToken')) {
+          return {
+            ok: true,
+            json: async () => ({ code: 1, data: { spaceToken: 'token' } }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          headers: {
+            get: (name: string) => name === 'content-type' ? 'application/octet-stream' : null,
+          },
+          arrayBuffer: async () => Buffer.from('content'),
+        } as unknown as Response;
+      });
+      global.fetch = mockFetch;
+
+      const result = await obsService.downloadFile('space', '/main.py', vscode.Uri.file('/tmp/main.py'), {
+        knownEtag: md5,
+      });
+
+      expect(result.etag).toBe(md5);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockFetch.mock.calls.some(([input]) => String(input).includes('/command/detail'))).toBe(false);
+    });
+  });
 });

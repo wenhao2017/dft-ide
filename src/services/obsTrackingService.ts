@@ -2,7 +2,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { obsService, ObsChildItem, ObsDownloadedFileResult } from './obsService';
+import { obsService, ObsChildItem, ObsDownloadedFileResult, ObsTrackingOrigin } from './obsService';
 import { resolveLocalConfigDirectory } from './workspaceService';
 
 const METADATA_SUFFIX = '.obs.json';
@@ -24,6 +24,7 @@ export interface ObsTrackedMetadata {
   source: {
     spaceName: string;
     remotePath: string;
+    origin?: ObsTrackingOrigin;
     versionId?: string;
     etag?: string;
     updatedAt?: string;
@@ -34,6 +35,8 @@ export interface ObsTrackedMetadata {
 
 export interface ObsTrackedDownloadOptions {
   versionId?: string;
+  remoteEtag?: string;
+  remoteUpdatedAt?: string;
   policy?: ObsTrackingPolicy;
   force?: boolean;
   overwriteUntracked?: boolean;
@@ -55,6 +58,7 @@ export interface ObsPendingUpdate {
   remoteEtag?: string;
   remoteUpdatedAt?: string;
   remoteSize?: number;
+  remoteDeleted?: boolean;
 }
 
 interface ObsIndexEntry {
@@ -100,6 +104,9 @@ export class ObsTrackingService implements vscode.Disposable {
   private intervalHandle: ReturnType<typeof setInterval> | undefined;
   private startupHandle: ReturnType<typeof setTimeout> | undefined;
   private flushHandle: ReturnType<typeof setTimeout> | undefined;
+  private flushPromise: Promise<void> | undefined;
+  private indexDirty = false;
+  private globalIndexUri: vscode.Uri | undefined;
   private disposed = false;
   private workspaceGeneration = 0;
 
@@ -108,6 +115,7 @@ export class ObsTrackingService implements vscode.Disposable {
       return;
     }
 
+    this.globalIndexUri = vscode.Uri.joinPath(context.globalStorageUri, 'obs-tracking', 'index.json');
     this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
     this.statusBarItem.command = 'dftIde.manageObsUpdates';
     this.statusBarItem.tooltip = '查看 OBS 文件更新';
@@ -120,6 +128,8 @@ export class ObsTrackingService implements vscode.Disposable {
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration('dftIde.obs')) {
           obsService.clearTokenCache();
+          this.pendingUpdates.clear();
+          this.updateStatusBar();
           this.configureSchedule();
         }
       })
@@ -202,19 +212,26 @@ export class ObsTrackingService implements vscode.Disposable {
 
     try {
       let targetVersionId = options.versionId;
-      if (!targetVersionId) {
+      let targetEtag = normalizeOptionalIdentity(options.remoteEtag);
+      let targetUpdatedAt = options.remoteUpdatedAt;
+      if (!targetVersionId && !targetEtag) {
         const detail = await obsService.getFileDetailInfo(spaceName, normalizedRemotePath);
         if (!detail.exists) {
-          throw new Error(`OBS file does not exist or its version cannot be resolved: ${normalizedRemotePath}`);
+          throw new Error(`OBS file does not exist or its remote identity cannot be resolved: ${normalizedRemotePath}`);
         }
         targetVersionId = detail.versionId;
+        targetEtag = detail.etag || detail.md5;
+        targetUpdatedAt = detail.updatedAt;
       }
       const result = await obsService.downloadFile(spaceName, normalizedRemotePath, tempUri, {
         versionId: targetVersionId,
+        knownEtag: targetEtag,
+        knownUpdatedAt: targetUpdatedAt,
       });
       const resolvedVersionId = normalizeOptionalVersion(result.versionId) ?? targetVersionId;
-      if (!resolvedVersionId) {
-        throw new Error(`OBS download did not return a version id: ${normalizedRemotePath}`);
+      const resolvedEtag = normalizeOptionalIdentity(result.etag) ?? normalizeOptionalIdentity(targetEtag);
+      if (!resolvedVersionId && !resolvedEtag) {
+        throw new Error(`OBS download did not return a version id or MD5: ${normalizedRemotePath}`);
       }
       const stat = await vscode.workspace.fs.stat(tempUri);
       const sha256 = await sha256File(tempUri.fsPath);
@@ -228,8 +245,9 @@ export class ObsTrackingService implements vscode.Disposable {
         source: {
           spaceName,
           remotePath: normalizedRemotePath,
+          origin: obsService.getTrackingOrigin(),
           versionId: resolvedVersionId,
-          etag: result.etag,
+          etag: resolvedEtag,
           updatedAt: result.updatedAt,
         },
         downloadedAt: new Date().toISOString(),
@@ -277,6 +295,8 @@ export class ObsTrackingService implements vscode.Disposable {
         const result = await this.downloadFile(spaceName, item.path, destination, {
           ...options,
           versionId: options.versionIdMap?.[normalizeRemotePath(item.path)] ?? item.versionId ?? options.versionId,
+          remoteEtag: item.etag || item.md5 || options.remoteEtag,
+          remoteUpdatedAt: item.updatedAt || options.remoteUpdatedAt,
         });
         downloadedItems.push(result);
       } catch (error) {
@@ -314,6 +334,7 @@ export class ObsTrackingService implements vscode.Disposable {
 
   private async handleWorkspaceChanged(): Promise<void> {
     this.workspaceGeneration++;
+    await this.flushIndex();
     this.entries.clear();
     this.pendingUpdates.clear();
     this.updateStatusBar();
@@ -345,8 +366,13 @@ export class ObsTrackingService implements vscode.Disposable {
 
   private async performUpdateCheck(options: { manual?: boolean }): Promise<ObsPendingUpdate[]> {
     await this.bootstrapPromise;
+    await this.refreshKnownMetadataFiles();
     const generation = this.workspaceGeneration;
-    const tracked = [...this.entries.values()].filter((entry) => entry.metadata.policy === 'latest');
+    const currentOrigin = obsService.getTrackingOrigin();
+    const tracked = [...this.entries.values()].filter((entry) =>
+      entry.metadata.policy === 'latest'
+      && (!entry.metadata.source.origin || isSameOrigin(entry.metadata.source.origin, currentOrigin))
+    );
     if (tracked.length === 0) {
       if (options.manual) {
         void vscode.window.showInformationMessage('当前工作区没有受管的 OBS 文件。');
@@ -378,6 +404,7 @@ export class ObsTrackingService implements vscode.Disposable {
         for (const entry of group) {
           const remotePath = normalizeRemotePath(entry.metadata.source.remotePath);
           let remote = byPath.get(remotePath);
+          let remoteDeleted = false;
           if (!remote) {
             const detail = await obsService.getFileDetailInfo(spaceName, remotePath);
             if (detail.exists) {
@@ -390,19 +417,22 @@ export class ObsTrackingService implements vscode.Disposable {
                 versionId: detail.versionId,
                 etag: detail.etag,
               };
+            } else {
+              remoteDeleted = true;
             }
           }
           checkedArtifacts.add(normalizeLocalPath(entry.artifactPath));
           entry.lastCheckedAt = now;
-          if (remote && hasRemoteUpdate(entry.metadata, remote)) {
+          if (remoteDeleted || (remote && await this.hasRemoteUpdate(entry, remote))) {
             updates.push({
               artifactPath: entry.artifactPath,
               metadataPath: entry.metadataPath,
               metadata: entry.metadata,
-              remoteVersionId: remote.versionId,
-              remoteEtag: remote.etag,
-              remoteUpdatedAt: remote.updatedAt,
-              remoteSize: toNumber(remote.size),
+              remoteVersionId: remote?.versionId,
+              remoteEtag: remote?.etag,
+              remoteUpdatedAt: remote?.updatedAt,
+              remoteSize: toNumber(remote?.size),
+              remoteDeleted,
             });
           }
         }
@@ -507,7 +537,9 @@ export class ObsTrackingService implements vscode.Disposable {
 
     const items: UpdateQuickPickItem[] = updates.map((update) => ({
       label: `$(cloud-download) ${path.basename(update.artifactPath)}`,
-      description: `${update.metadata.source.versionId ?? '未知'} → ${update.remoteVersionId ?? '最新'}`,
+      description: update.remoteDeleted
+        ? '远端文件已删除'
+        : `${displayIdentity(update.metadata.source.etag || update.metadata.source.versionId)} → ${displayIdentity(update.remoteEtag || update.remoteVersionId)}`,
       detail: `${update.metadata.source.spaceName}:${update.metadata.source.remotePath}\n${update.artifactPath}`,
       picked: true,
       update,
@@ -534,10 +566,12 @@ export class ObsTrackingService implements vscode.Disposable {
       async (progress, token) => {
         const conflicts: ObsPendingUpdate[] = [];
         const failures: Array<{ update: ObsPendingUpdate; error: unknown }> = [];
+        const deleted = updates.filter((update) => update.remoteDeleted);
         let completed = 0;
 
         for (const update of updates) {
           if (token.isCancellationRequested) break;
+          if (update.remoteDeleted) continue;
           progress.report({
             message: path.basename(update.artifactPath),
             increment: 100 / Math.max(1, updates.length),
@@ -549,6 +583,8 @@ export class ObsTrackingService implements vscode.Disposable {
               vscode.Uri.file(update.artifactPath),
               {
                 versionId: update.remoteVersionId,
+                remoteEtag: update.remoteEtag,
+                remoteUpdatedAt: update.remoteUpdatedAt,
                 policy: update.metadata.policy,
               }
             );
@@ -577,6 +613,8 @@ export class ObsTrackingService implements vscode.Disposable {
                   vscode.Uri.file(update.artifactPath),
                   {
                     versionId: update.remoteVersionId,
+                    remoteEtag: update.remoteEtag,
+                    remoteUpdatedAt: update.remoteUpdatedAt,
                     policy: update.metadata.policy,
                     force: true,
                   }
@@ -585,6 +623,20 @@ export class ObsTrackingService implements vscode.Disposable {
               } catch (error) {
                 failures.push({ update, error });
               }
+            }
+          }
+        }
+
+        if (deleted.length > 0 && !token.isCancellationRequested) {
+          const choice = await vscode.window.showWarningMessage(
+            `${deleted.length} 个受跟踪的 OBS 文件已从远端删除，本地文件不会被删除。`,
+            '停止跟踪这些文件',
+            '保留跟踪记录'
+          );
+          if (choice === '停止跟踪这些文件') {
+            for (const update of deleted) {
+              await safeDelete(vscode.Uri.file(update.metadataPath));
+              this.removeMetadataUri(vscode.Uri.file(update.metadataPath));
             }
           }
         }
@@ -625,24 +677,77 @@ export class ObsTrackingService implements vscode.Disposable {
     }
   }
 
+  private async refreshKnownMetadataFiles(): Promise<void> {
+    const uris = [...this.entries.values()].map((entry) => vscode.Uri.file(entry.metadataPath));
+    await runWithConcurrency(uris, 8, async (uri) => this.refreshMetadataUri(uri));
+  }
+
+  private async hasRemoteUpdate(entry: ObsIndexEntry, remote: ObsChildItem): Promise<boolean> {
+    const local = entry.metadata.source;
+    const remoteIdentity = normalizeOptionalIdentity(remote.etag || remote.md5);
+    const localIdentity = normalizeOptionalIdentity(local.etag);
+
+    if (remoteIdentity && localIdentity) {
+      return remoteIdentity !== localIdentity;
+    }
+
+    if (remoteIdentity && isMd5Identity(remoteIdentity)) {
+      try {
+        const currentMd5 = await md5File(entry.artifactPath);
+        if (currentMd5 !== remoteIdentity) {
+          return true;
+        }
+        local.etag = remoteIdentity;
+      } catch {
+        return true;
+      }
+      try {
+        await this.persistMetadata(entry);
+      } catch (error) {
+        console.warn(`[DFT IDE] Failed to persist OBS MD5 migration: ${entry.metadataPath}`, error);
+      }
+      return false;
+    }
+
+    if (remote.versionId && local.versionId) return remote.versionId !== local.versionId;
+    if (remote.updatedAt && local.updatedAt) {
+      const remoteTime = Date.parse(remote.updatedAt);
+      const localTime = Date.parse(local.updatedAt);
+      if (Number.isFinite(remoteTime) && Number.isFinite(localTime)) return remoteTime > localTime;
+    }
+    const remoteSize = toNumber(remote.size);
+    return remoteSize !== undefined && remoteSize !== entry.metadata.artifact.size;
+  }
+
+  private async persistMetadata(entry: ObsIndexEntry): Promise<void> {
+    const metadataUri = vscode.Uri.file(entry.metadataPath);
+    const tempUri = temporarySiblingUri(metadataUri, 'migrate');
+    await vscode.workspace.fs.writeFile(tempUri, Buffer.from(JSON.stringify(entry.metadata, null, 2), 'utf-8'));
+    await vscode.workspace.fs.rename(tempUri, metadataUri, { overwrite: true });
+    await this.refreshMetadataUri(metadataUri);
+  }
+
   private async discoverMetadataFiles(): Promise<void> {
-    const uris = await vscode.workspace.findFiles(
+    const workspaceUris = await vscode.workspace.findFiles(
       `**/.*${METADATA_SUFFIX}`,
       '**/{.git,node_modules,out,.dft-ide}/**'
     );
-    const discovered = new Set(uris.map((uri) => normalizeLocalPath(uri.fsPath)));
-    await runWithConcurrency(uris, 8, async (uri) => this.refreshMetadataUri(uri));
-    for (const key of [...this.entries.keys()]) {
-      if (!discovered.has(key)) this.entries.delete(key);
+    const uris = new Map<string, vscode.Uri>();
+    for (const entry of this.entries.values()) {
+      uris.set(normalizeLocalPath(entry.metadataPath), vscode.Uri.file(entry.metadataPath));
     }
+    for (const uri of workspaceUris) {
+      uris.set(normalizeLocalPath(uri.fsPath), uri);
+    }
+    await runWithConcurrency([...uris.values()], 8, async (uri) => this.refreshMetadataUri(uri));
     this.scheduleFlush();
   }
 
   private async refreshMetadataUri(uri: vscode.Uri): Promise<void> {
     if (!isMetadataFileName(path.basename(uri.fsPath))) return;
+    const key = normalizeLocalPath(uri.fsPath);
     try {
       const stat = await vscode.workspace.fs.stat(uri);
-      const key = normalizeLocalPath(uri.fsPath);
       const cached = this.entries.get(key);
       if (cached && cached.metadataMtime === stat.mtime && cached.metadataSize === stat.size) {
         return;
@@ -663,7 +768,11 @@ export class ObsTrackingService implements vscode.Disposable {
       this.updateStatusBar();
       this.scheduleFlush();
     } catch (error) {
-      this.entries.delete(normalizeLocalPath(uri.fsPath));
+      const existing = this.entries.get(key);
+      if (existing) this.pendingUpdates.delete(normalizeLocalPath(existing.artifactPath));
+      this.entries.delete(key);
+      this.updateStatusBar();
+      this.scheduleFlush();
       console.warn(`[DFT IDE] 忽略无效的 OBS 元数据文件: ${uri.fsPath}`, error);
     }
   }
@@ -695,23 +804,29 @@ export class ObsTrackingService implements vscode.Disposable {
   }
 
   private async loadIndex(): Promise<void> {
-    const indexUri = this.getIndexUri();
-    if (!indexUri) return;
-    try {
-      const bytes = await vscode.workspace.fs.readFile(indexUri);
-      const value = JSON.parse(Buffer.from(bytes).toString('utf-8')) as ObsLocalIndexFile;
-      if (value.schemaVersion !== INDEX_SCHEMA_VERSION || !Array.isArray(value.entries)) return;
-      for (const entry of value.entries) {
-        if (isIndexEntry(entry)) {
-          this.entries.set(normalizeLocalPath(entry.metadataPath), entry);
+    const legacyIndexUri = this.getLegacyIndexUri();
+    const currentIndexUri = this.getIndexUri();
+    const indexUris = new Map<string, vscode.Uri>();
+    if (legacyIndexUri) indexUris.set(normalizeLocalPath(legacyIndexUri.fsPath), legacyIndexUri);
+    if (currentIndexUri) indexUris.set(normalizeLocalPath(currentIndexUri.fsPath), currentIndexUri);
+    for (const indexUri of indexUris.values()) {
+      try {
+        const bytes = await vscode.workspace.fs.readFile(indexUri);
+        const value = JSON.parse(Buffer.from(bytes).toString('utf-8')) as ObsLocalIndexFile;
+        if (value.schemaVersion !== INDEX_SCHEMA_VERSION || !Array.isArray(value.entries)) continue;
+        for (const entry of value.entries) {
+          if (isIndexEntry(entry)) {
+            this.entries.set(normalizeLocalPath(entry.metadataPath), entry);
+          }
         }
+      } catch {
+        // The index is an optional cache and is rebuilt from tracked sidecars.
       }
-    } catch {
-      // The index is an optional cache and is rebuilt from tracked sidecars.
     }
   }
 
   private scheduleFlush(): void {
+    this.indexDirty = true;
     if (this.flushHandle) clearTimeout(this.flushHandle);
     this.flushHandle = setTimeout(() => {
       this.flushHandle = undefined;
@@ -720,23 +835,42 @@ export class ObsTrackingService implements vscode.Disposable {
   }
 
   private async flushIndex(): Promise<void> {
+    if (this.flushPromise) {
+      await this.flushPromise;
+      if (!this.indexDirty) return;
+    }
+    if (!this.indexDirty) return;
+    this.flushPromise = this.performFlushIndex().finally(() => {
+      this.flushPromise = undefined;
+    });
+    await this.flushPromise;
+  }
+
+  private async performFlushIndex(): Promise<void> {
     const indexUri = this.getIndexUri();
     if (!indexUri) return;
-    try {
-      await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.dirname(indexUri.fsPath)));
-      const tempUri = temporarySiblingUri(indexUri, 'index');
-      const content: ObsLocalIndexFile = {
-        schemaVersion: INDEX_SCHEMA_VERSION,
-        entries: [...this.entries.values()],
-      };
-      await vscode.workspace.fs.writeFile(tempUri, Buffer.from(JSON.stringify(content), 'utf-8'));
-      await vscode.workspace.fs.rename(tempUri, indexUri, { overwrite: true });
-    } catch (error) {
-      console.warn('[DFT IDE] 写入 OBS 本地索引失败:', error);
+    while (this.indexDirty) {
+      this.indexDirty = false;
+      try {
+        await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.dirname(indexUri.fsPath)));
+        const tempUri = temporarySiblingUri(indexUri, 'index');
+        const content: ObsLocalIndexFile = {
+          schemaVersion: INDEX_SCHEMA_VERSION,
+          entries: [...this.entries.values()],
+        };
+        await vscode.workspace.fs.writeFile(tempUri, Buffer.from(JSON.stringify(content), 'utf-8'));
+        await vscode.workspace.fs.rename(tempUri, indexUri, { overwrite: true });
+      } catch (error) {
+        console.warn('[DFT IDE] 写入 OBS 本地索引失败:', error);
+      }
     }
   }
 
   private getIndexUri(): vscode.Uri | undefined {
+    return this.globalIndexUri ?? this.getLegacyIndexUri();
+  }
+
+  private getLegacyIndexUri(): vscode.Uri | undefined {
     const localConfigDir = resolveLocalConfigDirectory();
     return localConfigDir
       ? vscode.Uri.file(path.join(localConfigDir, 'obs', 'index.json'))
@@ -782,7 +916,8 @@ function isTrackedMetadata(value: unknown): value is ObsTrackedMetadata {
       && typeof item.artifact.sha256 === 'string'
       && typeof item.artifact.size === 'number')
     && Boolean(item.source && typeof item.source.spaceName === 'string'
-      && typeof item.source.remotePath === 'string')
+      && typeof item.source.remotePath === 'string'
+      && (!item.source.origin || isTrackingOrigin(item.source.origin)))
     && typeof item.downloadedAt === 'string';
 }
 
@@ -808,6 +943,16 @@ function normalizeLocalPath(value: string): string {
 
 function normalizeOptionalVersion(value: string | undefined): string | undefined {
   return value && value !== 'latest' ? value : undefined;
+}
+
+function normalizeOptionalIdentity(value: string | undefined): string | undefined {
+  const normalized = value?.trim().replace(/^"|"$/g, '');
+  if (!normalized) return undefined;
+  return isMd5Identity(normalized) ? normalized.toLowerCase() : normalized;
+}
+
+function isMd5Identity(value: string): boolean {
+  return /^[a-f0-9]{32}$/i.test(value);
 }
 
 function safeRemoteChildName(value: string): string {
@@ -847,8 +992,16 @@ async function safeDelete(uri: vscode.Uri): Promise<void> {
 }
 
 async function sha256File(filePath: string): Promise<string> {
+  return hashFile(filePath, 'sha256');
+}
+
+async function md5File(filePath: string): Promise<string> {
+  return hashFile(filePath, 'md5');
+}
+
+async function hashFile(filePath: string, algorithm: 'sha256' | 'md5'): Promise<string> {
   return new Promise((resolve, reject) => {
-    const hash = crypto.createHash('sha256');
+    const hash = crypto.createHash(algorithm);
     const stream = fs.createReadStream(filePath);
     stream.on('data', (chunk) => hash.update(chunk));
     stream.on('error', reject);
@@ -856,21 +1009,32 @@ async function sha256File(filePath: string): Promise<string> {
   });
 }
 
-function hasRemoteUpdate(metadata: ObsTrackedMetadata, remote: ObsChildItem): boolean {
-  const local = metadata.source;
-  if (remote.versionId && local.versionId) return remote.versionId !== local.versionId;
-  if (remote.etag && local.etag) return remote.etag !== local.etag;
-  if (remote.updatedAt && local.updatedAt) {
-    const remoteTime = Date.parse(remote.updatedAt);
-    const localTime = Date.parse(local.updatedAt);
-    if (Number.isFinite(remoteTime) && Number.isFinite(localTime)) return remoteTime > localTime;
-  }
-  const remoteSize = toNumber(remote.size);
-  return remoteSize !== undefined && remoteSize !== metadata.artifact.size;
+function updateIdentity(update: ObsPendingUpdate): string {
+  if (update.remoteDeleted) return 'deleted';
+  return update.remoteEtag ?? update.remoteVersionId ?? update.remoteUpdatedAt ?? `size:${update.remoteSize ?? 'unknown'}`;
 }
 
-function updateIdentity(update: ObsPendingUpdate): string {
-  return update.remoteVersionId ?? update.remoteEtag ?? update.remoteUpdatedAt ?? `size:${update.remoteSize ?? 'unknown'}`;
+function displayIdentity(value: string | undefined): string {
+  if (!value) return '最新';
+  return value.length > 12 ? `${value.slice(0, 12)}…` : value;
+}
+
+function isSameOrigin(left: ObsTrackingOrigin, right: ObsTrackingOrigin): boolean {
+  return normalizeOriginPart(left.obsPage) === normalizeOriginPart(right.obsPage)
+    && normalizeOriginPart(left.apiBasePath) === normalizeOriginPart(right.apiBasePath)
+    && left.groupName.trim() === right.groupName.trim();
+}
+
+function isTrackingOrigin(value: unknown): value is ObsTrackingOrigin {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<ObsTrackingOrigin>;
+  return typeof item.obsPage === 'string'
+    && typeof item.apiBasePath === 'string'
+    && typeof item.groupName === 'string';
+}
+
+function normalizeOriginPart(value: string): string {
+  return value.trim().replace(/\/+$/, '');
 }
 
 function toNumber(value: string | number | undefined): number | undefined {

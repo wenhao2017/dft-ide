@@ -415,3 +415,16 @@ export function isEditLockedByOther(resp: ObsEditLockResponse): boolean {
 ```
 
 IDE 侧下载、更新提示、MD5 对比和版本列表至少需要明确并兼容以下字段：`code`、`message`、`extrasMessage`、`data`、`data.md5`、`data.fullPath`、`data.fileType`、`data.subFile`、`data.version`、`data.id`。
+
+## 15. IDE 文件跟踪与更新检测约定
+
+- 每个下载文件旁保存隐藏 sidecar：`.文件名.obs.json`。它是可随文件进入 Git 的权威来源记录。
+- sidecar 记录 OBS Space、远端完整路径、实际 OBS 服务来源以及下载时的 MD5/版本号。
+- VS Code global storage 中的 OBS index 只保存 sidecar 路径、检查时间、提醒去重和稍后提醒状态；它是可重建缓存，不代替 sidecar。
+- 下载到当前 workspace 之外的绝对路径也会进入全局 index，VS Code 重启后继续检测。
+- dev 和 production 根据 `obsPage + apiBasePath + groupName` 隔离，只检查与当前实际配置匹配的记录。
+- 最新文件的更新判断优先级为：`MD5 -> version id -> updatedAt -> size`。
+- 同一个 Space、同一个父目录下的多个文件合并为一次 `children` 请求，只有列表中找不到目标时才回退到 `detail`。
+- 旧 sidecar 没有 MD5 时，客户端只执行一次本地 MD5 计算：一致则补写 sidecar，不一致则报告远端变化。
+- 后端明确返回 `FILE_NOT_EXIST` 时标记为“远端已删除”，但不会自动删除本地文件；其他接口错误不能误判为删除。
+- `pinned` 文件不参加最新版自动检查；`latest` 文件按配置的定时间隔检查。

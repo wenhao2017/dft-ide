@@ -51,6 +51,8 @@ export interface ObsChildItem {
 
 export interface ObsDownloadFileOptions {
   versionId?: string;
+  knownEtag?: string;
+  knownUpdatedAt?: string;
 }
 
 export interface ObsDownloadedFileResult {
@@ -60,6 +62,12 @@ export interface ObsDownloadedFileResult {
   versionId?: string;
   updatedAt?: string;
   etag?: string;
+}
+
+export interface ObsTrackingOrigin {
+  obsPage: string;
+  apiBasePath: string;
+  groupName: string;
 }
 
 interface ObsApiResponse<T> {
@@ -142,6 +150,15 @@ export class ObsService {
     return this.resolveSpaceName({ fallbackSpaceName: fallback });
   }
 
+  getTrackingOrigin(): ObsTrackingOrigin {
+    const config = this.getConfig();
+    return {
+      obsPage: config.obsPage,
+      apiBasePath: config.apiBasePath,
+      groupName: config.groupName,
+    };
+  }
+
   /**
    * 获取当前文件详细信息（含版本号与修改时间）
    */
@@ -170,11 +187,22 @@ export class ObsService {
     });
 
     if (!response.ok) {
-      return { exists: false, filepath: normalizedPath };
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const errorBody = (await response.json()) as ObsApiResponse<ObsFileItemData>;
+        if (errorBody.message === 'FILE_NOT_EXIST') {
+          return { exists: false, filepath: normalizedPath };
+        }
+        throw new Error(this.formatObsError('OBS file detail failed', errorBody));
+      }
+      throw new Error(`OBS file detail failed: HTTP ${response.status}`);
     }
     const body = (await response.json()) as ObsApiResponse<ObsFileItemData>;
     if (body.code !== 1 || !body.data) {
-      return { exists: false, filepath: normalizedPath };
+      if (body.message === 'FILE_NOT_EXIST') {
+        return { exists: false, filepath: normalizedPath };
+      }
+      throw new Error(this.formatObsError('OBS file detail failed', body));
     }
     const data = body.data;
     const md5 = data.md5 || undefined;
@@ -327,15 +355,16 @@ export class ObsService {
       },
     });
 
-    if (!response.ok) {
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        const errJson = (await response.json()) as { code?: number; message?: string };
-        if (errJson.message === 'FILE_NOT_EXIST') {
-          throw new Error(`OBS 空间 [${spaceName}] 中不存在该文件: ${normalizedPath}`);
-        }
-        throw new Error(errJson.message || `OBS 下载报错 (code: ${errJson.code})`);
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const errJson = (await response.json()) as { code?: number; message?: string; extrasMessage?: string };
+      if (errJson.message === 'FILE_NOT_EXIST') {
+        throw new Error(`OBS 空间 [${spaceName}] 中不存在该文件: ${normalizedPath}`);
       }
+      const details = [errJson.extrasMessage, errJson.message].filter(Boolean).join(' ');
+      throw new Error(details || `OBS 下载返回了非文件响应 (code: ${errJson.code ?? 'unknown'})`);
+    }
+    if (!response.ok) {
       throw new Error(`OBS 请求下载失败: HTTP ${response.status}`);
     }
 
@@ -344,13 +373,13 @@ export class ObsService {
 
     // 从 Header 或 Detail 中尝试获取并记录版本号
     const headerVersionId = response.headers.get('x-obs-version-id') || response.headers.get('version-id') || options?.versionId;
-    const headerEtag = response.headers.get('etag') || undefined;
-    const headerUpdatedAt = response.headers.get('last-modified') || undefined;
+    const headerEtag = response.headers.get('etag') || options?.knownEtag || undefined;
+    const headerUpdatedAt = response.headers.get('last-modified') || options?.knownUpdatedAt || undefined;
 
     let resolvedVersionId = headerVersionId;
     let resolvedEtag = headerEtag;
     let resolvedUpdatedAt = headerUpdatedAt;
-    if (!resolvedVersionId || !resolvedEtag || !resolvedUpdatedAt) {
+    if (!resolvedEtag) {
       try {
         const detail = await this.getFileDetailInfo(spaceName, normalizedPath, options?.versionId);
         if (detail.versionId) {
