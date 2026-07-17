@@ -12,6 +12,7 @@ import { obsTrackingService } from './services/obsTrackingService';
 import { isSpreadsheetFile } from './services/commonSyncArtifacts';
 import { isPipelineFlowKey, isPipelineFlowKey as _isPipelineFlowKey, PipelineRuntimeService } from './services/pipelineRuntimeService';
 import { getWebviewHtml, InitialWebviewCommand } from './webviewHtml';
+import { environmentDefaults, getEnvironmentSetting } from './config/environment';
 import { SpreadsheetProvider } from "./spreadsheet"
 import {
   handleGetLanderModePipelines,
@@ -1804,7 +1805,8 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'openGitlabHost': {
         const requestId: string = msg.requestId;
         const repoGitName = normalizeHistoryFlow(msg.repoGitName);
-        let gitlabHost = process.env.GITLAB_HOST ?? vscode.workspace.getConfiguration('dftIde').get<string>('gitlabHost', '');
+        let gitlabHost = process.env.GITLAB_HOST ??
+          getEnvironmentSetting('dftIde', 'gitlabHost', environmentDefaults.gitlabHost);
         gitlabHost = gitlabHost.replace(/\/+$/, '');
         try {
           const targetUrl = vscode.Uri.parse(`${gitlabHost}/${repoGitName}`);

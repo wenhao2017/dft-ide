@@ -84,6 +84,14 @@ Watch extension and webview bundles:
 npm run watch
 ```
 
+Watch using the development environment defaults:
+
+```bash
+npm run dev
+```
+
+`npm run compile` and `npm run watch` use production defaults; `npm run dev` uses development defaults. You can also select the `Run DFT IDE Extension (Dev)` launch configuration in VS Code. Explicit user or workspace `dftIde.*` settings continue to override environment defaults.
+
 Run in VS Code:
 
 1. Open this repository in VS Code.

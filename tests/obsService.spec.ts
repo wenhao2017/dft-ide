@@ -75,7 +75,7 @@ describe('ObsService', () => {
     it('reuses an in-flight SpaceToken request and normalizes relative child paths', async () => {
       const mockFetch = vi.fn(async (input: string | URL | Request) => {
         const url = String(input);
-        if (url.includes('/api/token')) {
+        if (url.includes('/api/v1/space/group/getSpaceToken')) {
           return {
             ok: true,
             json: async () => ({ code: 1, data: { spaceToken: 'shared-token' } }),
@@ -98,7 +98,10 @@ describe('ObsService', () => {
 
       expect(first[0]).toMatchObject({ path: '/scripts/hibist/gen_cfg.py', versionId: 'v2' });
       expect(second[0]).toMatchObject({ path: '/scripts/hibist/gen_cfg.py', versionId: 'v2' });
-      expect(mockFetch.mock.calls.filter(([input]) => String(input).includes('/api/token'))).toHaveLength(1);
+      expect(mockFetch.mock.calls.filter(([input]) => String(input).includes('/api/v1/space/group/getSpaceToken'))).toHaveLength(1);
+      expect(mockFetch.mock.calls.every(([input]) =>
+        String(input).startsWith('https://obs.test.com/file-system-server-test/api/v1/')
+      )).toBe(true);
     });
   });
 });

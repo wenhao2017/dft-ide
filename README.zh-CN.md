@@ -86,6 +86,14 @@ npm run check
 npm run watch
 ```
 
+使用 Dev 环境配置启动监听构建：
+
+```bash
+npm run dev
+```
+
+`npm run compile` 和 `npm run watch` 使用生产环境默认配置；`npm run dev` 使用 Dev 环境默认配置。也可以在 VS Code 中选择 `Run DFT IDE Extension (Dev)` 调试配置。用户或工作区中显式设置的 `dftIde.*` 配置仍会覆盖对应的环境默认值。
+
 在 VS Code 中调试：
 
 1. 用 VS Code 打开当前仓库。

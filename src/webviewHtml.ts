@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { environmentDefaults, getEnvironmentSetting } from './config/environment';
 
 export type InitialWebviewCommand =
   | { command: 'showWelcome' }
@@ -16,11 +17,11 @@ export function getWebviewHtml(
   const nonce = getNonce();
   const apiBase =
     process.env.DFT_IDE_API_BASE ??
-    vscode.workspace.getConfiguration('dftIde').get<string>('apiBase', '');
+    getEnvironmentSetting('dftIde', 'apiBase', environmentDefaults.apiBase);
 
   const gitlabHost =
     process.env.GITLAB_HOST ??
-    vscode.workspace.getConfiguration('dftIde').get<string>('gitlabHost', '');
+    getEnvironmentSetting('dftIde', 'gitlabHost', environmentDefaults.gitlabHost);
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">

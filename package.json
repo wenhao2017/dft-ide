@@ -159,10 +159,10 @@
           "default": "aQ5TOzDq4XsumbOn",
           "description": "OBS AES-128-CBC signature IV. It must be 16 bytes when encoded as UTF-8."
         },
-        "dftIde.obs.getSpaceTokenPath": {
+        "dftIde.obs.apiBasePath": {
           "type": "string",
-          "default": "/file-system-server-dft/api/v1/space/group/getSpaceToken",
-          "description": "OBS_GET_SPACE_TOKEN endpoint path appended to dftIde.obs.page."
+          "default": "/file-system-server-dft",
+          "description": "OBS API base path appended to dftIde.obs.page. All OBS API endpoints use this prefix."
         },
         "dftIde.obs.scriptSpace": {
           "type": "string",
@@ -287,15 +287,17 @@
     }
   },
   "scripts": {
-    "build:ext": "esbuild src/extension.ts --bundle --outfile=out/extension.js --format=cjs --platform=node --external:vscode --sourcemap",
-    "build:worker": "esbuild src/services/commonWorkbookWorker.ts --bundle --outfile=out/commonWorkbookWorker.js --format=cjs --platform=node --sourcemap",
-    "build:webview": "esbuild src/webview/main.tsx --bundle --outfile=out/webview.js --format=iife --platform=browser --sourcemap --loader:.tsx=tsx --loader:.ts=tsx",
+    "build:ext": "node scripts/build.mjs --env=production --target=ext",
+    "build:worker": "node scripts/build.mjs --env=production --target=worker",
+    "build:webview": "node scripts/build.mjs --env=production --target=webview",
     "compile": "npm-run-all --parallel build:ext build:webview build:worker",
+    "compile:dev": "node scripts/build.mjs --env=development",
     "check": "tsc --noEmit",
-    "watch:ext": "esbuild src/extension.ts --bundle --outfile=out/extension.js --format=cjs --platform=node --external:vscode --sourcemap --watch",
-    "watch:worker": "esbuild src/services/commonWorkbookWorker.ts --bundle --outfile=out/commonWorkbookWorker.js --format=cjs --platform=node --sourcemap --watch",
-    "watch:webview": "esbuild src/webview/main.tsx --bundle --outfile=out/webview.js --format=iife --platform=browser --sourcemap --loader:.tsx=tsx --loader:.ts=tsx --watch",
+    "watch:ext": "node scripts/build.mjs --env=production --target=ext --watch",
+    "watch:worker": "node scripts/build.mjs --env=production --target=worker --watch",
+    "watch:webview": "node scripts/build.mjs --env=production --target=webview --watch",
     "watch": "npm-run-all --parallel watch:ext watch:webview watch:worker",
+    "dev": "node scripts/build.mjs --env=development --watch",
     "vscode:prepublish": "npm run compile",
     "test": "vitest run"
   },

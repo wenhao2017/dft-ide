@@ -9,6 +9,13 @@
       "problemMatcher": []
     },
     {
+      "label": "npm: compile:dev",
+      "type": "npm",
+      "script": "compile:dev",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
       "label": "npm: watch",
       "type": "npm",
       "script": "watch",

@@ -76,7 +76,7 @@ const vscodeMock = {
         ['dftIde.obs.groupName', 'test-group'],
         ['dftIde.obs.aesKey', '1234567890123456'],
         ['dftIde.obs.aesIv', '1234567890123456'],
-        ['dftIde.obs.getSpaceTokenPath', '/api/token'],
+        ['dftIde.obs.apiBasePath', '/file-system-server-test'],
         ['dftIde.obs.viewerUrlTemplate', '{obsPage}?spaceName={spaceName}&spaceToken={spaceToken}&w3id={w3id}'],
         ['dftIde.obs.w3id', 'w3-test-id'],
         ['dftIde.obs.spaceName', ''],

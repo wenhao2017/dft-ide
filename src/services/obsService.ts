@@ -1,21 +1,18 @@
 import * as crypto from 'crypto';
 import * as vscode from 'vscode';
+import { environmentDefaults, getEnvironmentSetting } from '../config/environment';
 
-// ==================== OBS 红区生产环境常量与密钥 ====================
-export const PANDAS_HOMEPAGE_PROD = 'http://pandas.hisi.huawei.com';
 export const OBS_BUCKET_NAME_RED = 'dft-files';
-export const OBS_AES_KEY_RED = '3WB4oEodiKFUreBi';
-export const OBS_AES_IV_RED = 'aQ5TOzDq4XsumbOn';
 
 // ==================== DFT 访问 OBS 核心 API 端点 ====================
-export const OBS_GET_SPACE_TOKEN = '/file-system-server-dft/api/v1/space/group/getSpaceToken';
-export const OBS_DOWNLOAD_FILE = '/file-system-server-dft/api/v1/file/command/download';
-export const OBS_GET_FILE_DETAILS = '/file-system-server-dft/api/v1/file/command/detail';
-export const OBS_GET_PATH = '/file-system-server-dft/api/v1/file/command/children';
-export const OBS_UPLOAD_FILE = '/file-system-server-dft/api/v1/file/command/upload';
-export const OBS_MKDIR = '/file-system-server-dft/api/v1/file/command/mkdir';
-export const OBS_GET_FILE_URL = '/file-system-server-dft/api/v1/file/command/url';
-export const OBS_GET_FILE_VERSIONS = '/file-system-server-dft/api/v1/file/command/version/list';
+export const OBS_GET_SPACE_TOKEN = '/api/v1/space/group/getSpaceToken';
+export const OBS_DOWNLOAD_FILE = '/api/v1/file/command/download';
+export const OBS_GET_FILE_DETAILS = '/api/v1/file/command/detail';
+export const OBS_GET_PATH = '/api/v1/file/command/children';
+export const OBS_UPLOAD_FILE = '/api/v1/file/command/upload';
+export const OBS_MKDIR = '/api/v1/file/command/mkdir';
+export const OBS_GET_FILE_URL = '/api/v1/file/command/url';
+export const OBS_GET_FILE_VERSIONS = '/api/v1/file/command/version/list';
 
 export interface ObsFileVersionRecord {
   versionId: string;
@@ -75,10 +72,10 @@ export interface OpenObsViewerOptions {
 
 interface ObsConfig {
   obsPage: string;
+  apiBasePath: string;
   groupName: string;
   aesKey: string;
   aesIv: string;
-  getSpaceTokenPath: string;
   viewerUrlTemplate: string;
   w3id: string;
   requestTimeoutMs: number;
@@ -128,7 +125,7 @@ export class ObsService {
     if (versionId) {
       queryParams.versionId = versionId;
     }
-    const url = this.buildUrl(config.obsPage, OBS_GET_FILE_DETAILS, queryParams);
+    const url = this.buildObsUrl(config, OBS_GET_FILE_DETAILS, queryParams);
 
     const response = await this.fetchWithTimeout(url, {
       method: 'GET',
@@ -174,7 +171,7 @@ export class ObsService {
     const spaceToken = await this.getSpaceToken(config, spaceName);
 
     const normalizedPath = filepath.startsWith('/') ? filepath : `/${filepath}`;
-    const url = this.buildUrl(config.obsPage, OBS_GET_FILE_VERSIONS, {
+    const url = this.buildObsUrl(config, OBS_GET_FILE_VERSIONS, {
       spaceName: spaceName,
       filepath: normalizedPath,
     });
@@ -209,7 +206,7 @@ export class ObsService {
     const spaceToken = await this.getSpaceToken(config, spaceName);
 
     const normalizedPath = remoteDirPath.startsWith('/') ? remoteDirPath : `/${remoteDirPath}`;
-    const url = this.buildUrl(config.obsPage, OBS_GET_PATH, {
+    const url = this.buildObsUrl(config, OBS_GET_PATH, {
       spaceName: spaceName,
       filepath: normalizedPath,
     });
@@ -269,7 +266,7 @@ export class ObsService {
     if (options?.versionId) {
       queryParams.versionId = options.versionId;
     }
-    const url = this.buildUrl(config.obsPage, OBS_DOWNLOAD_FILE, queryParams);
+    const url = this.buildObsUrl(config, OBS_DOWNLOAD_FILE, queryParams);
 
     const response = await this.fetchWithTimeout(url, {
       method: 'GET',
@@ -328,17 +325,23 @@ export class ObsService {
 
   private getConfig(): ObsConfig {
     const config = vscode.workspace.getConfiguration('dftIde.obs');
-    const page = config.get<string>('page', '').trim().replace(/\/+$/, '');
+    const page = getEnvironmentSetting('dftIde.obs', 'page', environmentDefaults.obs.page)
+      .trim()
+      .replace(/\/+$/, '');
+    const apiBasePath = getEnvironmentSetting(
+      'dftIde.obs',
+      'apiBasePath',
+      environmentDefaults.obs.apiBasePath
+    ).trim();
     const groupName = config.get<string>('groupName', '').trim();
-    const aesKey = config.get<string>('aesKey', '');
-    const aesIv = config.get<string>('aesIv', '');
-    const getSpaceTokenPath = config.get<string>('getSpaceTokenPath', '').trim();
+    const aesKey = getEnvironmentSetting('dftIde.obs', 'aesKey', environmentDefaults.obs.aesKey);
+    const aesIv = getEnvironmentSetting('dftIde.obs', 'aesIv', environmentDefaults.obs.aesIv);
     return {
-      obsPage: page || PANDAS_HOMEPAGE_PROD,
+      obsPage: page || environmentDefaults.obs.page,
+      apiBasePath: apiBasePath || environmentDefaults.obs.apiBasePath,
       groupName: groupName || 'dft',
-      aesKey: aesKey || OBS_AES_KEY_RED,
-      aesIv: aesIv || OBS_AES_IV_RED,
-      getSpaceTokenPath: getSpaceTokenPath || OBS_GET_SPACE_TOKEN,
+      aesKey: aesKey || environmentDefaults.obs.aesKey,
+      aesIv: aesIv || environmentDefaults.obs.aesIv,
       viewerUrlTemplate: config.get<string>('viewerUrlTemplate', '').trim(),
       w3id: config.get<string>('w3id', '').trim(),
       requestTimeoutMs: Math.max(1_000, config.get<number>('requestTimeoutSeconds', 15) * 1_000),
@@ -380,7 +383,7 @@ export class ObsService {
   private async requestSpaceToken(config: ObsConfig, spaceName: string): Promise<string> {
     this.assertTokenConfig(config);
 
-    const url = this.buildUrl(config.obsPage, config.getSpaceTokenPath, {
+    const url = this.buildObsUrl(config, OBS_GET_SPACE_TOKEN, {
       group: config.groupName,
       name: spaceName,
     });
@@ -427,7 +430,7 @@ export class ObsService {
     if (!config.groupName) missing.push('dftIde.obs.groupName');
     if (!config.aesKey) missing.push('dftIde.obs.aesKey');
     if (!config.aesIv) missing.push('dftIde.obs.aesIv');
-    if (!config.getSpaceTokenPath) missing.push('dftIde.obs.getSpaceTokenPath');
+    if (!config.apiBasePath) missing.push('dftIde.obs.apiBasePath');
     if (missing.length > 0) {
       throw new Error(`Missing OBS settings: ${missing.join(', ')}`);
     }
@@ -491,6 +494,14 @@ export class ObsService {
     const url = new URL(cleanPath, baseWithSlash);
     Object.entries(query).forEach(([key, value]) => url.searchParams.set(key, value));
     return url.toString();
+  }
+
+  private buildObsUrl(config: ObsConfig, endpointPath: string, query: Record<string, string>): string {
+    const apiPath = [config.apiBasePath, endpointPath]
+      .map((part) => part.replace(/^\/+|\/+$/g, ''))
+      .filter(Boolean)
+      .join('/');
+    return this.buildUrl(config.obsPage, apiPath, query);
   }
 
   private formatObsError(prefix: string, body: ObsApiResponse<unknown>): string {

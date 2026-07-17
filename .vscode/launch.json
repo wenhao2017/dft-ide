@@ -2,6 +2,20 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Run DFT IDE Extension (Dev)",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--enable-proposed-api=w00445630.dft-ide",
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/out/**/*.js"
+      ],
+      "preLaunchTask": "npm: compile:dev"
+    },
+    {
       "name": "Run DFT IDE Extension",
       "type": "extensionHost",
       "request": "launch",
