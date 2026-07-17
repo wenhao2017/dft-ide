@@ -41,7 +41,7 @@ import { useVscodePath } from '../hooks/useVscodePath';
 import { useFlowConfig } from '../hooks/useFlowConfig';
 import PathInput from '../components/shared/PathInput';
 import useWizardStore from '../store/wizardStore';
-import ObsViewer from '../components/shared/ObsViewer';
+import TemporaryObsBrowser from '../components/temporary/TemporaryObsBrowser';
 import {getGitlabHost} from '../../services/gitlabService';
 import {
   getProjectRepoGitInfo,
@@ -133,7 +133,6 @@ const CommonFlow: React.FC = () => {
     verification: { repo: 'verification' },
   });
   const [repoLoading, setRepoLoading] = useState(false);
-  const [obsViewerOpen, setObsViewerOpen] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [commitMsg, setCommitMsg] = useState('');
   const [pushAfterCommit, setPushAfterCommit] = useState(false);
@@ -1291,6 +1290,7 @@ const CommonFlow: React.FC = () => {
             </Space>
 
             <Space size="small" wrap>
+              <TemporaryObsBrowser defaultSpaceName={obsSpaceName} />
               <Badge dot={hasUnsaved} offset={[-4, 4]}>
                 <Button icon={<SaveOutlined />} loading={saving} onClick={() => handleSave(collectFormData())}>
                   保存路径配置
@@ -1313,8 +1313,6 @@ const CommonFlow: React.FC = () => {
             </Space>
           </Space>
         </Card>
-
-        <ObsViewer open={obsViewerOpen} spaceName={obsSpaceName} onCancel={() => setObsViewerOpen(false)} />
 
         <Modal
           title="正在预检查同步差异"
