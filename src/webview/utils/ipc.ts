@@ -209,6 +209,8 @@ export interface ObsChildItemDto {
   size?: string | number
   updatedAt?: string
   versionId?: string
+  md5?: string
+  etag?: string
 }
 
 export async function listObsChildren(

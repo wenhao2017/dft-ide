@@ -12,11 +12,13 @@ export const OBS_GET_PATH = '/api/v1/file/command/children';
 export const OBS_UPLOAD_FILE = '/api/v1/file/command/upload';
 export const OBS_MKDIR = '/api/v1/file/command/mkdir';
 export const OBS_GET_FILE_URL = '/api/v1/file/command/url';
-export const OBS_GET_FILE_VERSIONS = '/api/v1/file/command/version/list';
+export const OBS_GET_FILE_VERSIONS = '/api/v1/file/command/queryFileVersionList';
 
 export interface ObsFileVersionRecord {
-  versionId: string;
-  updatedAt: string;
+  id: number;
+  version: string;
+  versionId?: string;
+  updatedAt?: string;
   size?: string | number;
   modifier?: string;
   isLatest?: boolean;
@@ -25,6 +27,11 @@ export interface ObsFileVersionRecord {
 export interface ObsFileDetailInfo {
   exists: boolean;
   filepath: string;
+  fileName?: string;
+  fileType?: string;
+  parentPath?: string;
+  md5?: string;
+  updaterName?: string;
   versionId?: string;
   size?: number | string;
   updatedAt?: string;
@@ -38,6 +45,7 @@ export interface ObsChildItem {
   size?: string | number;
   updatedAt?: string;
   versionId?: string;
+  md5?: string;
   etag?: string;
 }
 
@@ -63,6 +71,30 @@ interface ObsApiResponse<T> {
 
 interface SpaceTokenData {
   spaceToken?: string;
+}
+
+interface ObsFileItemData {
+  fileType?: string;
+  fileName?: string;
+  fullPath?: string;
+  parentPath?: string;
+  md5?: string;
+  updaterName?: string;
+  subFile?: ObsFileItemData[];
+  name?: string;
+  filename?: string;
+  path?: string;
+  filepath?: string;
+  type?: string;
+  isDir?: boolean;
+  isDirectory?: boolean;
+  size?: string | number;
+  updatedAt?: string;
+  updateTime?: string;
+  versionId?: string;
+  version?: string;
+  etag?: string;
+  [key: string]: unknown;
 }
 
 export interface OpenObsViewerOptions {
@@ -140,18 +172,24 @@ export class ObsService {
     if (!response.ok) {
       return { exists: false, filepath: normalizedPath };
     }
-    const body = (await response.json()) as ObsApiResponse<any>;
+    const body = (await response.json()) as ObsApiResponse<ObsFileItemData>;
     if (body.code !== 1 || !body.data) {
       return { exists: false, filepath: normalizedPath };
     }
     const data = body.data;
+    const md5 = data.md5 || undefined;
     return {
       exists: true,
-      filepath: normalizedPath,
+      filepath: data.fullPath || normalizedPath,
+      fileName: data.fileName,
+      fileType: data.fileType,
+      parentPath: data.parentPath,
+      md5,
+      updaterName: data.updaterName,
       versionId: data.versionId || data.version || response.headers.get('x-obs-version-id') || undefined,
       size: data.size,
       updatedAt: data.updatedAt || data.updateTime || response.headers.get('last-modified') || undefined,
-      etag: data.etag || response.headers.get('etag') || undefined,
+      etag: md5 || data.etag || response.headers.get('etag') || undefined,
     };
   }
 
@@ -223,25 +261,35 @@ export class ObsService {
     if (!response.ok) {
       throw new Error(`OBS list children failed: HTTP ${response.status}`);
     }
-    const body = (await response.json()) as ObsApiResponse<any>;
+    const body = (await response.json()) as ObsApiResponse<
+      ObsFileItemData[] | { children?: ObsFileItemData[]; list?: ObsFileItemData[] }
+    >;
     if (body.code !== 1 || !body.data) {
       throw new Error(this.formatObsError('OBS list children failed', body));
     }
     const list = Array.isArray(body.data) ? body.data : (body.data.children || body.data.list || []);
-    return list.map((item: any) => {
-      const name = item.name || item.filename || '';
-      const rawPath = String(item.path || item.filepath || name);
+    return list.map((item) => {
+      const rawPath = String(
+        item.fullPath || item.path || item.filepath || item.fileName || item.name || item.filename || ''
+      );
+      const fallbackName = rawPath.split('/').filter(Boolean).pop() || '';
+      const name = item.fileName || item.name || item.filename || fallbackName;
       const childPath = rawPath.startsWith('/')
         ? rawPath
         : `${normalizedPath.replace(/\/$/, '')}/${rawPath.replace(/^\/+/, '')}`;
+      const fileType = item.fileType?.toUpperCase();
+      const md5 = item.md5 || undefined;
       return {
         name,
         path: childPath,
-        type: item.type === 'folder' || item.isDir ? 'folder' : 'file',
+        type: fileType === 'FOLDER' || item.type?.toLowerCase() === 'folder' || item.isDir || item.isDirectory
+          ? 'folder'
+          : 'file',
         size: item.size,
         updatedAt: item.updatedAt || item.updateTime,
         versionId: item.versionId || item.version,
-        etag: item.etag,
+        md5,
+        etag: md5 || item.etag,
       };
     });
   }
@@ -297,15 +345,19 @@ export class ObsService {
     // 从 Header 或 Detail 中尝试获取并记录版本号
     const headerVersionId = response.headers.get('x-obs-version-id') || response.headers.get('version-id') || options?.versionId;
     const headerEtag = response.headers.get('etag') || undefined;
-    const headerUpdatedAt = response.headers.get('last-modified') || new Date().toISOString();
+    const headerUpdatedAt = response.headers.get('last-modified') || undefined;
 
     let resolvedVersionId = headerVersionId;
-    if (!resolvedVersionId) {
+    let resolvedEtag = headerEtag;
+    let resolvedUpdatedAt = headerUpdatedAt;
+    if (!resolvedVersionId || !resolvedEtag || !resolvedUpdatedAt) {
       try {
         const detail = await this.getFileDetailInfo(spaceName, normalizedPath, options?.versionId);
         if (detail.versionId) {
           resolvedVersionId = detail.versionId;
         }
+        resolvedEtag = resolvedEtag || detail.etag || detail.md5;
+        resolvedUpdatedAt = resolvedUpdatedAt || detail.updatedAt;
       } catch (e) {
         // 忽略非必须查询的网络异常
       }
@@ -316,8 +368,8 @@ export class ObsService {
       remoteFilePath: normalizedPath,
       localDestUri,
       versionId: resolvedVersionId || options?.versionId || 'latest',
-      etag: headerEtag,
-      updatedAt: headerUpdatedAt,
+      etag: resolvedEtag,
+      updatedAt: resolvedUpdatedAt || new Date().toISOString(),
     };
 
     return result;

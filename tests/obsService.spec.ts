@@ -85,7 +85,22 @@ describe('ObsService', () => {
           ok: true,
           json: async () => ({
             code: 1,
-            data: [{ name: 'gen_cfg.py', path: 'gen_cfg.py', type: 'file', versionId: 'v2' }],
+            data: [
+              {
+                fileType: 'FOLDER',
+                fileName: 'eco',
+                fullPath: '/scripts/hibist/eco',
+                parentPath: '/scripts/hibist',
+                md5: '',
+              },
+              {
+                fileType: 'FILE',
+                fileName: 'gen_cfg.py',
+                fullPath: '/scripts/hibist/gen_cfg.py',
+                parentPath: '/scripts/hibist',
+                md5: 'e10adc3949ba59abbe56e057f20f883e',
+              },
+            ],
           }),
         } as Response;
       });
@@ -96,8 +111,15 @@ describe('ObsService', () => {
         obsService.listChildren('test-space', '/scripts/hibist'),
       ]);
 
-      expect(first[0]).toMatchObject({ path: '/scripts/hibist/gen_cfg.py', versionId: 'v2' });
-      expect(second[0]).toMatchObject({ path: '/scripts/hibist/gen_cfg.py', versionId: 'v2' });
+      expect(first[0]).toMatchObject({ name: 'eco', path: '/scripts/hibist/eco', type: 'folder' });
+      expect(first[1]).toMatchObject({
+        name: 'gen_cfg.py',
+        path: '/scripts/hibist/gen_cfg.py',
+        type: 'file',
+        md5: 'e10adc3949ba59abbe56e057f20f883e',
+        etag: 'e10adc3949ba59abbe56e057f20f883e',
+      });
+      expect(second).toEqual(first);
       expect(mockFetch.mock.calls.filter(([input]) => String(input).includes('/api/v1/space/group/getSpaceToken'))).toHaveLength(1);
       expect(mockFetch.mock.calls.every(([input]) =>
         String(input).startsWith('https://obs.test.com/file-system-server-test/api/v1/')
