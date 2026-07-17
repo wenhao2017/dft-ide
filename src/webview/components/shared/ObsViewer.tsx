@@ -14,6 +14,7 @@ import {
 import { downloadObsPath, listObsChildren, type ObsChildItemDto } from '../../utils/ipc';
 
 const { Text, Title } = Typography;
+const OBS_ROOT_PATH = '/';
 
 export type ObsSelectTarget = 'file' | 'folder';
 
@@ -47,7 +48,7 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [downloading, setDownloading] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [currentPath, setCurrentPath] = useState('/root');
+  const [currentPath, setCurrentPath] = useState(OBS_ROOT_PATH);
   const [items, setItems] = useState<ObsFile[]>([]);
   const [search, setSearch] = useState('');
 
@@ -71,7 +72,7 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
 
   useEffect(() => {
     if (open) {
-      void loadPath('/root');
+      void loadPath(OBS_ROOT_PATH);
     }
   }, [open, loadPath]);
 
@@ -88,7 +89,7 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
     const segments = currentPath.split('/').filter(Boolean);
     return [
       { title: 'OBS' },
-      { title: spaceName, onClick: () => void loadPath('/root') },
+      { title: spaceName, onClick: () => void loadPath(OBS_ROOT_PATH) },
       ...segments.map((segment, index) => ({
         title: segment,
         onClick: () => void loadPath(`/${segments.slice(0, index + 1).join('/')}`),
@@ -394,10 +395,10 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
           >
             <Space direction="vertical" size={8} className="dft-obs-folder-list" style={{ width: '100%' }}>
               <Button
-                type={currentPath === '/root' ? 'primary' : 'text'}
+                type={currentPath === OBS_ROOT_PATH ? 'primary' : 'text'}
                 icon={<HomeOutlined />}
                 style={{ width: '100%', justifyContent: 'flex-start' }}
-                onClick={() => void loadPath('/root')}
+                onClick={() => void loadPath(OBS_ROOT_PATH)}
               >
                 Root
               </Button>

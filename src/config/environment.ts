@@ -14,6 +14,7 @@ const ENVIRONMENT_DEFAULTS = {
     obs: {
       page: 'http://pandas.hisi.huawei.com',
       apiBasePath: '/file-system-server-dft',
+      bucketName: 'dft-files',
       aesKey: '3WB4oEodiKFUreBi',
       aesIv: 'aQ5TOzDq4XsumbOn',
     },
@@ -24,6 +25,7 @@ const ENVIRONMENT_DEFAULTS = {
     obs: {
       page: 'https://dmas-beta.hisi.huawei.com',
       apiBasePath: '/file-system-server',
+      bucketName: 'ctmp-review-test',
       aesKey: 'lTjLZawOljWaX7VU',
       aesIv: '6IExw50E8lK6qCUa',
     },

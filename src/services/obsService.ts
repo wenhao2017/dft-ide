@@ -2,7 +2,7 @@ import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import { environmentDefaults, getEnvironmentSetting } from '../config/environment';
 
-export const OBS_BUCKET_NAME_RED = 'dft-files';
+export const OBS_BUCKET_NAME_RED = environmentDefaults.obs.bucketName;
 
 // ==================== DFT 访问 OBS 核心 API 端点 ====================
 export const OBS_GET_SPACE_TOKEN = '/api/v1/space/group/getSpaceToken';
