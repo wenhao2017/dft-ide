@@ -337,28 +337,211 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
     const xSpreadsheetJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'node_modules', 'x-data-spreadsheet', 'dist', 'xspreadsheet.js'));
     const xSpreadsheetLocales = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'node_modules', 'x-data-spreadsheet', 'dist', 'locale', 'zh-cn.js'));
 
+    const hasDiff = workbookData.some((sheet) => sheet.styles?.some((style) => typeof style.dftDiff === 'string'));
+
     return `
       <!DOCTYPE html>
-      <html lang="en">
+      <html lang="zh-CN">
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>XLS Viewer</title>
         <link href="${xSpreadsheetCss}" rel="stylesheet">
         <style>
-          html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
-          #spreadsheet-demo { width: 100%; height: 100%; }
+          :root { color-scheme: light dark; }
+          html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            color: var(--vscode-editor-foreground);
+            background: var(--vscode-editor-background);
+            font-family: var(--vscode-font-family);
+          }
+          body { display: flex; flex-direction: column; }
+          #spreadsheet-demo { width: 100%; flex: 1; min-height: 0; background: var(--vscode-editor-background); }
+          #diff-legend {
+            display: ${hasDiff ? 'flex' : 'none'};
+            align-items: center;
+            gap: 16px;
+            flex: 0 0 auto;
+            min-height: 34px;
+            padding: 0 12px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-editor-background));
+            color: var(--vscode-descriptionForeground);
+            font-size: 12px;
+          }
+          .dft-diff-key { display: inline-flex; align-items: center; gap: 6px; }
+          .dft-diff-swatch { width: 11px; height: 11px; border: 1px solid currentColor; border-radius: 2px; }
+          .dft-diff-added { color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043); background: color-mix(in srgb, currentColor 24%, transparent); }
+          .dft-diff-changed { color: var(--vscode-gitDecoration-modifiedResourceForeground, #d29922); background: color-mix(in srgb, currentColor 24%, transparent); }
+          .dft-diff-deleted { color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149); background: color-mix(in srgb, currentColor 24%, transparent); }
+
+          .x-spreadsheet,
+          .x-spreadsheet-sheet,
+          .x-spreadsheet-toolbar,
+          .x-spreadsheet-bottombar,
+          .x-spreadsheet-menu,
+          .x-spreadsheet-contextmenu,
+          .x-spreadsheet-modal,
+          .x-spreadsheet-form-select,
+          .x-spreadsheet-form-fields,
+          .x-spreadsheet-dropdown .x-spreadsheet-dropdown-content,
+          .x-spreadsheet-color-palette table,
+          .x-spreadsheet-border-palette table {
+            color: var(--vscode-editor-foreground) !important;
+            background: var(--vscode-editor-background) !important;
+            border-color: var(--vscode-panel-border) !important;
+          }
+          .x-spreadsheet-toolbar,
+          .x-spreadsheet-bottombar {
+            background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-editor-background)) !important;
+          }
+          .x-spreadsheet-item,
+          .x-spreadsheet-form-field,
+          .x-spreadsheet-form-select,
+          .x-spreadsheet-form-fields input,
+          .x-spreadsheet-form-fields textarea {
+            color: var(--vscode-input-foreground) !important;
+            background: var(--vscode-input-background) !important;
+            border-color: var(--vscode-input-border, var(--vscode-panel-border)) !important;
+          }
+          .x-spreadsheet-item:hover,
+          .x-spreadsheet-bottombar li:hover {
+            background: var(--vscode-list-hoverBackground) !important;
+          }
+          .x-spreadsheet-bottombar li.active,
+          .x-spreadsheet-item.active {
+            color: var(--vscode-list-activeSelectionForeground) !important;
+            background: var(--vscode-list-activeSelectionBackground) !important;
+          }
+          .x-spreadsheet-scrollbar > div {
+            background: var(--vscode-scrollbarSlider-background) !important;
+          }
+          .x-spreadsheet-scrollbar > div:hover {
+            background: var(--vscode-scrollbarSlider-hoverBackground) !important;
+          }
+          body.vscode-high-contrast .x-spreadsheet,
+          body.vscode-high-contrast-light .x-spreadsheet {
+            outline: 1px solid var(--vscode-contrastBorder);
+          }
         </style>
       </head>
       <body>
+        <div id="diff-legend" aria-label="表格差异图例">
+          <strong>差异：</strong>
+          <span class="dft-diff-key"><span class="dft-diff-swatch dft-diff-added"></span>新增</span>
+          <span class="dft-diff-key"><span class="dft-diff-swatch dft-diff-changed"></span>修改</span>
+          <span class="dft-diff-key"><span class="dft-diff-swatch dft-diff-deleted"></span>删除</span>
+        </div>
         <div id="spreadsheet-demo"></div>
         <script src="${xSpreadsheetJs}"></script>
         <script src="${xSpreadsheetLocales}"></script>
         <script>
           x_spreadsheet.locale('zh-cn');
-          const wbdata = ${this.toScriptJson(workbookData)};
-          const s = x_spreadsheet(document.getElementById('spreadsheet-demo'));
-          s.loadData(wbdata);
+          const initialWorkbookData = ${this.toScriptJson(workbookData)};
+          const host = document.getElementById('spreadsheet-demo');
+          let spreadsheet;
+          let rebuildTimer;
+
+          const cssColor = (name, fallback) => {
+            const value = getComputedStyle(document.body).getPropertyValue(name).trim();
+            return value || fallback;
+          };
+          const isDark = () => document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast');
+          const isHighContrast = () => document.body.classList.contains('vscode-high-contrast') || document.body.classList.contains('vscode-high-contrast-light');
+          const themePalette = () => ({
+            background: cssColor('--vscode-editor-background', isDark() ? '#1e1e1e' : '#ffffff'),
+            foreground: cssColor('--vscode-editor-foreground', isDark() ? '#d4d4d4' : '#1f2328'),
+            header: cssColor('--vscode-editorGroupHeader-tabsBackground', isDark() ? '#252526' : '#f4f5f8'),
+            border: cssColor('--vscode-panel-border', isDark() ? '#454545' : '#d0d7de'),
+            added: isDark() ? '#163d2a' : '#d4edda',
+            changed: isDark() ? '#4a3813' : '#fff3cd',
+            deleted: isDark() ? '#4a1f24' : '#f8d7da',
+            addedBorder: cssColor('--vscode-gitDecoration-addedResourceForeground', '#2ea043'),
+            changedBorder: cssColor('--vscode-gitDecoration-modifiedResourceForeground', '#d29922'),
+            deletedBorder: cssColor('--vscode-gitDecoration-deletedResourceForeground', '#f85149'),
+          });
+
+          const cloneAndThemeData = (data) => {
+            const themed = JSON.parse(JSON.stringify(data));
+            const palette = themePalette();
+            for (let sheetIndex = 0; sheetIndex < themed.length; sheetIndex += 1) {
+              const sheet = themed[sheetIndex];
+              if (!Array.isArray(sheet.styles)) continue;
+              const originalStyles = initialWorkbookData[sheetIndex]?.styles || [];
+              sheet.styles = sheet.styles.map((style, styleIndex) => {
+                const kind = style?.dftDiff || originalStyles[styleIndex]?.dftDiff;
+                if (!style || !kind) return style;
+                const color = kind === 'added' ? palette.added : kind === 'deleted' ? palette.deleted : palette.changed;
+                const borderColor = kind === 'added' ? palette.addedBorder : kind === 'deleted' ? palette.deletedBorder : palette.changedBorder;
+                return {
+                  ...style,
+                  bgcolor: color,
+                  border: isHighContrast() ? {
+                    top: ['thin', borderColor], right: ['thin', borderColor],
+                    bottom: ['thin', borderColor], left: ['thin', borderColor],
+                  } : style.border,
+                };
+              });
+            }
+            return themed;
+          };
+
+          // x-data-spreadsheet renders the grid and headers on canvas with a light-only palette.
+          // Map those built-in colors to the current VS Code palette at draw time.
+          (() => {
+            const proto = CanvasRenderingContext2D.prototype;
+            if (proto.__dftThemePatched) return;
+            proto.__dftThemePatched = true;
+            const mapColor = (value) => {
+              if (typeof value !== 'string') return value;
+              const normalized = value.replace(/\s/g, '').toLowerCase();
+              const palette = themePalette();
+              if (normalized === '#fff' || normalized === '#ffffff') return palette.background;
+              if (normalized === '#f4f5f8' || normalized === '#f5f6f7' || normalized === '#f8f8f9') return palette.header;
+              if (normalized === '#e6e6e6' || normalized === '#ddd' || normalized === '#d0d0d0') return palette.border;
+              if (normalized === '#585757' || normalized === '#333333' || normalized === '#0a0a0a') return palette.foreground;
+              return value;
+            };
+            const wrap = (name, properties) => {
+              const original = proto[name];
+              if (typeof original !== 'function') return;
+              proto[name] = function(...args) {
+                const saved = properties.map((property) => this[property]);
+                properties.forEach((property) => { this[property] = mapColor(this[property]); });
+                try { return original.apply(this, args); }
+                finally { properties.forEach((property, index) => { this[property] = saved[index]; }); }
+              };
+            };
+            wrap('fillRect', ['fillStyle']);
+            wrap('fill', ['fillStyle']);
+            wrap('fillText', ['fillStyle']);
+            wrap('strokeRect', ['strokeStyle']);
+            wrap('stroke', ['strokeStyle']);
+            wrap('strokeText', ['strokeStyle']);
+          })();
+
+          const rebuildSpreadsheet = () => {
+            const currentData = spreadsheet ? spreadsheet.getData() : initialWorkbookData;
+            const palette = themePalette();
+            host.innerHTML = '';
+            spreadsheet = x_spreadsheet(host, {
+              style: {
+                bgcolor: palette.background,
+                color: palette.foreground,
+                font: { name: 'Arial', size: 10, bold: false, italic: false },
+              },
+            });
+            spreadsheet.loadData(cloneAndThemeData(currentData));
+          };
+
+          rebuildSpreadsheet();
+          new MutationObserver(() => {
+            window.clearTimeout(rebuildTimer);
+            rebuildTimer = window.setTimeout(rebuildSpreadsheet, 30);
+          }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
           const vscode = acquireVsCodeApi();
           document.addEventListener('keydown', (event) => {
@@ -366,7 +549,7 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
               event.preventDefault();
               vscode.postMessage({
                 type: 'save',
-                data: s.getData()
+                data: spreadsheet.getData()
               });
             }
           });
@@ -405,9 +588,9 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
     for (const sheet of workbookData) {
       sheet.styles = [
         { bgcolor: '#000100' },
-        { bgcolor: '#d4edda' },
-        { bgcolor: '#fff3cd' },
-        { bgcolor: '#f8d7da' },
+        { bgcolor: '#d4edda', dftDiff: 'added' },
+        { bgcolor: '#fff3cd', dftDiff: 'changed' },
+        { bgcolor: '#f8d7da', dftDiff: 'deleted' },
       ];
     }
 

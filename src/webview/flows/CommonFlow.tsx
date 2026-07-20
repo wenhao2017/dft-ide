@@ -42,6 +42,7 @@ import { useFlowConfig } from '../hooks/useFlowConfig';
 import PathInput from '../components/shared/PathInput';
 import useWizardStore from '../store/wizardStore';
 import TemporaryObsBrowser from '../components/temporary/TemporaryObsBrowser';
+import GuidedConflictPanel from '../components/shared/GuidedConflictPanel';
 import {getGitlabHost} from '../../services/gitlabService';
 import {
   getProjectRepoGitInfo,
@@ -56,7 +57,9 @@ import {
   applyCommonArtifactSync,
   getRepoGitInfo,
   getBranches,
-  openExternalUrl
+  openExternalUrl,
+  startGuidedRepoSync,
+  GuidedConflictStatus,
 } from '../utils/ipc';
 import {
   accentPanelStyle,
@@ -159,9 +162,13 @@ const CommonFlow: React.FC = () => {
   const [prepareWaitModalOpen, setPrepareWaitModalOpen] = useState<boolean>(false);
   const [isApplying, setIsApplying] = useState<boolean>(false);
   const [branchOptions, setBranchOptions] = useState<any>(null);
+  const [guidedConflict, setGuidedConflict] = useState<GuidedConflictStatus | null>(null);
   const prepareSyncRunIdRef = useRef(0);
 
   const activeProject = useWizardStore((s) => s.activeProject);
+  const canManageMembers = activeProject
+    ? activeProject.id !== '0' && (activeProject.canManageMembers ?? activeProject.role?.toUpperCase() === 'DFTM')
+    : false;
   const { savedData, loading, saving, uploading, syncing, hasUnsaved, handleSave, debouncedSave, markDirty } =
     useFlowConfig('common');
 
@@ -245,22 +252,24 @@ const CommonFlow: React.FC = () => {
     return formData;
   }, [savedData, selectedDataRepo, selectedRepo]);
 
-  const refreshRepoInfo = async () => {
+  const refreshRepoInfo = async (refreshRemote = true, notifyUpdates = false) => {
     setRepoLoading(true);
     try {
-      const result = await getProjectRepoGitInfo();
-      const next = { ...repoInfo };
-      for (const item of result.repos ?? []) {
-        next[item.repo] = item;
-      }
-      setRepoInfo(next);
+      const result = await getProjectRepoGitInfo({ refreshRemote, notifyUpdates });
+      setRepoInfo((current) => {
+        const next = { ...current };
+        for (const item of result.repos ?? []) next[item.repo] = item;
+        return next;
+      });
     } finally {
       setRepoLoading(false);
     }
   };
 
   useEffect(() => {
-    refreshRepoInfo();
+    void refreshRepoInfo(true, true);
+    const timer = window.setInterval(() => void refreshRepoInfo(true, true), 5 * 60_000);
+    return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -328,25 +337,34 @@ const CommonFlow: React.FC = () => {
     targetNormTable.value,
   ]);
 
-  const runAction = async (repo: RepoKey, action: 'pull' | 'push' | 'openScm') => {
-    const hide = message.loading('正在处理 Git 操作...', 0);
+  const runAction = async (repo: RepoKey, action: 'update' | 'uploadCommits' | 'submitAndUpload' | 'openScm') => {
     try {
-      const result = await runRepoGitAction({ repo, action });
+      const result = await runRepoGitAction({ repo, action, canManageData: canManageMembers });
       if (result.success) {
-        message.success('操作完成');
-        await refreshRepoInfo();
-      } else {
-        message.error(result.error ?? 'Git 操作失败');
+        if (result.message) message.success(result.message);
+        await refreshRepoInfo(true, false);
+      } else if (!result.cancelled) {
+        message.error(result.error ?? result.message ?? '操作失败，请查看修改详情');
       }
-    } finally {
-      hide();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '操作失败，请稍后重试');
     }
+  };
+
+  const startConflictGuide = async (repo: RepoKey) => {
+    const result = await startGuidedRepoSync(repo, canManageMembers);
+    if (!result.success || !result.status) {
+      message.error(result.error ?? '无法开始处理，请查看修改详情');
+      return;
+    }
+    setGuidedConflict(result.status);
+    await refreshRepoInfo(false, false);
   };
 
   const submitBranchAction = async () => {
     const branchName = branchModal.value.trim();
     if (!branchName) {
-      message.warning('请输入分支名');
+      message.warning('请选择或输入工作版本');
       return;
     }
 
@@ -357,17 +375,13 @@ const CommonFlow: React.FC = () => {
     });
 
     if (result.success) {
-      message.success(branchModal.mode === 'checkout' ? '已切换分支' : '已创建并切换分支');
+      message.success(branchModal.mode === 'checkout' ? '已切换工作版本' : '已创建并切换工作版本');
       setBranchModal((prev) => ({ ...prev, open: false, value: '' }));
       await refreshRepoInfo();
     } else {
-      message.error(result.error ?? '分支操作失败');
+      message.error(result.error ?? '工作版本操作失败');
     }
   };
-
-  const canManageMembers = activeProject
-    ? activeProject.id !== '0' && (activeProject.canManageMembers ?? activeProject.role?.toUpperCase() === 'DFTM')
-    : false;
 
   const openGitlab = async (repo: RepoKey) => {
     const repoRoot = repoInfo[repo]?.repoRoot ?? '';
@@ -385,20 +399,44 @@ const CommonFlow: React.FC = () => {
     }
   };
 
-  const repoMenu = (repo: RepoKey, group: number): MenuProps['items'] => [
-    { key: 'pull', icon: <CloudSyncOutlined />, label: '更新到最新', onClick: () => runAction(repo, 'pull') },
-    {
-      key: 'push',
-      icon: <UploadOutlined />,
-      label: '上传本地提交',
-      onClick: () => runAction(repo, 'push'),
-      // disabled: !canManageMembers && group == 1,
-    },
+  const repoMenu = (repo: RepoKey, _group: number): MenuProps['items'] => {
+    const info = repoInfo[repo];
+    const state = info?.friendlyState;
+    const primary: MenuProps['items'] = [];
+    if (state === 'cloudUpdates') {
+      primary.push({ key: 'update', icon: <CloudSyncOutlined />, label: '更新到本地', onClick: () => runAction(repo, 'update') });
+    } else if (state === 'localChanges') {
+      primary.push({
+        key: 'submitAndUpload', icon: <UploadOutlined />,
+        label: repo === 'data' && !canManageMembers ? '仅 DFTM 管理员可以上传' : `提交并上传（${info.changedCount ?? 0} 个文件）`,
+        disabled: repo === 'data' && !canManageMembers,
+        onClick: () => runAction(repo, 'submitAndUpload'),
+      });
+    } else if (state === 'localCommits') {
+      primary.push({
+        key: 'uploadCommits', icon: <UploadOutlined />,
+        label: repo === 'data' && !canManageMembers ? '仅 DFTM 管理员可以上传' : `上传 ${info.ahead ?? 0} 项本地内容`,
+        disabled: repo === 'data' && !canManageMembers,
+        onClick: () => runAction(repo, 'uploadCommits'),
+      });
+    } else if (state === 'bothChanged' || state === 'conflict' || state === 'operationInProgress') {
+      primary.push({
+        key: 'resolve', icon: <WarningOutlined />, label: '按引导处理本地和云端修改',
+        disabled: repo === 'data' && !canManageMembers,
+        onClick: () => startConflictGuide(repo),
+      });
+    } else if (state === 'synced') {
+      primary.push({ key: 'synced', icon: <CheckCircleOutlined />, label: '已是最新', disabled: true });
+    }
+
+    return [
+    ...primary,
+    { key: 'refresh', icon: <SyncOutlined />, label: '重新检查', onClick: () => refreshRepoInfo(true, false) },
     { type: 'divider' },
     {
       key: 'checkout',
       icon: <PullRequestOutlined />,
-      label: '切换到已有分支',
+      label: '切换工作版本',
       onClick: async () => {
         const result = await getBranches(repo);
         setBranchOptions(result.branches);
@@ -408,13 +446,14 @@ const CommonFlow: React.FC = () => {
     {
       key: 'createBranch',
       icon: <BranchesOutlined />,
-      label: '从当前版本新建分支',
+      label: '新建工作版本',
       onClick: () => setBranchModal({ open: true, repo, mode: 'createBranch', value: '' }),
     },
     { type: 'divider' },
-    { key: 'openScm', icon: <FileSyncOutlined />, label: '打开 VS Code Git 面板', onClick: () => runAction(repo, 'openScm') },
-    { key: 'openGitlab', icon: <GitlabOutlined />, label: '打开 Git 地址', onClick: () => openGitlab(repo) },
+    { key: 'openScm', icon: <FileSyncOutlined />, label: '查看修改详情', onClick: () => runAction(repo, 'openScm') },
+    { key: 'openGitlab', icon: <GitlabOutlined />, label: '打开云端仓库', onClick: () => openGitlab(repo) },
   ];
+  };
 
   const openConfirmModal = async () => {
     if (isPreparingSync) {
@@ -567,6 +606,7 @@ const CommonFlow: React.FC = () => {
             targetNormTable: tgtTable,
             decisions,
             stageAfterApply: false,
+            canManageData: canManageMembers,
           });
 
           if (!res.success) {
@@ -683,10 +723,42 @@ const CommonFlow: React.FC = () => {
     </div>
   );
 
+  const repoStatusColor = (state?: RepoGitInfo['friendlyState']) => {
+    if (state === 'synced') return 'green';
+    if (state === 'cloudUpdates') return 'blue';
+    if (state === 'localChanges' || state === 'localCommits') return 'orange';
+    if (state === 'bothChanged' || state === 'conflict' || state === 'operationInProgress') return 'red';
+    return 'default';
+  };
+
+  const runPrimaryRepoAction = (repo: RepoKey) => {
+    const state = repoInfo[repo]?.friendlyState;
+    if (state === 'cloudUpdates') return runAction(repo, 'update');
+    if (state === 'localChanges') return runAction(repo, 'submitAndUpload');
+    if (state === 'localCommits') return runAction(repo, 'uploadCommits');
+    if (state === 'bothChanged' || state === 'conflict' || state === 'operationInProgress') return startConflictGuide(repo);
+    return refreshRepoInfo(true, false);
+  };
+
+  const primaryRepoActionLabel = (repo: RepoKey) => {
+    const info = repoInfo[repo];
+    const requiresDataManager = repo === 'data'
+      && ['localChanges', 'localCommits', 'bothChanged', 'conflict', 'operationInProgress'].includes(info?.friendlyState ?? '');
+    if (requiresDataManager && !canManageMembers) return '请联系 DFTM 管理员';
+    if (info?.friendlyState === 'cloudUpdates') return '更新到本地';
+    if (info?.friendlyState === 'localChanges') return '提交并上传';
+    if (info?.friendlyState === 'localCommits') return '上传本地内容';
+    if (info?.friendlyState === 'bothChanged' || info?.friendlyState === 'conflict' || info?.friendlyState === 'operationInProgress') return '开始处理';
+    return '重新检查';
+  };
+
+  const repoActionDisabled = (repo: RepoKey) => repo === 'data'
+    && !canManageMembers
+    && ['localChanges', 'localCommits', 'bothChanged', 'conflict', 'operationInProgress'].includes(repoInfo[repo]?.friendlyState ?? '');
+
   const renderRepoCard = (repo: RepoKey, group: number) => {
     const info = repoInfo[repo];
     const active = group == 1 ? selectedDataRepo === repo : selectedRepo === repo;
-    const hasError = Boolean(info?.error);
 
     return (
       <Dropdown trigger={['contextMenu']} menu={{ items: repoMenu(repo, group) }}>
@@ -708,11 +780,7 @@ const CommonFlow: React.FC = () => {
           <Space direction="vertical" size={7} style={{ width: '100%' }}>
             <Space style={{ width: '100%', justifyContent: 'space-between' }}>
               <Text strong>{repoLabels[repo]}</Text>
-              {hasError ? (
-                <Tag color="red">异常</Tag>
-              ) : (
-                <Tag color={info?.hasChanges ? 'orange' : 'green'}>{info?.hasChanges ? `${info.changedCount ?? 0} 个变更` : '干净'}</Tag>
-              )}
+              <Tag color={repoStatusColor(info?.friendlyState)}>{info?.statusText ?? '正在读取仓库状态'}</Tag>
             </Space>
 
             <Space size={6}>
@@ -723,7 +791,7 @@ const CommonFlow: React.FC = () => {
             </Space>
 
             <Text ellipsis={{ tooltip: info?.repoRoot }} style={{ ...mutedTextStyle, fontSize: 12 }}>
-              {info?.upstream ? `跟踪 ${info.upstream}` : info?.repoRoot ?? '等待仓库信息'}
+              {info?.checkedAt ? `已检查云端 · ${new Date(info.checkedAt).toLocaleTimeString()}` : info?.repoRoot ?? '等待仓库信息'}
             </Text>
           </Space>
         </button>
@@ -751,11 +819,17 @@ const CommonFlow: React.FC = () => {
       <div style={sectionHeaderStyle}>
         {renderStepTitle(step, 'Data 公共仓', '公共输入文件的集中维护位置')}
         <Space size="small" wrap>
-          <Button size="small" icon={<CloudSyncOutlined />} loading={repoLoading} onClick={() => runAction('data', 'pull')}>
-            更新 Data 仓
+          <Button
+            size="small"
+            icon={<CloudSyncOutlined />}
+            loading={repoLoading}
+            disabled={repoActionDisabled('data')}
+            onClick={() => runPrimaryRepoAction('data')}
+          >
+            {primaryRepoActionLabel('data')}
           </Button>
           <Button size="small" icon={<FileSyncOutlined />} onClick={openSourceControl}>
-            打开 Git 面板
+            查看修改详情
           </Button>
         </Space>
       </div>
@@ -796,13 +870,13 @@ const CommonFlow: React.FC = () => {
       <div style={sectionHeaderStyle}>
         {renderStepTitle(step, '目标流程仓', '选择 Hibist / Sailor / 验证仓，并配置接收文件路径')}
         <Space size="small" wrap>
-          <Tooltip title={`更新${repoLabels[selectedRepo]}到远端最新版本`}>
-            <Button size="small" icon={<CloudSyncOutlined />} onClick={() => runAction(selectedRepo, 'pull')}>
-              更新目标仓
+          <Tooltip title={repoInfo[selectedRepo]?.statusText}>
+            <Button size="small" icon={<CloudSyncOutlined />} onClick={() => runPrimaryRepoAction(selectedRepo)}>
+              {primaryRepoActionLabel(selectedRepo)}
             </Button>
           </Tooltip>
           <Button size="small" icon={<FileSyncOutlined />} onClick={openSourceControl}>
-            打开 Git 面板
+            查看修改详情
           </Button>
         </Space>
       </div>
@@ -1237,6 +1311,18 @@ const CommonFlow: React.FC = () => {
           />
         )}
 
+        {guidedConflict && guidedConflict.phase !== 'completed' && guidedConflict.phase !== 'aborted' && (
+          <GuidedConflictPanel
+            initialStatus={guidedConflict}
+            canManageData={canManageMembers}
+            onStatusChange={setGuidedConflict}
+            onFinished={() => {
+              setGuidedConflict(null);
+              void refreshRepoInfo(true, false);
+            }}
+          />
+        )}
+
         <Card size="small" style={{ ...cardStyle, ...accentPanelStyle, marginBottom: 14 }} styles={{ body: { padding: 18 } }}>
           <div style={sectionHeaderStyle}>
             <div>
@@ -1300,13 +1386,12 @@ const CommonFlow: React.FC = () => {
                 type="primary"
                 icon={<SyncOutlined />}
                 loading={confirmLoading}
-                disabled={isPreparingSync}
+                disabled={isPreparingSync || (syncDirection === 'targetToData' && !canManageMembers)}
                 onClick={openConfirmModal}
                 style={{
                   fontWeight: 700,
                   boxShadow: '0 6px 16px rgba(22,119,255,0.24)',
                 }}
-              // disabled={syncDirection === 'targetToData' && !canManageMembers }
               >
                 {isPreparingSync ? '正在预检查...' : primaryButtonText}
               </Button>
@@ -1405,7 +1490,7 @@ const CommonFlow: React.FC = () => {
         </Modal>
 
         <Modal
-          title={branchModal.mode === 'checkout' ? '切换分支' : '新建分支'}
+          title={branchModal.mode === 'checkout' ? '切换工作版本' : '新建工作版本'}
           open={branchModal.open}
           onCancel={() => setBranchModal((prev) => ({ ...prev, open: false }))}
           onOk={submitBranchAction}
@@ -1419,11 +1504,11 @@ const CommonFlow: React.FC = () => {
                 autoFocus
                 value={branchModal.value}
                 onChange={(event) => setBranchModal((prev) => ({ ...prev, value: event.target.value }))}
-                placeholder='请输入新分支名'
+                placeholder='请输入新工作版本名称'
               /> :
               <Select
                 allowClear
-                placeholder="请选择分支"
+                placeholder="请选择工作版本"
                 defaultValue={branchModal.value}
                 onChange={(value) => setBranchModal((prev) => ({ ...prev, value }))}
                 fieldNames={{ label: 'name', value: 'name'}}

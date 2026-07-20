@@ -76,6 +76,13 @@ import {
 // Import sync services
 import {
   getRepoGitInfoForWebview,
+  performFriendlyRepoAction,
+  startGuidedRepoSync,
+  getGuidedRepoSyncStatus,
+  openNextGuidedConflict,
+  resolveGuidedSpreadsheetConflict,
+  completeGuidedRepoSync,
+  abortGuidedRepoSync,
   submitRepoToCloud,
   syncCommonArtifactsToRepo,
   prepareCommonArtifactSyncToRepo,
@@ -137,6 +144,66 @@ const pipelineRuntimeService = new PipelineRuntimeService({
 });
 
 const activeJobTimers = new Map<string, ReturnType<typeof setInterval>>();
+const lastNotifiedRepoUpdates = new Map<string, string>();
+
+async function notifyFriendlyRepoUpdates(
+  context: vscode.ExtensionContext,
+  repos: Awaited<ReturnType<typeof getRepoGitInfoForWebview>>[]
+): Promise<void> {
+  const changed = repos.filter((repo) => repo.friendlyState === 'cloudUpdates' || repo.friendlyState === 'bothChanged');
+  const newItems = changed.filter((repo) => {
+    const identity = `${repo.friendlyState}:${repo.behind ?? 0}:${repo.branch ?? ''}`;
+    if (lastNotifiedRepoUpdates.get(repo.repo) === identity) return false;
+    lastNotifiedRepoUpdates.set(repo.repo, identity);
+    return true;
+  });
+  for (const repo of repos) {
+    if (repo.friendlyState === 'synced') lastNotifiedRepoUpdates.delete(repo.repo);
+  }
+  if (newItems.length === 0) return;
+
+  const labels: Record<string, string> = { data: 'Data', hibist: 'Hibist', sailor: 'Sailor', verification: 'Verification' };
+  if (newItems.length === 1 && newItems[0].repo === 'data' && newItems[0].friendlyState === 'cloudUpdates') {
+    const action = await vscode.window.showInformationMessage(
+      'Data 公共仓库有新内容，建议更新后再生成配置或运行流程。',
+      '立即更新',
+      '打开 Common 页',
+      '稍后提醒'
+    );
+    if (action === '立即更新') {
+      try {
+        await vscode.window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: '正在更新 Data 公共仓库', cancellable: false },
+          () => performFriendlyRepoAction('data', 'update', { canManageData: false })
+        );
+        void vscode.window.showInformationMessage('Data 公共仓库已更新到本地。');
+      } catch (error) {
+        lastNotifiedRepoUpdates.delete('data');
+        const next = await vscode.window.showWarningMessage(
+          error instanceof Error ? error.message : 'Data 公共仓库暂时无法自动更新。',
+          '打开 Common 页',
+          '查看修改详情'
+        );
+        if (next === '打开 Common 页') await openWebviewFlow(context, 'Common');
+        if (next === '查看修改详情') await gitService.openSourceControl();
+      }
+    } else if (action === '打开 Common 页') {
+      await openWebviewFlow(context, 'Common');
+    } else if (action === '稍后提醒') {
+      lastNotifiedRepoUpdates.delete('data');
+    }
+    return;
+  }
+
+  const names = newItems.map((repo) => labels[repo.repo] ?? repo.repo).join('、');
+  const action = await vscode.window.showInformationMessage(
+    `${names} ${newItems.length > 1 ? `共 ${newItems.length} 个仓库` : '仓库'}有云端更新或需要处理的修改。`,
+    '打开 Common 页',
+    '稍后提醒'
+  );
+  if (action === '打开 Common 页') await openWebviewFlow(context, 'Common');
+  if (action === '稍后提醒') newItems.forEach((repo) => lastNotifiedRepoUpdates.delete(repo.repo));
+}
 
 function normalizePathForScope(value: string): string {
   return path.resolve(value).replace(/[\\/]+$/, '').toLowerCase();
@@ -161,6 +228,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(dftDiagnostics);
   obsTrackingService.initialize(context);
+  initializeRepoUpdateMonitor(context);
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(OBS_READONLY_SCHEME, {
       provideTextDocumentContent: (uri) =>
@@ -246,6 +314,29 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   void initializeDftWorkbench(context);
+}
+
+function initializeRepoUpdateMonitor(context: vscode.ExtensionContext): void {
+  let interval: ReturnType<typeof setInterval> | undefined;
+  const check = async () => {
+    if (!resolveProjectRoot()) return;
+    const repos = await Promise.all(
+      (['hibist', 'sailor', 'data', 'verification'] as const).map((repo) => getRepoGitInfoForWebview(repo, true))
+    );
+    await notifyFriendlyRepoUpdates(context, repos);
+  };
+  const startup = setTimeout(() => {
+    void check().catch((error) => console.warn('[DFT IDE] Repository update check failed:', error));
+    interval = setInterval(() => {
+      void check().catch((error) => console.warn('[DFT IDE] Repository update check failed:', error));
+    }, 5 * 60_000);
+  }, 15_000);
+  context.subscriptions.push({
+    dispose: () => {
+      clearTimeout(startup);
+      if (interval) clearInterval(interval);
+    },
+  });
 }
 
 async function initializeDftWorkbench(context: vscode.ExtensionContext): Promise<void> {
@@ -993,9 +1084,15 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'getProjectRepoGitInfo': {
         const requestId: string = msg.requestId;
         try {
+          const refreshRemote = Boolean(msg.refreshRemote);
           const repos = await Promise.all(
-            (['hibist', 'sailor', 'data', 'verification'] as const).map((repo) => getRepoGitInfoForWebview(repo))
+            (['hibist', 'sailor', 'data', 'verification'] as const).map((repo) => getRepoGitInfoForWebview(repo, refreshRemote))
           );
+          if (Boolean(msg.notifyUpdates)) {
+            void notifyFriendlyRepoUpdates(context, repos).catch((error) => {
+              console.warn('[DFT IDE] Failed to notify repository updates:', error);
+            });
+          }
           currentPanel?.webview.postMessage({
             command: 'getProjectRepoGitInfoResponse',
             requestId,
@@ -1022,7 +1119,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           currentPanel?.webview.postMessage({
             command: 'getRepoGitInfoResponse',
             requestId,
-            ...(await getRepoGitInfoForWebview(repo))
+            ...(await getRepoGitInfoForWebview(repo, Boolean(msg.refreshRemote)))
           });
         } catch (error) {
           currentPanel?.webview.postMessage({
@@ -1040,18 +1137,37 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         const repo = normalizeProjectRepo(msg.repo);
         const action = typeof msg.action === 'string' ? msg.action : '';
         const branchName = typeof msg.branchName === 'string' ? msg.branchName.trim() : '';
+        const canManageData = Boolean(msg.canManageData);
+        const commitMessage = typeof msg.message === 'string' ? msg.message.trim() : undefined;
         try {
           if (!repo) {
             throw new Error('Unsupported repository.');
           }
           const resource = vscode.Uri.file(getProjectRepoRoot(repo));
-          if (action === 'pull') {
-            await gitService.pull(resource);
+          let actionResult: Awaited<ReturnType<typeof performFriendlyRepoAction>> | undefined;
+          if (action === 'update') {
+            actionResult = await vscode.window.withProgress(
+              { location: vscode.ProgressLocation.Notification, title: `正在更新 ${repo} 仓库`, cancellable: false },
+              () => performFriendlyRepoAction(repo, 'update', { canManageData, message: commitMessage })
+            );
+          } else if (action === 'uploadCommits') {
+            actionResult = await vscode.window.withProgress(
+              { location: vscode.ProgressLocation.Notification, title: `正在上传 ${repo} 仓库`, cancellable: false },
+              () => performFriendlyRepoAction(repo, 'uploadCommits', { canManageData, message: commitMessage })
+            );
+          } else if (action === 'submitAndUpload') {
+            actionResult = await performFriendlyRepoAction(repo, 'submitAndUpload', { canManageData, message: commitMessage });
+          } else if (action === 'pull') {
+            actionResult = await performFriendlyRepoAction(repo, 'update', { canManageData, message: commitMessage });
           } else if (action === 'push') {
-            await gitService.push(resource);
+            actionResult = await performFriendlyRepoAction(repo, 'uploadCommits', { canManageData, message: commitMessage });
           } else if (action === 'fetch') {
             await gitService.fetch(resource);
           } else if (action === 'checkout') {
+            const info = await gitService.refreshCurrentGitInfo(resource);
+            if (info?.hasChanges || info?.conflictCount || info?.operationInProgress) {
+              throw new Error('本地还有未处理的修改，请先查看修改详情，再切换工作版本。');
+            }
             await gitService.checkout(branchName, resource);
           } else if (action === 'createBranch') {
             await gitService.createBranch(branchName, true, resource);
@@ -1063,7 +1179,10 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           currentPanel?.webview.postMessage({
             command: 'runRepoGitActionResponse',
             requestId,
-            success: true
+            success: actionResult ? actionResult.success : true,
+            cancelled: actionResult?.cancelled,
+            message: actionResult?.message,
+            info: actionResult?.info,
           });
         } catch (error) {
           currentPanel?.webview.postMessage({
@@ -1071,6 +1190,46 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             requestId,
             success: false,
             error: error instanceof Error ? error.message : String(error)
+          });
+        }
+        return;
+      }
+
+      case 'startGuidedRepoSync':
+      case 'getGuidedRepoSyncStatus':
+      case 'openNextGuidedConflict':
+      case 'resolveGuidedSpreadsheetConflict':
+      case 'completeGuidedRepoSync':
+      case 'abortGuidedRepoSync': {
+        const requestId: string = msg.requestId;
+        const repo = normalizeProjectRepo(msg.repo);
+        try {
+          if (!repo) throw new Error('Unsupported repository.');
+          let status;
+          if (msg.command === 'startGuidedRepoSync') {
+            status = await startGuidedRepoSync(repo, {
+              canManageData: Boolean(msg.canManageData),
+              message: typeof msg.message === 'string' ? msg.message : undefined,
+            });
+          } else if (msg.command === 'getGuidedRepoSyncStatus') {
+            status = await getGuidedRepoSyncStatus(repo);
+          } else if (msg.command === 'openNextGuidedConflict') {
+            status = await openNextGuidedConflict(repo);
+          } else if (msg.command === 'resolveGuidedSpreadsheetConflict') {
+            const resolution = msg.resolution === 'local' ? 'local' : 'cloud';
+            status = await resolveGuidedSpreadsheetConflict(repo, String(msg.path ?? ''), resolution);
+          } else if (msg.command === 'completeGuidedRepoSync') {
+            status = await completeGuidedRepoSync(repo, Boolean(msg.canManageData));
+          } else {
+            status = await abortGuidedRepoSync(repo);
+          }
+          currentPanel?.webview.postMessage({
+            command: `${msg.command}Response`, requestId, success: true, status,
+          });
+        } catch (error) {
+          currentPanel?.webview.postMessage({
+            command: `${msg.command}Response`, requestId, success: false,
+            error: error instanceof Error ? error.message : String(error),
           });
         }
         return;
@@ -1556,6 +1715,9 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         try {
           if (!targetRepo) {
             throw new Error('Please choose a valid target repository.');
+          }
+          if (targetRepo === 'data' && !Boolean(msg.canManageData)) {
+            throw new Error('只有 DFTM 管理员可以更新 Data 公共仓库。');
           }
           const result = await applyCommonArtifactSyncToRepo({
             targetRepo,

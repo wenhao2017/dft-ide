@@ -320,32 +320,88 @@ export interface RepoGitInfo {
   repoRoot?: string
   branch?: string
   upstream?: string
+  commit?: string
   hasChanges?: boolean
   changedCount?: number
   changedFiles?: GitChangedFileInfo[]
+  stagedCount?: number
+  unstagedCount?: number
+  conflictCount?: number
+  ahead?: number
+  behind?: number
+  remoteChecked?: boolean
+  operationInProgress?: boolean
+  friendlyState?: 'checking' | 'synced' | 'cloudUpdates' | 'localChanges' | 'localCommits' | 'bothChanged' | 'conflict' | 'operationInProgress' | 'noRemote' | 'unavailable'
+  statusText?: string
+  checkedAt?: string
   error?: string
 }
 
-export async function getRepoGitInfo(repo: RepoKey): Promise<RepoGitInfo> {
-  const res = await ipcRequest('getRepoGitInfo', { repo })
+export async function getRepoGitInfo(repo: RepoKey, refreshRemote = false): Promise<RepoGitInfo> {
+  const res = await ipcRequest('getRepoGitInfo', { repo, refreshRemote }, refreshRemote ? 120_000 : undefined)
   return res as unknown as RepoGitInfo
 }
 
-export async function getProjectRepoGitInfo(): Promise<{
+export async function getProjectRepoGitInfo(options?: { refreshRemote?: boolean; notifyUpdates?: boolean }): Promise<{
   repos: RepoGitInfo[]
   error?: string
 }> {
-  const res = await ipcRequest('getProjectRepoGitInfo')
+  const res = await ipcRequest('getProjectRepoGitInfo', options ?? {}, options?.refreshRemote ? 120_000 : undefined)
   return res as { repos: RepoGitInfo[]; error?: string }
 }
 
 export async function runRepoGitAction(options: {
   repo: RepoKey
-  action: 'pull' | 'push' | 'fetch' | 'checkout' | 'createBranch' | 'openScm'
+  action: 'pull' | 'push' | 'fetch' | 'update' | 'uploadCommits' | 'submitAndUpload' | 'checkout' | 'createBranch' | 'openScm'
   branchName?: string
-}): Promise<{ success: boolean; error?: string }> {
+  canManageData?: boolean
+  message?: string
+}): Promise<{ success: boolean; cancelled?: boolean; message?: string; info?: RepoGitInfo; error?: string }> {
   const res = await ipcRequest('runRepoGitAction', options, 120_000)
-  return res as { success: boolean; error?: string }
+  return res as { success: boolean; cancelled?: boolean; message?: string; info?: RepoGitInfo; error?: string }
+}
+
+export interface GuidedConflictStatus {
+  repo: RepoKey
+  phase: 'resolving' | 'readyToUpload' | 'completed' | 'aborted' | 'error'
+  localCheckpointCreated: boolean
+  cloudContentFetched: boolean
+  conflicts: Array<{ path: string; name: string; spreadsheet: boolean }>
+  message: string
+  error?: string
+}
+
+async function guidedRepoRequest(command: string, payload: Record<string, unknown>): Promise<{
+  success: boolean
+  status?: GuidedConflictStatus
+  error?: string
+}> {
+  const res = await ipcRequest(command, payload, 180_000)
+  return res as { success: boolean; status?: GuidedConflictStatus; error?: string }
+}
+
+export function startGuidedRepoSync(repo: RepoKey, canManageData: boolean, message?: string) {
+  return guidedRepoRequest('startGuidedRepoSync', { repo, canManageData, message })
+}
+
+export function getGuidedRepoSyncStatus(repo: RepoKey) {
+  return guidedRepoRequest('getGuidedRepoSyncStatus', { repo })
+}
+
+export function openNextGuidedConflict(repo: RepoKey) {
+  return guidedRepoRequest('openNextGuidedConflict', { repo })
+}
+
+export function resolveGuidedSpreadsheetConflict(repo: RepoKey, path: string, resolution: 'local' | 'cloud') {
+  return guidedRepoRequest('resolveGuidedSpreadsheetConflict', { repo, path, resolution })
+}
+
+export function completeGuidedRepoSync(repo: RepoKey, canManageData: boolean) {
+  return guidedRepoRequest('completeGuidedRepoSync', { repo, canManageData })
+}
+
+export function abortGuidedRepoSync(repo: RepoKey) {
+  return guidedRepoRequest('abortGuidedRepoSync', { repo })
 }
 
 export type RepoCloudSubmitState =
@@ -895,6 +951,7 @@ export async function applyCommonArtifactSync(options: {
   targetNormTable: string
   decisions: any[]
   stageAfterApply?: boolean
+  canManageData?: boolean
 }): Promise<{
   success: boolean
   report: string

@@ -1,4 +1,9 @@
 import * as vscode from "vscode";
+import * as path from "path";
+import { execFile } from "child_process";
+import { promisify } from "util";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * VS Code 内置 Git 扩展的 ID
@@ -24,6 +29,13 @@ export interface GitInfo {
   upstream?: string;
   hasChanges: boolean;
   changedFiles: GitChangedFile[];
+  stagedCount: number;
+  unstagedCount: number;
+  conflictCount: number;
+  ahead: number;
+  behind: number;
+  remoteChecked: boolean;
+  operationInProgress: boolean;
 }
 
 /**
@@ -55,6 +67,7 @@ function getErrorMessage(error: unknown): string {
 export interface DftGitService {
   initGitRepository(resource?: vscode.Uri): Promise<boolean>;
   getCurrentGitInfo(resource?: vscode.Uri): Promise<GitInfo | undefined>;
+  refreshCurrentGitInfo(resource?: vscode.Uri): Promise<GitInfo | undefined>;
   getCurrentRepository(resource?: vscode.Uri): Promise<any | undefined>;
   getChangedFiles(resource?: vscode.Uri): Promise<GitChangedFile[]>;
   hasChangedFiles(paths: string[], resource?: vscode.Uri): Promise<boolean>;
@@ -73,6 +86,55 @@ export interface DftGitService {
   stashApply(stashName: string, resource?: vscode.Uri): Promise<void>;
   getStashList(resource?: vscode.Uri): Promise<string[]>;
   getCommitInfo(commitHash: string, resource?: vscode.Uri): Promise<CommitInfo | undefined>;
+  mergeRemoteBranch(branchName: string, resource?: vscode.Uri): Promise<void>;
+  getUnmergedFiles(resource?: vscode.Uri): Promise<vscode.Uri[]>;
+  isMergeInProgress(resource?: vscode.Uri): Promise<boolean>;
+  abortMerge(resource?: vscode.Uri): Promise<void>;
+  resolveConflictFile(file: vscode.Uri, resolution: 'local' | 'cloud', resource?: vscode.Uri): Promise<void>;
+  openMergeConflict(file: vscode.Uri, resource?: vscode.Uri): Promise<void>;
+}
+
+function countChangedFiles(changedFiles: GitChangedFile[], type: GitFileChangeType): number {
+  return new Set(changedFiles.filter((file) => file.type === type).map((file) => file.path)).size;
+}
+
+async function buildGitInfo(repo: any, remoteChecked: boolean): Promise<GitInfo> {
+  if (typeof repo.status === 'function') {
+    await repo.status();
+  }
+  const changedFiles = collectChangedFiles(repo);
+  const head = repo.state?.HEAD;
+  let mergeInProgress = false;
+  try {
+    await runGit(repo.rootUri.fsPath, ['rev-parse', '--verify', '-q', 'MERGE_HEAD']);
+    mergeInProgress = true;
+  } catch {
+    // rev-parse exits non-zero when there is no active merge.
+  }
+  return {
+    repoRoot: repo.rootUri.fsPath,
+    branch: head?.name,
+    commit: head?.commit,
+    upstream: head?.upstream ? `${head.upstream.remote}/${head.upstream.name}` : undefined,
+    hasChanges: changedFiles.length > 0,
+    changedFiles,
+    stagedCount: countChangedFiles(changedFiles, 'index'),
+    unstagedCount: countChangedFiles(changedFiles, 'workingTree'),
+    conflictCount: countChangedFiles(changedFiles, 'merge'),
+    ahead: typeof head?.ahead === 'number' ? head.ahead : 0,
+    behind: typeof head?.behind === 'number' ? head.behind : 0,
+    remoteChecked,
+    operationInProgress: Boolean(repo.state?.rebaseCommit || repo.state?.sequencerState || mergeInProgress),
+  };
+}
+
+async function runGit(repoRoot: string, args: string[]): Promise<string> {
+  const result = await execFileAsync('git', ['-C', repoRoot, ...args], {
+    encoding: 'utf-8',
+    timeout: 120_000,
+    windowsHide: true,
+  });
+  return result.stdout.trim();
 }
 
 /**
@@ -136,9 +198,10 @@ async function getRepository(resource?: vscode.Uri): Promise<any | undefined> {
       return isInsidePath(resource.fsPath, repo.rootUri.fsPath);
     });
 
-    if (matchedRepo) {
-      return matchedRepo;
-    }
+    // An explicit resource must never silently operate on another repository.
+    // This matters in a four-repository workspace where one repository may be
+    // missing or temporarily unavailable.
+    return matchedRepo;
   }
 
   const activeEditor = vscode.window.activeTextEditor;
@@ -254,18 +317,16 @@ export const gitService: DftGitService = {
       return undefined;
     }
 
-    const changedFiles = collectChangedFiles(repo);
+    return buildGitInfo(repo, false);
+  },
 
-    const head = repo.state?.HEAD;
-
-    return {
-      repoRoot: repo.rootUri.fsPath,
-      branch: head?.name,
-      commit: head?.commit,
-      upstream: head?.upstream ? `${head.upstream.remote}/${head.upstream.name}` : undefined,
-      hasChanges: changedFiles.length > 0,
-      changedFiles,
-    };
+  async refreshCurrentGitInfo(resource?: vscode.Uri): Promise<GitInfo | undefined> {
+    const repo = await getRepository(resource);
+    if (!repo) {
+      return undefined;
+    }
+    await repo.fetch();
+    return buildGitInfo(repo, true);
   },
 
   /**
@@ -623,5 +684,80 @@ export const gitService: DftGitService = {
       vscode.window.showErrorMessage(`Failed to get commit info for "${hash}":${getErrorMessage(error)}`);
       return undefined;
     }
+  },
+
+  async mergeRemoteBranch(branchName: string, resource?: vscode.Uri): Promise<void> {
+    const repo = await getRepository(resource);
+    if (!repo) {
+      throw new Error('No Git repository found.');
+    }
+    const name = branchName.trim();
+    if (!name) {
+      throw new Error('The cloud branch is not configured.');
+    }
+    await repo.merge(name);
+  },
+
+  async getUnmergedFiles(resource?: vscode.Uri): Promise<vscode.Uri[]> {
+    const repo = await getRepository(resource);
+    if (!repo) {
+      return [];
+    }
+    const output = await runGit(repo.rootUri.fsPath, ['diff', '--name-only', '--diff-filter=U', '-z']);
+    return output
+      .split('\0')
+      .filter(Boolean)
+      .map((relativePath) => vscode.Uri.file(path.join(repo.rootUri.fsPath, relativePath)));
+  },
+
+  async isMergeInProgress(resource?: vscode.Uri): Promise<boolean> {
+    const repo = await getRepository(resource);
+    if (!repo) {
+      return false;
+    }
+    try {
+      await runGit(repo.rootUri.fsPath, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  async abortMerge(resource?: vscode.Uri): Promise<void> {
+    const repo = await getRepository(resource);
+    if (!repo) {
+      throw new Error('No Git repository found.');
+    }
+    await runGit(repo.rootUri.fsPath, ['merge', '--abort']);
+  },
+
+  async resolveConflictFile(file: vscode.Uri, resolution: 'local' | 'cloud', resource?: vscode.Uri): Promise<void> {
+    const repo = await getRepository(resource || file);
+    if (!repo) {
+      throw new Error('No Git repository found.');
+    }
+    const relativePath = path.relative(repo.rootUri.fsPath, file.fsPath);
+    if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+      throw new Error('The conflict file is outside the selected repository.');
+    }
+    const side = resolution === 'local' ? '--ours' : '--theirs';
+    await runGit(repo.rootUri.fsPath, ['checkout', side, '--', relativePath]);
+    await repo.add([file.fsPath]);
+  },
+
+  async openMergeConflict(file: vscode.Uri, resource?: vscode.Uri): Promise<void> {
+    const repo = await getRepository(resource || file);
+    if (!repo) {
+      throw new Error('No Git repository found.');
+    }
+    const change = (repo.state?.mergeChanges ?? []).find((item: any) => {
+      const uri = getChangeUri(item);
+      return uri?.fsPath === file.fsPath;
+    });
+    if (change?.command?.command) {
+      await vscode.commands.executeCommand(change.command.command, ...(change.command.arguments ?? []));
+      return;
+    }
+    await vscode.commands.executeCommand('vscode.open', file);
   }
 };
