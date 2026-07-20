@@ -15,48 +15,87 @@ if ("$phase" != "before" && "$phase" != "after") then
     exit 2
 endif
 
-switch ("$step")
-case "gen_analysis_env":
-    # 在此添加 gen_analysis_env 的前置/后置 ECO 命令。
+switch ("${step}:${phase}")
+case "gen_analysis_env:before":
+    # 在此添加 gen_analysis_env 的前置 ECO 命令。
     breaksw
-case "run_analysis":
-    # 在此添加 run_analysis 的前置/后置 ECO 命令。
+case "gen_analysis_env:after":
+    # 在此添加 gen_analysis_env 的后置 ECO 命令。
     breaksw
-case "gen_insert_env":
-    # 在此添加 gen_insert_env 的前置/后置 ECO 命令。
+case "run_analysis:before":
+    # 在此添加 run_analysis 的前置 ECO 命令。
     breaksw
-case "run_insert":
-    # 在此添加 run_insert 的前置/后置 ECO 命令。
+case "run_analysis:after":
+    # 在此添加 run_analysis 的后置 ECO 命令。
     breaksw
-case "gen_build_env":
-    # 在此添加 gen_build_env 的前置/后置 ECO 命令。
+case "gen_insert_env:before":
+    # 在此添加 gen_insert_env 的前置 ECO 命令。
     breaksw
-case "run_build":
-    # 在此添加 run_build 的前置/后置 ECO 命令。
+case "gen_insert_env:after":
+    # 在此添加 gen_insert_env 的后置 ECO 命令。
     breaksw
-case "gen_syn_env":
-    # 在此添加 gen_syn_env 的前置/后置 ECO 命令。
+case "run_insert:before":
+    # 在此添加 run_insert 的前置 ECO 命令。
     breaksw
-case "run_syn":
-    # 在此添加 run_syn 的前置/后置 ECO 命令。
+case "run_insert:after":
+    # 在此添加 run_insert 的后置 ECO 命令。
     breaksw
-case "gen_fml_env":
-    # 在此添加 gen_fml_env 的前置/后置 ECO 命令。
+case "gen_build_env:before":
+    # 在此添加 gen_build_env 的前置 ECO 命令。
     breaksw
-case "run_fml":
-    # 在此添加 run_fml 的前置/后置 ECO 命令。
+case "gen_build_env:after":
+    # 在此添加 gen_build_env 的后置 ECO 命令。
     breaksw
-case "gen_sim_env":
-    # 在此添加 gen_sim_env 的前置/后置 ECO 命令。
+case "run_build:before":
+    # 在此添加 run_build 的前置 ECO 命令。
     breaksw
-case "run_sim":
-    # 在此添加 run_sim 的前置/后置 ECO 命令。
+case "run_build:after":
+    # 在此添加 run_build 的后置 ECO 命令。
     breaksw
-case "release":
-    # 在此添加 release 的前置/后置 ECO 命令。
+case "gen_syn_env:before":
+    # 在此添加 gen_syn_env 的前置 ECO 命令。
+    breaksw
+case "gen_syn_env:after":
+    # 在此添加 gen_syn_env 的后置 ECO 命令。
+    breaksw
+case "run_syn:before":
+    # 在此添加 run_syn 的前置 ECO 命令。
+    breaksw
+case "run_syn:after":
+    # 在此添加 run_syn 的后置 ECO 命令。
+    breaksw
+case "gen_fml_env:before":
+    # 在此添加 gen_fml_env 的前置 ECO 命令。
+    breaksw
+case "gen_fml_env:after":
+    # 在此添加 gen_fml_env 的后置 ECO 命令。
+    breaksw
+case "run_fml:before":
+    # 在此添加 run_fml 的前置 ECO 命令。
+    breaksw
+case "run_fml:after":
+    # 在此添加 run_fml 的后置 ECO 命令。
+    breaksw
+case "gen_sim_env:before":
+    # 在此添加 gen_sim_env 的前置 ECO 命令。
+    breaksw
+case "gen_sim_env:after":
+    # 在此添加 gen_sim_env 的后置 ECO 命令。
+    breaksw
+case "run_sim:before":
+    # 在此添加 run_sim 的前置 ECO 命令。
+    breaksw
+case "run_sim:after":
+    # 在此添加 run_sim 的后置 ECO 命令。
+    breaksw
+case "release:before":
+    # 在此添加 release 的前置 ECO 命令。
+    breaksw
+case "release:after":
+    # 在此添加 release 的后置 ECO 命令。
     breaksw
 default:
-    echo "[DFT IDE] 未知的 Hibist ECO Step: $step"
+    echo "[DFT IDE] 未知的 ECO 调度组合: step=$step phase=$phase"
     exit 2
 endsw
 

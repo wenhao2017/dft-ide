@@ -6,18 +6,51 @@ set step = "$DFT_IDE_STEP"
 set phase = "$DFT_IDE_ECO_PHASE"
 if ("$phase" != "before" && "$phase" != "after") exit 2
 
-switch ("$step")
-case "create_project":
-case "gen_design_info":
-case "gen_3d_merge_env":
-case "analysis_3d_netlist":
-case "complete_check":
-case "run_3d_merge":
-case "delivery_data":
-    # 请按需拆分独立的 case 分支，并添加领域或项目 ECO 调用。
+switch ("${step}:${phase}")
+case "create_project:before":
+    # 在此添加 create_project 的前置 ECO 命令。
+    breaksw
+case "create_project:after":
+    # 在此添加 create_project 的后置 ECO 命令。
+    breaksw
+case "gen_design_info:before":
+    # 在此添加 gen_design_info 的前置 ECO 命令。
+    breaksw
+case "gen_design_info:after":
+    # 在此添加 gen_design_info 的后置 ECO 命令。
+    breaksw
+case "gen_3d_merge_env:before":
+    # 在此添加 gen_3d_merge_env 的前置 ECO 命令。
+    breaksw
+case "gen_3d_merge_env:after":
+    # 在此添加 gen_3d_merge_env 的后置 ECO 命令。
+    breaksw
+case "analysis_3d_netlist:before":
+    # 在此添加 analysis_3d_netlist 的前置 ECO 命令。
+    breaksw
+case "analysis_3d_netlist:after":
+    # 在此添加 analysis_3d_netlist 的后置 ECO 命令。
+    breaksw
+case "complete_check:before":
+    # 在此添加 complete_check 的前置 ECO 命令。
+    breaksw
+case "complete_check:after":
+    # 在此添加 complete_check 的后置 ECO 命令。
+    breaksw
+case "run_3d_merge:before":
+    # 在此添加 run_3d_merge 的前置 ECO 命令。
+    breaksw
+case "run_3d_merge:after":
+    # 在此添加 run_3d_merge 的后置 ECO 命令。
+    breaksw
+case "delivery_data:before":
+    # 在此添加 delivery_data 的前置 ECO 命令。
+    breaksw
+case "delivery_data:after":
+    # 在此添加 delivery_data 的后置 ECO 命令。
     breaksw
 default:
-    echo "[DFT IDE] 未知的 Lander merge 3D ECO Step: $step"
+    echo "[DFT IDE] 未知的 ECO 调度组合: step=$step phase=$phase"
     exit 2
 endsw
 exit 0

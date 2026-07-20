@@ -20,85 +20,153 @@ if ("$phase" != "before" && "$phase" != "after") then
     exit 2
 endif
 
-switch ("$step")
-case "gen_libcell_env":
-    # 在此添加 gen_libcell_env 的前置/后置 ECO 命令。
+switch ("${step}:${phase}")
+case "gen_libcell_env:before":
+    # 在此添加 gen_libcell_env 的前置 ECO 命令。
     breaksw
-case "run_libcell_syn":
-    # 在此添加 run_libcell_syn 的前置/后置 ECO 命令。
+case "gen_libcell_env:after":
+    # 在此添加 gen_libcell_env 的后置 ECO 命令。
     breaksw
-case "gen_analysis_env":
-    # 在此添加 gen_analysis_env 的前置/后置 ECO 命令。
+case "run_libcell_syn:before":
+    # 在此添加 run_libcell_syn 的前置 ECO 命令。
     breaksw
-case "run_analysis":
-    # 在此添加 run_analysis 的前置/后置 ECO 命令。
+case "run_libcell_syn:after":
+    # 在此添加 run_libcell_syn 的后置 ECO 命令。
     breaksw
-case "gen_prescan_env":
-    # 在此添加 gen_prescan_env 的前置/后置 ECO 命令。
+case "gen_analysis_env:before":
+    # 在此添加 gen_analysis_env 的前置 ECO 命令。
     breaksw
-case "run_prescan":
-    # 在此添加 run_prescan 的前置/后置 ECO 命令。
+case "gen_analysis_env:after":
+    # 在此添加 gen_analysis_env 的后置 ECO 命令。
     breaksw
-case "gen_scan_env":
-    # 在此添加 gen_scan_env 的前置/后置 ECO 命令。
+case "run_analysis:before":
+    # 在此添加 run_analysis 的前置 ECO 命令。
     breaksw
-case "run_scan":
-    if ("$phase" == "before") then
-        # 在此添加 run_scan 的前置 ECO 命令。
-    else
-        # 在此添加 run_scan 的后置 ECO 命令。
-    endif
+case "run_analysis:after":
+    # 在此添加 run_analysis 的后置 ECO 命令。
     breaksw
-case "gen_edt_env":
-    # 在此添加 gen_edt_env 的前置/后置 ECO 命令。
+case "gen_prescan_env:before":
+    # 在此添加 gen_prescan_env 的前置 ECO 命令。
     breaksw
-case "run_edt_gen":
-    # 在此添加 run_edt_gen 的前置/后置 ECO 命令。
+case "gen_prescan_env:after":
+    # 在此添加 gen_prescan_env 的后置 ECO 命令。
     breaksw
-case "gen_ip_env":
-    # 在此添加 gen_ip_env 的前置/后置 ECO 命令。
+case "run_prescan:before":
+    # 在此添加 run_prescan 的前置 ECO 命令。
     breaksw
-case "gen_bscan_env":
-    # 在此添加 gen_bscan_env 的前置/后置 ECO 命令。
+case "run_prescan:after":
+    # 在此添加 run_prescan 的后置 ECO 命令。
     breaksw
-case "run_bscan_gen":
-    # 在此添加 run_bscan_gen 的前置/后置 ECO 命令。
+case "gen_scan_env:before":
+    # 在此添加 gen_scan_env 的前置 ECO 命令。
     breaksw
-case "gen_bscan_insert":
-    # 在此添加 gen_bscan_insert 的前置/后置 ECO 命令。
+case "gen_scan_env:after":
+    # 在此添加 gen_scan_env 的后置 ECO 命令。
     breaksw
-case "gen_ioshare_env":
-    # 在此添加 gen_ioshare_env 的前置/后置 ECO 命令。
+case "run_scan:before":
+    # 在此添加 run_scan 的前置 ECO 命令。
     breaksw
-case "gen_ijtag_env":
-    # 在此添加 gen_ijtag_env 的前置/后置 ECO 命令。
+case "run_scan:after":
+    # 在此添加 run_scan 的后置 ECO 命令。
     breaksw
-case "run_ijtag_gen":
-    # 在此添加 run_ijtag_gen 的前置/后置 ECO 命令。
+case "gen_edt_env:before":
+    # 在此添加 gen_edt_env 的前置 ECO 命令。
     breaksw
-case "gen_compile_env":
-    # 在此添加 gen_compile_env 的前置/后置 ECO 命令。
+case "gen_edt_env:after":
+    # 在此添加 gen_edt_env 的后置 ECO 命令。
     breaksw
-case "run_compile":
-    # 在此添加 run_compile 的前置/后置 ECO 命令。
+case "run_edt_gen:before":
+    # 在此添加 run_edt_gen 的前置 ECO 命令。
     breaksw
-case "gen_assemble_env":
-    # 在此添加 gen_assemble_env 的前置/后置 ECO 命令。
+case "run_edt_gen:after":
+    # 在此添加 run_edt_gen 的后置 ECO 命令。
     breaksw
-case "run_assemble":
-    # 在此添加 run_assemble 的前置/后置 ECO 命令。
+case "gen_ip_env:before":
+    # 在此添加 gen_ip_env 的前置 ECO 命令。
     breaksw
-case "gen_release_env":
-    # 在此添加 gen_release_env 的前置/后置 ECO 命令。
+case "gen_ip_env:after":
+    # 在此添加 gen_ip_env 的后置 ECO 命令。
     breaksw
-case "run_release":
-    # 在此添加 run_release 的前置/后置 ECO 命令。
+case "gen_bscan_env:before":
+    # 在此添加 gen_bscan_env 的前置 ECO 命令。
     breaksw
-case "deliver":
-    # 在此添加 deliver 的前置/后置 ECO 命令。
+case "gen_bscan_env:after":
+    # 在此添加 gen_bscan_env 的后置 ECO 命令。
+    breaksw
+case "run_bscan_gen:before":
+    # 在此添加 run_bscan_gen 的前置 ECO 命令。
+    breaksw
+case "run_bscan_gen:after":
+    # 在此添加 run_bscan_gen 的后置 ECO 命令。
+    breaksw
+case "gen_bscan_insert:before":
+    # 在此添加 gen_bscan_insert 的前置 ECO 命令。
+    breaksw
+case "gen_bscan_insert:after":
+    # 在此添加 gen_bscan_insert 的后置 ECO 命令。
+    breaksw
+case "gen_ioshare_env:before":
+    # 在此添加 gen_ioshare_env 的前置 ECO 命令。
+    breaksw
+case "gen_ioshare_env:after":
+    # 在此添加 gen_ioshare_env 的后置 ECO 命令。
+    breaksw
+case "gen_ijtag_env:before":
+    # 在此添加 gen_ijtag_env 的前置 ECO 命令。
+    breaksw
+case "gen_ijtag_env:after":
+    # 在此添加 gen_ijtag_env 的后置 ECO 命令。
+    breaksw
+case "run_ijtag_gen:before":
+    # 在此添加 run_ijtag_gen 的前置 ECO 命令。
+    breaksw
+case "run_ijtag_gen:after":
+    # 在此添加 run_ijtag_gen 的后置 ECO 命令。
+    breaksw
+case "gen_compile_env:before":
+    # 在此添加 gen_compile_env 的前置 ECO 命令。
+    breaksw
+case "gen_compile_env:after":
+    # 在此添加 gen_compile_env 的后置 ECO 命令。
+    breaksw
+case "run_compile:before":
+    # 在此添加 run_compile 的前置 ECO 命令。
+    breaksw
+case "run_compile:after":
+    # 在此添加 run_compile 的后置 ECO 命令。
+    breaksw
+case "gen_assemble_env:before":
+    # 在此添加 gen_assemble_env 的前置 ECO 命令。
+    breaksw
+case "gen_assemble_env:after":
+    # 在此添加 gen_assemble_env 的后置 ECO 命令。
+    breaksw
+case "run_assemble:before":
+    # 在此添加 run_assemble 的前置 ECO 命令。
+    breaksw
+case "run_assemble:after":
+    # 在此添加 run_assemble 的后置 ECO 命令。
+    breaksw
+case "gen_release_env:before":
+    # 在此添加 gen_release_env 的前置 ECO 命令。
+    breaksw
+case "gen_release_env:after":
+    # 在此添加 gen_release_env 的后置 ECO 命令。
+    breaksw
+case "run_release:before":
+    # 在此添加 run_release 的前置 ECO 命令。
+    breaksw
+case "run_release:after":
+    # 在此添加 run_release 的后置 ECO 命令。
+    breaksw
+case "deliver:before":
+    # 在此添加 deliver 的前置 ECO 命令。
+    breaksw
+case "deliver:after":
+    # 在此添加 deliver 的后置 ECO 命令。
     breaksw
 default:
-    echo "[DFT IDE] 未知的 Sailor ECO Step: $step"
+    echo "[DFT IDE] 未知的 ECO 调度组合: step=$step phase=$phase"
     exit 2
 endsw
 

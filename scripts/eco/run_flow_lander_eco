@@ -17,18 +17,51 @@ if ("$phase" != "before" && "$phase" != "after") then
 endif
 
 # 在此添加通用 Lander ECO 调度规则；没有匹配动作时正常返回 0。
-switch ("$step")
-case "prepare_workspace":
-case "load_config":
-case "check_env":
-case "submit_mode":
-case "collect_result":
-case "parse_report":
-case "publish_dashboard":
-    # 某个 Step 需要 ECO 时，请拆分成独立的 case 分支并添加调用命令。
+switch ("${step}:${phase}")
+case "prepare_workspace:before":
+    # 在此添加 prepare_workspace 的前置 ECO 命令。
+    breaksw
+case "prepare_workspace:after":
+    # 在此添加 prepare_workspace 的后置 ECO 命令。
+    breaksw
+case "load_config:before":
+    # 在此添加 load_config 的前置 ECO 命令。
+    breaksw
+case "load_config:after":
+    # 在此添加 load_config 的后置 ECO 命令。
+    breaksw
+case "check_env:before":
+    # 在此添加 check_env 的前置 ECO 命令。
+    breaksw
+case "check_env:after":
+    # 在此添加 check_env 的后置 ECO 命令。
+    breaksw
+case "submit_mode:before":
+    # 在此添加 submit_mode 的前置 ECO 命令。
+    breaksw
+case "submit_mode:after":
+    # 在此添加 submit_mode 的后置 ECO 命令。
+    breaksw
+case "collect_result:before":
+    # 在此添加 collect_result 的前置 ECO 命令。
+    breaksw
+case "collect_result:after":
+    # 在此添加 collect_result 的后置 ECO 命令。
+    breaksw
+case "parse_report:before":
+    # 在此添加 parse_report 的前置 ECO 命令。
+    breaksw
+case "parse_report:after":
+    # 在此添加 parse_report 的后置 ECO 命令。
+    breaksw
+case "publish_dashboard:before":
+    # 在此添加 publish_dashboard 的前置 ECO 命令。
+    breaksw
+case "publish_dashboard:after":
+    # 在此添加 publish_dashboard 的后置 ECO 命令。
     breaksw
 default:
-    echo "[DFT IDE] 未知的 Lander ECO Step: $step"
+    echo "[DFT IDE] 未知的 ECO 调度组合: step=$step phase=$phase"
     exit 2
 endsw
 

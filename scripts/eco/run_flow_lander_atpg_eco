@@ -14,28 +14,111 @@ if ("$phase" != "before" && "$phase" != "after") then
     exit 2
 endif
 
-switch ("$step")
-case "create_project":
-case "gen_design_info":
-case "gen_plan_env":
-case "release_plan":
-case "gen_atpg_setting":
-case "gen_pdl_env":
-case "gen_atpg_env_pre":
-case "gen_atpg_env":
-case "gen_crg_env":
-case "run_crg_gen":
-case "run_atpg":
-case "gen_all_scan_env":
-case "run_all_scan":
-case "delivery_data":
-case "sed_3d_tb":
-case "gen_sim_env":
-case "run_sim":
-    # 某个 Step 需要 ECO 时，请拆分成独立的 case 分支并添加调用命令。
+switch ("${step}:${phase}")
+case "create_project:before":
+    # 在此添加 create_project 的前置 ECO 命令。
+    breaksw
+case "create_project:after":
+    # 在此添加 create_project 的后置 ECO 命令。
+    breaksw
+case "gen_design_info:before":
+    # 在此添加 gen_design_info 的前置 ECO 命令。
+    breaksw
+case "gen_design_info:after":
+    # 在此添加 gen_design_info 的后置 ECO 命令。
+    breaksw
+case "gen_plan_env:before":
+    # 在此添加 gen_plan_env 的前置 ECO 命令。
+    breaksw
+case "gen_plan_env:after":
+    # 在此添加 gen_plan_env 的后置 ECO 命令。
+    breaksw
+case "release_plan:before":
+    # 在此添加 release_plan 的前置 ECO 命令。
+    breaksw
+case "release_plan:after":
+    # 在此添加 release_plan 的后置 ECO 命令。
+    breaksw
+case "gen_atpg_setting:before":
+    # 在此添加 gen_atpg_setting 的前置 ECO 命令。
+    breaksw
+case "gen_atpg_setting:after":
+    # 在此添加 gen_atpg_setting 的后置 ECO 命令。
+    breaksw
+case "gen_pdl_env:before":
+    # 在此添加 gen_pdl_env 的前置 ECO 命令。
+    breaksw
+case "gen_pdl_env:after":
+    # 在此添加 gen_pdl_env 的后置 ECO 命令。
+    breaksw
+case "gen_atpg_env_pre:before":
+    # 在此添加 gen_atpg_env_pre 的前置 ECO 命令。
+    breaksw
+case "gen_atpg_env_pre:after":
+    # 在此添加 gen_atpg_env_pre 的后置 ECO 命令。
+    breaksw
+case "gen_atpg_env:before":
+    # 在此添加 gen_atpg_env 的前置 ECO 命令。
+    breaksw
+case "gen_atpg_env:after":
+    # 在此添加 gen_atpg_env 的后置 ECO 命令。
+    breaksw
+case "gen_crg_env:before":
+    # 在此添加 gen_crg_env 的前置 ECO 命令。
+    breaksw
+case "gen_crg_env:after":
+    # 在此添加 gen_crg_env 的后置 ECO 命令。
+    breaksw
+case "run_crg_gen:before":
+    # 在此添加 run_crg_gen 的前置 ECO 命令。
+    breaksw
+case "run_crg_gen:after":
+    # 在此添加 run_crg_gen 的后置 ECO 命令。
+    breaksw
+case "run_atpg:before":
+    # 在此添加 run_atpg 的前置 ECO 命令。
+    breaksw
+case "run_atpg:after":
+    # 在此添加 run_atpg 的后置 ECO 命令。
+    breaksw
+case "gen_all_scan_env:before":
+    # 在此添加 gen_all_scan_env 的前置 ECO 命令。
+    breaksw
+case "gen_all_scan_env:after":
+    # 在此添加 gen_all_scan_env 的后置 ECO 命令。
+    breaksw
+case "run_all_scan:before":
+    # 在此添加 run_all_scan 的前置 ECO 命令。
+    breaksw
+case "run_all_scan:after":
+    # 在此添加 run_all_scan 的后置 ECO 命令。
+    breaksw
+case "delivery_data:before":
+    # 在此添加 delivery_data 的前置 ECO 命令。
+    breaksw
+case "delivery_data:after":
+    # 在此添加 delivery_data 的后置 ECO 命令。
+    breaksw
+case "sed_3d_tb:before":
+    # 在此添加 sed_3d_tb 的前置 ECO 命令。
+    breaksw
+case "sed_3d_tb:after":
+    # 在此添加 sed_3d_tb 的后置 ECO 命令。
+    breaksw
+case "gen_sim_env:before":
+    # 在此添加 gen_sim_env 的前置 ECO 命令。
+    breaksw
+case "gen_sim_env:after":
+    # 在此添加 gen_sim_env 的后置 ECO 命令。
+    breaksw
+case "run_sim:before":
+    # 在此添加 run_sim 的前置 ECO 命令。
+    breaksw
+case "run_sim:after":
+    # 在此添加 run_sim 的后置 ECO 命令。
     breaksw
 default:
-    echo "[DFT IDE] 未知的 Lander ATPG ECO Step: $step"
+    echo "[DFT IDE] 未知的 ECO 调度组合: step=$step phase=$phase"
     exit 2
 endsw
 

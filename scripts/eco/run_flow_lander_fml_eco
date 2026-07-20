@@ -6,20 +6,63 @@ set step = "$DFT_IDE_STEP"
 set phase = "$DFT_IDE_ECO_PHASE"
 if ("$phase" != "before" && "$phase" != "after") exit 2
 
-switch ("$step")
-case "create_project":
-case "gen_design_info":
-case "gen_plan_env":
-case "release_plan":
-case "gen_fml_env":
-case "run_fml":
-case "upload_fml_database_pre":
-case "upload_fml_database":
-case "gen_report":
-    # 请按需拆分独立的 case 分支，并添加领域或项目 ECO 调用。
+switch ("${step}:${phase}")
+case "create_project:before":
+    # 在此添加 create_project 的前置 ECO 命令。
+    breaksw
+case "create_project:after":
+    # 在此添加 create_project 的后置 ECO 命令。
+    breaksw
+case "gen_design_info:before":
+    # 在此添加 gen_design_info 的前置 ECO 命令。
+    breaksw
+case "gen_design_info:after":
+    # 在此添加 gen_design_info 的后置 ECO 命令。
+    breaksw
+case "gen_plan_env:before":
+    # 在此添加 gen_plan_env 的前置 ECO 命令。
+    breaksw
+case "gen_plan_env:after":
+    # 在此添加 gen_plan_env 的后置 ECO 命令。
+    breaksw
+case "release_plan:before":
+    # 在此添加 release_plan 的前置 ECO 命令。
+    breaksw
+case "release_plan:after":
+    # 在此添加 release_plan 的后置 ECO 命令。
+    breaksw
+case "gen_fml_env:before":
+    # 在此添加 gen_fml_env 的前置 ECO 命令。
+    breaksw
+case "gen_fml_env:after":
+    # 在此添加 gen_fml_env 的后置 ECO 命令。
+    breaksw
+case "run_fml:before":
+    # 在此添加 run_fml 的前置 ECO 命令。
+    breaksw
+case "run_fml:after":
+    # 在此添加 run_fml 的后置 ECO 命令。
+    breaksw
+case "upload_fml_database_pre:before":
+    # 在此添加 upload_fml_database_pre 的前置 ECO 命令。
+    breaksw
+case "upload_fml_database_pre:after":
+    # 在此添加 upload_fml_database_pre 的后置 ECO 命令。
+    breaksw
+case "upload_fml_database:before":
+    # 在此添加 upload_fml_database 的前置 ECO 命令。
+    breaksw
+case "upload_fml_database:after":
+    # 在此添加 upload_fml_database 的后置 ECO 命令。
+    breaksw
+case "gen_report:before":
+    # 在此添加 gen_report 的前置 ECO 命令。
+    breaksw
+case "gen_report:after":
+    # 在此添加 gen_report 的后置 ECO 命令。
     breaksw
 default:
-    echo "[DFT IDE] 未知的 Lander FML ECO Step: $step"
+    echo "[DFT IDE] 未知的 ECO 调度组合: step=$step phase=$phase"
     exit 2
 endsw
 exit 0
