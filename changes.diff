@@ -5,7 +5,7 @@ index cca1419..956ac50 100644
 @@ -594,14 +594,26 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
              throw new Error('Invalid pipeline runtime payload');
            }
-
+ 
 +          let snapshot;
            if (msg.command === 'ensurePipelineRuntime') {
 -            pipelineRuntimeService.ensureRuntime(flowKey, moduleKey, flowLabel);
@@ -41,7 +41,6 @@ index cca1419..956ac50 100644
              });
            }
          } catch (err) {
-
 diff --git a/src/services/pipelineRuntimeService.ts b/src/services/pipelineRuntimeService.ts
 index 3a89365..b6e757c 100644
 --- a/src/services/pipelineRuntimeService.ts
@@ -56,17 +55,17 @@ index 3a89365..b6e757c 100644
    buffer: string;
 @@ -77,6 +78,8 @@ function getPipelineTerminalTitle(flowLabel: string, moduleKey: string): string
  }
-
+ 
  const PIPELINE_PYTHON_MODULE = 'python/3.10.6';
 +const DEFAULT_DONAU_GROUP = 'ug_dft.HIS-HIS-ASIC-HISC-DFT-PLAT-WS';
 +const DEFAULT_DONAU_QUEUE = 'normal';
-
+ 
  function quoteCshArgument(value: string): string {
    return `"${value.replace(/(["\\$`])/g, '\\$1')}"`;
 @@ -111,6 +114,45 @@ function buildStepEndMarker(runId: string, taskId: string): string {
    return `__DFT_IDE_STEP_END__|${runId}|${taskId}|`;
  }
-
+ 
 +function resolveVerificationRunParameters(
 +  runParameters: unknown,
 +  taskConfig?: Record<string, unknown> | null,
@@ -111,7 +110,7 @@ index 3a89365..b6e757c 100644
    task: PipelineTask,
 @@ -174,9 +216,13 @@ function buildStepCommands(
    }
-
+ 
    const stepCommand = task.command.trim();
 +  const executionCommand = flowKey === 'verification'
 +    ? stepCommand
@@ -123,7 +122,7 @@ index 3a89365..b6e757c 100644
 +  commands.push(executionCommand);
    commands.push('set dft_ide_step_status = $status');
    commands.push(`echo "${buildStepEndMarker(runId, task.id)}$dft_ide_step_status"`);
-
+ 
 @@ -476,7 +522,9 @@ function runSequentialSimulation(
          }
          commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
@@ -132,7 +131,7 @@ index 3a89365..b6e757c 100644
 +        commands.push(flowKey === 'verification'
 +          ? stepCommand
 +          : buildPipelineStepExecutionCommand(projectPath, stepCommand));
-
+ 
          openTerminal(getPipelineTerminalTitle(flowLabel, moduleKey), commands, cwd);
        }
 @@ -587,6 +635,8 @@ export class PipelineRuntimeService {
@@ -145,9 +144,9 @@ index 3a89365..b6e757c 100644
      const key = getPipelineRuntimeKey(flowKey, moduleKey);
      const config = pipelineFlowConfigs[flowKey];
 @@ -600,7 +650,13 @@ export class PipelineRuntimeService {
-
+ 
      clearRuntimeTimers(key);
-
+ 
 -    const { tasks: parsedTasks, links: parsedLinks } = loadPipelineConfig(flowKey);
 +    const loadedPipeline = loadPipelineConfig(flowKey);
 +    const parsedTasks = selectedTasks?.length
@@ -179,7 +178,7 @@ index 3a89365..b6e757c 100644
 +        : buildPipelineStepExecutionCommand(resolveProjectPath(flowKey), stepCommand));
        this.options.openTerminal(getPipelineTerminalTitle(runtime.flowLabel, moduleKey), commands);
      }
-
+ 
 @@ -800,6 +861,25 @@ export class PipelineRuntimeService {
        session.envConfig,
        session.taskConfig,
@@ -206,7 +205,6 @@ index 3a89365..b6e757c 100644
      void Promise.resolve(
        this.options.openTerminal(session.terminalTitle, commands, session.cwd, session.shellPath),
      ).catch((error) => {
-
 diff --git a/src/webview/components/shared/DesignTreePanel.tsx b/src/webview/components/shared/DesignTreePanel.tsx
 index 8322280..9c7e705 100644
 --- a/src/webview/components/shared/DesignTreePanel.tsx
@@ -226,9 +224,9 @@ index 8322280..9c7e705 100644
 +import StepSelector, {
 +  VERIFICATION_STEP_PRESETS,
 +} from '../verification/mode/StepSelector';
-
+ 
  const { Text, Title } = Typography;
-
+ 
 @@ -714,9 +716,8 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
        <Modal
          open={taskModalOpen}
@@ -299,7 +297,6 @@ index 8322280..9c7e705 100644
          </Space>
        </Modal>
      </div>
-
 diff --git a/src/webview/components/shared/PipelineExecutionOverview.tsx b/src/webview/components/shared/PipelineExecutionOverview.tsx
 index 23cd35d..600e4fa 100644
 --- a/src/webview/components/shared/PipelineExecutionOverview.tsx
@@ -319,9 +316,9 @@ index 23cd35d..600e4fa 100644
 +import StepSelector, {
 +  VERIFICATION_STEP_PRESETS,
 +} from '../verification/mode/StepSelector';
-
+ 
  type OverviewRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
-
+ 
  export interface PipelineExecutionRef {
 -  handleExternalRun: (keys: string[], selectedTaskIds?: string[]) => void;
 +  handleExternalRun: (
@@ -332,7 +329,7 @@ index 23cd35d..600e4fa 100644
 +  ) => void;
    handleExternalStop: (keys: string[]) => void;
  }
-
+ 
 @@ -42,6 +49,7 @@ interface PipelineExecutionOverviewProps {
    flowLabel: string;
    moduleKeys: string[];
@@ -374,13 +371,13 @@ index 23cd35d..600e4fa 100644
      })
 -  ), [flowKey, getFlowLabel, runtimes, selectedModuleKeys]);
 +  ), [defaultTasksByModule, flowKey, getFlowLabel, runtimes, selectedModuleKeys]);
-
+ 
    const activeModuleData = visibleRuns.find((run) => run.moduleKey === activeModuleKey);
    const activeHierarchy = useMemo(() => {
 @@ -388,37 +413,53 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
      onActiveModuleChange?.(moduleKey);
    }, [onActiveModuleChange]);
-
+ 
 -  const prepareRun = useCallback((targets: string[]) => {
 +  const prepareRun = useCallback(async (targets: string[]) => {
      setRunModalTargets(targets);
@@ -403,7 +400,7 @@ index 23cd35d..600e4fa 100644
      setRunModalOpen(true);
 -  }, [activeModuleData, flowKey, runtimes]);
 +  }, [defaultTasksByModule, ensureRuntime, flowKey, getFlowLabel, runtimes]);
-
+ 
    const confirmRunModal = useCallback(() => {
      const targetKey = runModalTargets[0];
      const runtime = runtimes[getPipelineRuntimeKey(flowKey, targetKey)] || activeModuleData;
@@ -414,7 +411,7 @@ index 23cd35d..600e4fa 100644
 +      : runtime?.tasks || [];
      const targetTasks = tasks.slice(runModalRange[0], runModalRange[1] + 1);
      const selectedTaskIds = targetTasks.length > 0 ? targetTasks.map((t) => t.id) : undefined;
-
+ 
      runModalTargets.forEach((moduleKey) => {
        setPeakMetrics((prev) => ({ ...prev, [moduleKey]: { maxCpu: 0, maxMem: 0 } }));
        ensureRuntimeVisible(moduleKey);
@@ -428,19 +425,19 @@ index 23cd35d..600e4fa 100644
 +        defaultTasksByModule?.[moduleKey],
 +      );
      });
-
+ 
      if (runModalTargets.length === 1) {
        activateModule(runModalTargets[0]);
      }
      setRunModalOpen(false);
 -  }, [runModalTargets, runModalRange, runtimes, flowKey, activeModuleData, ensureRuntimeVisible, getFlowLabel, startRuntime, activateModule, moduleWorkDirs]);
 +  }, [runModalTargets, runModalRange, runtimes, flowKey, activeModuleData, defaultTasksByModule, ensureRuntimeVisible, getFlowLabel, startRuntime, activateModule, moduleWorkDirs]);
-
+ 
    const stopRun = useCallback((moduleKey: string) => {
      ensureRuntimeVisible(moduleKey);
 @@ -426,20 +467,20 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
    }, [ensureRuntimeVisible, flowKey, getFlowLabel, stopRuntime]);
-
+ 
    useImperativeHandle(ref, () => ({
 -    handleExternalRun(keys: string[], selectedTaskIds?: string[]) {
 +    handleExternalRun(keys, selectedTaskIds, selectedTasks, runParameters) {
@@ -531,7 +528,6 @@ index 23cd35d..600e4fa 100644
          </Space>
        </Modal>
        </Row>
-
 diff --git a/src/webview/components/verification/Step2_ToolConfig.tsx b/src/webview/components/verification/Step2_ToolConfig.tsx
 index ae303fa..295576f 100644
 --- a/src/webview/components/verification/Step2_ToolConfig.tsx
@@ -541,26 +537,26 @@ index ae303fa..295576f 100644
  import DonauResourcePicker from '../shared/DonauResourcePicker';
  import PipelineExecutionOverview, { PipelineExecutionRef as OverviewRef } from '../shared/PipelineExecutionOverview';
 +import type { LanderStep } from './mode/types';
-
+ 
  const { Text } = Typography;
-
+ 
 @@ -35,10 +36,11 @@ interface Props {
    onModuleSelect?: (moduleKey: string) => void;
    moduleKeys: string[];
    moduleWorkDirs?: Record<string, string>;
 +  defaultStepsByModule?: Record<string, LanderStep[]>;
  }
-
+ 
  export interface PipelineExecutionRef {
 -  handleExternalRun: (keys: string[], selectedTaskIds?: string[]) => void;
 +  handleExternalRun: (keys: string[], selectedTaskIds?: string[], selectedTasks?: LanderStep[], runParameters?: unknown) => void;
    handleExternalStop: (keys: string[]) => void;
  }
-
+ 
 @@ -64,12 +66,18 @@ const toolOptions = [
    }
  ]
-
+ 
 -const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPrev, moduleKey, onModuleSelect, moduleKeys, moduleWorkDirs }, ref) => {
 +const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPrev, moduleKey, onModuleSelect, moduleKeys, moduleWorkDirs, defaultStepsByModule }, ref) => {
    const [activeTab, setActiveTab] = useState('task');
@@ -577,10 +573,10 @@ index ae303fa..295576f 100644
 +  } | null>(null);
    const selectedAccount = Form.useWatch('clusterGroup', taskForm);
    const selectedQueue = Form.useWatch('clusterQueue', taskForm);
-
+ 
 @@ -77,15 +85,15 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
    const flowLabel = 'DFTM';
-
+ 
    useImperativeHandle(ref, () => ({
 -    handleExternalRun(keys: string[], selectedTaskIds?: string[]) {
 +    handleExternalRun(keys: string[], selectedTaskIds?: string[], selectedTasks?: LanderStep[], runParameters?: unknown) {
@@ -614,17 +610,16 @@ index ae303fa..295576f 100644
                    activeModuleKey={moduleKey}
                    onActiveModuleChange={onModuleSelect}
                  />
-
 diff --git a/src/webview/components/verification/mode/DonauModal.tsx b/src/webview/components/verification/mode/DonauModal.tsx
 index be3409e..a6fb7e5 100644
 --- a/src/webview/components/verification/mode/DonauModal.tsx
 +++ b/src/webview/components/verification/mode/DonauModal.tsx
 @@ -1,6 +1,7 @@
  import { Input, Modal, Space } from 'antd'
-
+ 
  import type { DonauConfig } from './types'
 +import DonauResourcePicker from '../../shared/DonauResourcePicker'
-
+ 
  interface DonauModalProps {
    open: boolean
 @@ -43,14 +44,28 @@ export default function DonauModal({
@@ -650,7 +645,7 @@ index be3409e..a6fb7e5 100644
            value={value.group ?? ''}
            onChange={(event) => update('group', event.target.value)}
          />
-
+ 
          <Input
 -          placeholder="queue"
 +          addonBefore="Queue"
@@ -658,7 +653,6 @@ index be3409e..a6fb7e5 100644
            value={value.queue ?? ''}
            onChange={(event) => update('queue', event.target.value)}
          />
-
 diff --git a/src/webview/components/verification/mode/ModePanel/index.tsx b/src/webview/components/verification/mode/ModePanel/index.tsx
 index ff5e19f..a23a28d 100644
 --- a/src/webview/components/verification/mode/ModePanel/index.tsx
@@ -672,9 +666,9 @@ index ff5e19f..a23a28d 100644
    onStop,
  }: ModePanelProps) {
 @@ -115,6 +116,38 @@ export default function ModePanel({
-
+ 
    const searchValue = selection.searchValues[activeTab]
-
+ 
 +  /**
 +   * resources.focusModes may be restored asynchronously from persisted state.
 +   * Keep the execution overview in sync even when the user has not changed the
@@ -710,34 +704,33 @@ index ff5e19f..a23a28d 100644
    const focusOptions = useMemo(
      () =>
        allItems.map((item) => ({
-
 diff --git a/src/webview/components/verification/mode/RunModal.tsx b/src/webview/components/verification/mode/RunModal.tsx
 index aabb940..ade94b4 100644
 --- a/src/webview/components/verification/mode/RunModal.tsx
 +++ b/src/webview/components/verification/mode/RunModal.tsx
 @@ -1,6 +1,6 @@
  import { useEffect, useMemo, useState } from 'react'
-
+ 
 -import { Button, Empty, Modal, Space, Spin, message, Typography } from 'antd'
 +import { Button, Empty, Input, Modal, Popconfirm, Select, Space, Spin, message, Typography } from 'antd'
-
+ 
  import type {
    BaseConfigItem,
 @@ -11,8 +11,9 @@ import type {
    RunParamRow,
  } from './types'
-
+ 
 -import StepSelector from './StepSelector'
 +import StepSelector, { VERIFICATION_STEP_PRESETS } from './StepSelector'
  import ParamTable from './ParamTable'
 +import { useVerificationStageConfig } from './ModePanel/hooks/useVerificationStageConfig'
-
+ 
  interface RunModalProps {
    open: boolean
 @@ -52,6 +53,18 @@ const cloneRows = (rows: RunParamRow[]): RunParamRow[] => {
    }))
  }
-
+ 
 +type SavedParams = Record<string, RunParamRow[]>
 +
 +const readSavedParams = (value: unknown): SavedParams => {
@@ -755,7 +748,7 @@ index aabb940..ade94b4 100644
    mode,
 @@ -69,6 +82,26 @@ export default function RunModal({
    const [range, setRange] = useState<[number, number]>([0, 0])
-
+ 
    const [rows, setRows] = useState<RunParamRow[]>([createRunParamRow()])
 +  const [scenarioAlias, setScenarioAlias] = useState('')
 +  const [selectedAlias, setSelectedAlias] = useState<string>()
@@ -777,12 +770,12 @@ index aabb940..ade94b4 100644
 +      setSavedParams(readSavedParams(stageConfig?.params))
 +    }
 +  }, [stageConfig, stageConfigLoading])
-
+ 
    useEffect(() => {
      if (!open || !mode) {
 @@ -104,6 +137,7 @@ export default function RunModal({
          }
-
+ 
          setSteps(result.steps)
 +        setRange(result.steps.length > 0 ? [0, result.steps.length - 1] : [0, 0])
        } catch (error) {
@@ -791,13 +784,13 @@ index aabb940..ade94b4 100644
 @@ -128,10 +162,71 @@ export default function RunModal({
      }
    }, [open, mode?.preMode, getLanderModePipelines])
-
+ 
 -  const stepNames = useMemo(() => {
 -    return steps.slice(range[0], range[1] + 1).map((step) => step.name)
 +  const selectedSteps = useMemo(() => {
 +    return steps.slice(range[0], range[1] + 1)
    }, [steps, range])
-
+ 
 +  const stepNames = useMemo(() => {
 +    return selectedSteps.map((step) => step.name)
 +  }, [selectedSteps])
@@ -873,7 +866,7 @@ index aabb940..ade94b4 100644
    }
 @@ -183,7 +280,12 @@ export default function RunModal({
              <Typography.Text strong>Step 选择</Typography.Text>
-
+ 
              {steps.length ? (
 -              <StepSelector steps={steps} range={range} onChange={setRange} />
 +              <StepSelector
@@ -888,7 +881,7 @@ index aabb940..ade94b4 100644
 @@ -192,6 +294,46 @@ export default function RunModal({
            <div>
              <Typography.Text strong>运行参数</Typography.Text>
-
+ 
 +            <Space.Compact block style={{ margin: '10px 0' }}>
 +              <Select
 +                allowClear
@@ -932,7 +925,6 @@ index aabb940..ade94b4 100644
              <ParamTable
                rows={rows}
                groups={groups}
-
 diff --git a/src/webview/components/verification/mode/StepSelector.tsx b/src/webview/components/verification/mode/StepSelector.tsx
 index d9375c0..f1c23af 100644
 --- a/src/webview/components/verification/mode/StepSelector.tsx
@@ -940,25 +932,25 @@ index d9375c0..f1c23af 100644
 @@ -1,17 +1,46 @@
  import { useMemo } from 'react'
 +import type { CSSProperties, ReactNode } from 'react'
-
+ 
 -import { Empty, List, Slider, Space, Tag, Typography } from 'antd'
 +import { Button, Empty, message, Slider, Space, Tooltip } from 'antd'
-
+ 
 -import type { LanderStep } from './types'
 +export interface StepSelectorStep {
 +  id: string
 +  name: string
 +}
-
+ 
 -const { Text } = Typography
 +export type StepSelectorPresets = Record<string, string[]>
-
+ 
  interface StepSelectorProps {
 -  steps: LanderStep[]
 +  steps: StepSelectorStep[]
-
+ 
    range: [number, number]
-
+ 
    onChange: (range: [number, number]) => void
 +
 +  presets?: StepSelectorPresets
@@ -986,12 +978,12 @@ index d9375c0..f1c23af 100644
 +
 +  Sim: ['sed_3d_tb', 'gen_sim_env', 'run_sim'],
  }
-
+ 
  const normalizeRange = (
 @@ -25,39 +54,87 @@ const normalizeRange = (
    return start <= end ? [start, end] : [end, start]
  }
-
+ 
 +const findContinuousRange = (
 +  steps: StepSelectorStep[],
 +  names: string[],
@@ -1020,7 +1012,7 @@ index d9375c0..f1c23af 100644
 +  presets,
  }: StepSelectorProps) {
    const maxIndex = Math.max(steps.length - 1, 0)
-
+ 
 -  const safeRange = useMemo(() => {
 -    return normalizeRange(range, maxIndex)
 -  }, [range, maxIndex])
@@ -1028,7 +1020,7 @@ index d9375c0..f1c23af 100644
 +    () => normalizeRange(range, maxIndex),
 +    [range, maxIndex],
 +  )
-
+ 
 -  const selectedStepIds = useMemo(() => {
 -    if (!steps.length) {
 -      return []
@@ -1060,13 +1052,13 @@ index d9375c0..f1c23af 100644
 +          </Tooltip>
 +        ),
 +      }
-
+ 
 -    return steps.slice(safeRange[0], safeRange[1] + 1).map((step) => step.id)
 -  }, [steps, safeRange])
 +      return result
 +    }, {})
 +  }, [steps])
-
+ 
 -  const selectedIdSet = useMemo(() => {
 -    return new Set(selectedStepIds)
 -  }, [selectedStepIds])
@@ -1075,7 +1067,7 @@ index d9375c0..f1c23af 100644
 +      message.warning(`${name} 未配置 Step`)
 +      return
 +    }
-
+ 
 -  const marks = useMemo(() => {
 -    if (!steps.length) {
 -      return {}
@@ -1085,7 +1077,7 @@ index d9375c0..f1c23af 100644
 +      message.warning(`${name} 预设不满足当前 Step 顺序`)
 +      return
      }
-
+ 
 -    return steps.reduce<Record<number, string>>((acc, step, index) => {
 -      acc[index] = String(index + 1)
 -      return acc
@@ -1093,7 +1085,7 @@ index d9375c0..f1c23af 100644
 -  }, [steps])
 +    onChange(result)
 +  }
-
+ 
    if (!steps.length) {
      return (
 @@ -68,26 +145,28 @@ export default function StepSelector({
@@ -1131,7 +1123,7 @@ index d9375c0..f1c23af 100644
 +          ))}
 +        </Space>
 +      )}
-
+ 
        <Slider
 -        range
 +        range={{ draggableTrack: true }}
@@ -1142,7 +1134,7 @@ index d9375c0..f1c23af 100644
 @@ -98,94 +177,15 @@ export default function StepSelector({
                return ''
              }
-
+ 
 -            return steps[value]?.name ?? String(value + 1)
 +            return steps[value]?.name ?? ''
            },
@@ -1225,7 +1217,8 @@ index d9375c0..f1c23af 100644
 -                        }}
 -                      >
 -                        {step.description}
--                      </div>
+-                      </Text>
+-                    </div>
 -                  )}
 -                </div>
 -              </Space>
@@ -1236,32 +1229,30 @@ index d9375c0..f1c23af 100644
      </Space>
    )
  }
-
 diff --git a/src/webview/components/verification/mode/types.ts b/src/webview/components/verification/mode/types.ts
 index 989a998..801ffef 100644
 --- a/src/webview/components/verification/mode/types.ts
 +++ b/src/webview/components/verification/mode/types.ts
 @@ -85,6 +85,10 @@ export interface ModeRunPayload {
-
+ 
    stepNames: string[]
-
+ 
 +  stepIds: string[]
 +
 +  steps: LanderStep[]
 +
    rows: RunParamRow[]
  }
-
+ 
 @@ -139,6 +143,8 @@ export interface ModePanelProps {
-
+ 
    onCheckedChange?: (tab: ModePanelTab, names: string[]) => void
-
+ 
 +  onDefaultStepsChange?: (stepsByMode: Record<string, LanderStep[]>) => void
 +
    onRun?: (payload: ModeRunPayload) => void
-
+ 
    onStop?: (names: string[]) => void
-
 diff --git a/src/webview/flows/VerificationFlow.tsx b/src/webview/flows/VerificationFlow.tsx
 index 7589ad3..7d84410 100644
 --- a/src/webview/flows/VerificationFlow.tsx
@@ -1269,7 +1260,7 @@ index 7589ad3..7d84410 100644
 @@ -1,4 +1,4 @@
 -import React, { useRef, useState } from 'react'
 +import React, { useCallback, useRef, useState } from 'react'
-
+ 
  import Step1CommonConfig from '../components/verification/Step1_CommonConfig'
  import Step2ToolConfig, {
 @@ -21,9 +21,21 @@ const VerificationFlow: React.FC = () => {
@@ -1278,7 +1269,7 @@ index 7589ad3..7d84410 100644
    const [moduleWorkDirs] = useState<Record<string, string>>({})
 +  const [defaultStepsByMode, setDefaultStepsByMode] = useState<Record<string, ModeRunPayload['steps']>>({})
    const [, setLastRunPayload] = useState<ModeRunPayload>()
-
+ 
    const executionRef = useRef<PipelineExecutionRef>(null)
 +  const pendingRunRef = useRef<ModeRunPayload | undefined>(undefined)
 +
@@ -1291,13 +1282,13 @@ index 7589ad3..7d84410 100644
 +      instance.handleExternalRun([payload.mode.name], payload.stepIds, payload.steps, payload.rows)
 +    }
 +  }, [])
-
+ 
    const nextStep = () => {
      setCurrentStep((prev) => Math.min(prev + 1, 3))
 @@ -39,18 +51,25 @@ const VerificationFlow: React.FC = () => {
      }
    }
-
+ 
 -  const handleCheckedChange = (tab: ModePanelTab, keys: string[]) => {
 +  const handleCheckedChange = useCallback((tab: ModePanelTab, keys: string[]) => {
      if (tab === 'mode') {
@@ -1305,7 +1296,7 @@ index 7589ad3..7d84410 100644
      }
 -  }
 +  }, [])
-
+ 
    const handleRun = (payload: ModeRunPayload) => {
      setLastRunPayload(payload)
      setSelectedModule(payload.mode.name)
@@ -1313,7 +1304,7 @@ index 7589ad3..7d84410 100644
 +    setExecutionModuleKeys((current) => (
 +      current.includes(payload.mode.name) ? current : [...current, payload.mode.name]
 +    ))
-
+ 
 -    executionRef.current?.handleExternalRun([payload.mode.name])
 +    if (executionRef.current) {
 +      executionRef.current.handleExternalRun([payload.mode.name], payload.stepIds, payload.steps, payload.rows)
@@ -1322,7 +1313,7 @@ index 7589ad3..7d84410 100644
 +      setCurrentStep(1)
 +    }
    }
-
+ 
    const handleStop = (keys: string[]) => {
 @@ -68,13 +87,14 @@ const VerificationFlow: React.FC = () => {
        description: '仿真工具链',
@@ -1348,13 +1339,12 @@ index 7589ad3..7d84410 100644
              onRun={handleRun}
              onStop={handleStop}
            />
-
 diff --git a/src/webview/store/pipelineRuntimeStore.ts b/src/webview/store/pipelineRuntimeStore.ts
 index c7c964d..bbf27ad 100644
 --- a/src/webview/store/pipelineRuntimeStore.ts
 +++ b/src/webview/store/pipelineRuntimeStore.ts
 @@ -36,8 +36,20 @@ export interface PipelineRuntimeSnapshot {
-
+ 
  interface PipelineRuntimeStore {
    runtimes: Record<string, PipelineRuntimeSnapshot>;
 -  ensureRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string) => void;
@@ -1398,7 +1388,7 @@ index c7c964d..bbf27ad 100644
 +      return undefined;
 +    });
    },
-
+ 
 -  startRuntime: (flowKey, moduleKey, flowLabel, selectedTaskIds, cwd) => {
 +  startRuntime: (flowKey, moduleKey, flowLabel, selectedTaskIds, cwd, selectedTasks, runParameters) => {
 +    const normalizedSelectedTaskIds = selectedTaskIds?.length ? selectedTaskIds : undefined;
@@ -1434,9 +1424,8 @@ index c7c964d..bbf27ad 100644
 -    void startPipelineRuntime({ flowKey, moduleKey, flowLabel, selectedTaskIds, cwd });
 +    void startPipelineRuntime({ flowKey, moduleKey, flowLabel, selectedTaskIds, selectedTasks, cwd, runParameters });
    },
-
+ 
    stopRuntime: (flowKey, moduleKey, flowLabel) => {
-
 diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
 index bf9d2d1..f63ad38 100644
 --- a/src/webview/utils/ipc.ts
@@ -1451,7 +1440,7 @@ index bf9d2d1..f63ad38 100644
 -  return res as { success: boolean; error?: string }
 +  return res as { success: boolean; snapshot?: unknown; error?: string }
  }
-
+ 
  export async function startPipelineRuntime(options: {
 @@ -851,7 +851,14 @@ export async function startPipelineRuntime(options: {
    moduleKey: string
