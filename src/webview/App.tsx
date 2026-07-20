@@ -24,7 +24,7 @@ import useWizardStore from './store/wizardStore';
 import vscode from './utils/vscode';
 import { toggleZenMode as ipcToggleZenMode } from './utils/ipc';
 import { useShallow } from 'zustand/react/shallow';
-import type { DftProject } from './services/projectService';
+import { getProjectDomainLabel, type DftProject } from './services/projectService';
 
 const { Content } = Layout;
 const { Title } = Typography;
@@ -494,12 +494,14 @@ const App: React.FC = () => {
               />
             </Tooltip>
             {activeProject && (
-              <Tag
-                color="blue"
-                style={{ margin: 0 }}
-              >
-                {activeProject.name}
-              </Tag>
+              <>
+                <Tag color="blue" style={{ margin: 0 }}>
+                  {activeProject.name}
+                </Tag>
+                <Tag color="purple" style={{ margin: 0 }}>
+                  领域：{getProjectDomainLabel(activeProject.domain)}
+                </Tag>
+              </>
             )}
           </Space>
         </div>
@@ -559,9 +561,14 @@ const App: React.FC = () => {
                     DFT IDE
                   </Tag>
                   {activeProject && (
-                    <Tag color="green" style={{ margin: 0 }}>
-                      {activeProject.name}
-                    </Tag>
+                    <>
+                      <Tag color="green" style={{ margin: 0 }}>
+                        {activeProject.name}
+                      </Tag>
+                      <Tag color="purple" style={{ margin: 0 }}>
+                        领域：{getProjectDomainLabel(activeProject.domain)}
+                      </Tag>
+                    </>
                   )}
                   {/* 优化1：未保存变更提示 */}
                   {dirtyFlows.has(flowContext.category) && (

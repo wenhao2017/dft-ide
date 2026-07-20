@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { ProjectDomain } from '../services/projectService';
 
 export interface FlowContext {
   category: string;
@@ -11,6 +12,7 @@ export interface ProjectContext {
   rootPath?: string;
   role?: string;
   canManageMembers?: boolean;
+  domain?: ProjectDomain;
 }
 
 export interface TaskPayload {
@@ -38,6 +40,7 @@ interface WizardState {
   updatePayload: (data: Partial<TaskPayload>) => void;
   setFlowContext: (context: FlowContext | null) => void;
   setActiveProject: (project: ProjectContext | null) => void;
+  setActiveProjectDomain: (domain: ProjectDomain) => void;
   setCurrentUser: (user: string) => void;
   markDirty: (flow: string) => void;
   clearDirty: (flow: string) => void;
@@ -79,6 +82,11 @@ const useWizardStore = create<WizardState>((set, get) => ({
   setActiveProject: (project) =>
     set(() => ({
       activeProject: project,
+    })),
+
+  setActiveProjectDomain: (domain) =>
+    set((state) => ({
+      activeProject: state.activeProject ? { ...state.activeProject, domain } : null,
     })),
 
   setCurrentUser: (user) =>

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Col, Input, Progress, Row, Spin, Tag, Tooltip, message, Form, Modal } from "antd";
+import { Alert, Button, Col, Input, Progress, Row, Select, Spin, Tag, Tooltip, message, Form, Modal } from "antd";
 import Card from "antd/es/card";
 import Empty from "antd/es/empty";
 import List from "antd/es/list";
@@ -19,6 +19,7 @@ import {
   TeamOutlined,
   ThunderboltOutlined,
   RedoOutlined,
+  GlobalOutlined,
 } from '@ant-design/icons';
 import {
   getCurrentUser,
@@ -42,6 +43,10 @@ import {
   ProjectDashboard,
   ProjectRepoStatus,
   updateProjectRootPath,
+  getProjectDomainLabel,
+  PROJECT_DOMAIN_OPTIONS,
+  ProjectDomain,
+  updateProjectDomain,
 } from '../services/projectService';
 
 const { Paragraph, Text, Title } = Typography;
@@ -174,10 +179,12 @@ type ProjectFormValue = {
 };
 
 const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }) => {
-  const {setFlowContext, setActiveProject, currentUser, setCurrentUser} = useWizardStore(
+  const {activeProject, setFlowContext, setActiveProject, setActiveProjectDomain, currentUser, setCurrentUser} = useWizardStore(
     useShallow((state) => ({
+      activeProject: state.activeProject,
       setFlowContext: state.setFlowContext,
       setActiveProject: state.setActiveProject,
+      setActiveProjectDomain: state.setActiveProjectDomain,
       currentUser: state.currentUser,
       setCurrentUser: state.setCurrentUser,
     }))
@@ -196,6 +203,9 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [projectForm] = Form.useForm<ProjectFormValue>();
   const [projectSaving, setProjectSaving] = useState(false);
+  const [domainProject, setDomainProject] = useState<DftProject | null>(null);
+  const [selectedDomain, setSelectedDomain] = useState<ProjectDomain | undefined>();
+  const [domainSaving, setDomainSaving] = useState(false);
 
   const cardBorder = 'var(--vscode-panel-border, rgba(127,127,127,0.18))';
   const panelBg = isDark
@@ -298,6 +308,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
       rootPath: workspaceProjectInfo.projectRoot ?? workspaceProject.rootPath,
       role: workspaceProject.role,
       canManageMembers: workspaceProject.canManageMembers,
+      domain: workspaceProject.domain,
     });
   }, [setActiveProject, workspaceProject, workspaceProjectInfo]);
 
@@ -323,6 +334,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
           rootPath: result.projectPath,
           role: project.role,
           canManageMembers: project.canManageMembers,
+          domain: project.domain,
         });
         setDashboard((prev) => prev ? { ...prev, currentProjectId: project.id } : prev);
         if (onNavigate) {
@@ -363,6 +375,9 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
   const isMemberManageDisable = (project: DftProject) =>
     !isProjectInitialized(project) || project.role !== 'DFTM';
 
+  const isDomainManageDisable = (project: DftProject) =>
+    project.role.toUpperCase() !== 'DFTM';
+
   const isProjectEnterDisable = (project: DftProject) =>
     !isProjectInitialized(project);
 
@@ -377,6 +392,46 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
     if (project.role !== 'DFTM') return '不是 DFTM 角色，不能管理成员'
     return '管理项目成员'
   }
+
+  const domainManageTooltipTitle = (project: DftProject) =>
+    isDomainManageDisable(project)
+      ? '只有 DFTM 角色可以管理项目领域'
+      : '配置或修改项目领域';
+
+  const openDomainModal = (project: DftProject) => {
+    setDomainProject(project);
+    setSelectedDomain(project.domain);
+  };
+
+  const closeDomainModal = () => {
+    if (domainSaving) return;
+    setDomainProject(null);
+    setSelectedDomain(undefined);
+  };
+
+  const saveDomain = async () => {
+    if (!domainProject || !selectedDomain) return;
+    setDomainSaving(true);
+    try {
+      await updateProjectDomain(domainProject.id, selectedDomain);
+      const updateDomain = (project: DftProject) =>
+        project.id === domainProject.id ? { ...project, domain: selectedDomain } : project;
+      setProjects((previous) => previous.map(updateDomain));
+      setDashboard((previous) => previous
+        ? { ...previous, projects: previous.projects.map(updateDomain) }
+        : previous);
+      if (activeProject?.id === domainProject.id) {
+        setActiveProjectDomain(selectedDomain);
+      }
+      message.success(`项目领域已更新为“${getProjectDomainLabel(selectedDomain)}”`);
+      setDomainProject(null);
+      setSelectedDomain(undefined);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '项目领域更新失败');
+    } finally {
+      setDomainSaving(false);
+    }
+  };
 
   const projectEnterTooltipTitle = (project: DftProject) => {
     if (!isProjectInitialized(project)) return '当前项目未初始化，不能进入项目'
@@ -630,6 +685,32 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
         </Form>
       </Modal>
 
+      <Modal
+        title={`管理领域${domainProject ? ` · ${domainProject.name}` : ''}`}
+        open={Boolean(domainProject)}
+        onCancel={closeDomainModal}
+        onOk={() => void saveDomain()}
+        okText="保存"
+        confirmLoading={domainSaving}
+        okButtonProps={{ disabled: !selectedDomain }}
+        destroyOnHidden
+      >
+        <Form layout="vertical">
+          <Form.Item
+            label="项目领域"
+            required
+            extra="领域属于项目级配置，保存后 Hibist、Sailor 及其他流程会读取同一个值。"
+          >
+            <Select<ProjectDomain>
+              value={selectedDomain}
+              onChange={setSelectedDomain}
+              placeholder="请选择领域"
+              options={PROJECT_DOMAIN_OPTIONS}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
       <div
         className="welcome-content-grid"
         style={{
@@ -645,6 +726,9 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
           extra={
             <Space size={6} wrap>
               {workspaceProject && <Tag color="blue">当前加载：{workspaceProject.name}</Tag>}
+              {workspaceProject && (
+                <Tag color="purple">领域：{getProjectDomainLabel(workspaceProject.domain)}</Tag>
+              )}
               {!workspaceProject && currentProject && <Tag>上次：{currentProject.name}</Tag>}
             </Space>
           }
@@ -724,6 +808,18 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                             </Button>
                           </span>
                         </Tooltip>
+                        <Tooltip key="domain" title={domainManageTooltipTitle(project)}>
+                          <span>
+                            <Button
+                              icon={<GlobalOutlined />}
+                              disabled={isDomainManageDisable(project)}
+                              onClick={() => openDomainModal(project)}
+                              style={{ flex: 1 }}
+                            >
+                              管理领域
+                            </Button>
+                          </span>
+                        </Tooltip>
                         <Tooltip key="enter" title={active ? '当前 VS Code 已加载该项目' : projectEnterTooltipTitle(project)}>
                           <span>
                             <Button
@@ -758,6 +854,9 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                         <Text strong>{project.name}</Text>
                         <Tag>{project.ctmp_id ? "CTMP" : "自定义"}</Tag>
                         <Tag>{project.role}</Tag>
+                        <Tag color={project.domain ? 'purple' : 'default'}>
+                          领域：{getProjectDomainLabel(project.domain)}
+                        </Tag>
                         {active && <Tag color="blue">当前加载</Tag>}
                         {!active && project.id === projectId && <Tag color="blue">上次项目</Tag>}
                       </Space>

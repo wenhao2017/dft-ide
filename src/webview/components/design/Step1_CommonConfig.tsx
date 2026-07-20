@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Badge, Button, Card, Col, Form, Radio, Row, Select, Space, Spin, message, RadioChangeEvent, Modal, Flex, Typography, Checkbox } from 'antd';
+import { Badge, Button, Card, Form, Space, Spin, Modal, Flex, Typography, Checkbox } from 'antd';
 import {
   BranchesOutlined,
   FileAddOutlined,
@@ -36,21 +36,6 @@ const pageStyle: React.CSSProperties = {
   color: 'var(--vscode-foreground)',
 };
 
-const domainOptions = [
-  {
-    value: 1,
-    label:'联接'
-  },
-  {
-    value: 2,
-    label:'无线终端'
-  },
-  {
-    value: 3,
-    label:'图灵'
-  },
-];
-
 const emptyNormalizeCfg = (): NormalizeCfg => ({ commandCfg: '', jsonCfg: '' });
 
 const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => {
@@ -58,7 +43,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
   const [currentBranch, setCurrentBranch] = useState<string>('');
 
   const project = useVscodePath();
-  const [domainCfg, setDomainCfg] = useState<number>(1);
   const [normalizeCfgs, setNormalizeCfgs] = useState<NormalizeCfg[]>([emptyNormalizeCfg()]);
   const [selectedNormalizeIndexes, setSelectedNormalizeIndexes] = useState<number[]>([0]);
 
@@ -90,7 +74,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
     if (!savedData) return;
     const source = (savedData.step1 as Record<string, unknown> | undefined) ?? savedData;
     if (source.project) project.setValue(String(source.project));
-    if (source.domainCfg) setDomainCfg(Number(source.domainCfg))
 
     if (Array.isArray(source.normalizeCfgs)) {
       const nextCfgs = source.normalizeCfgs
@@ -118,7 +101,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
 
   const collectFormData = () => ({
     project: project.value,
-    domainCfg,
     normalizeCfgs,
     selectedNormalizeIndexes,
   });
@@ -134,7 +116,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
 
   const clearForm = () => {
     project.setValue("");
-    setDomainCfg(1);
     setNormalizeCfgs([emptyNormalizeCfg()]);
     setSelectedNormalizeIndexes([0]);
   };
@@ -209,15 +190,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
               />
             </Form.Item>
 
-            <Form.Item label="选择领域">
-              <Select
-                value={domainCfg}
-                onChange={(value) => setDomainCfg(value)}
-                allowClear
-                placeholder="请选择领域"
-                options={domainOptions}
-              />
-            </Form.Item>
           </Card>
 
           <Card size="small" style={{ marginBottom: 14 }} styles={{ body: { padding: 18 } }}>

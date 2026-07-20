@@ -1,5 +1,24 @@
 export type ProjectRepoKey = 'data' | 'hibist' | 'sailor' | 'verification';
 
+export type ProjectDomain = 1 | 2 | 3;
+
+export const PROJECT_DOMAIN_OPTIONS: Array<{ value: ProjectDomain; label: string }> = [
+  { value: 1, label: '联接' },
+  { value: 2, label: '无线终端' },
+  { value: 3, label: '图灵' },
+];
+
+export function normalizeProjectDomain(value: unknown): ProjectDomain | undefined {
+  const numericValue = Number(value);
+  return numericValue === 1 || numericValue === 2 || numericValue === 3
+    ? numericValue
+    : undefined;
+}
+
+export function getProjectDomainLabel(domain?: ProjectDomain): string {
+  return PROJECT_DOMAIN_OPTIONS.find((option) => option.value === domain)?.label ?? '未配置';
+}
+
 export interface ProjectRepoStatus {
   key: ProjectRepoKey;
   gitlabProjectName: string;
@@ -17,6 +36,7 @@ export interface DftProject {
   owner: string;
   role: string;
   canManageMembers?: boolean;
+  domain?: ProjectDomain;
   updatedAt: string;
   stage: string;
   description: string;
@@ -38,6 +58,7 @@ const mockProjects: DftProject[] = [
     owner: 'DFT Platform',
     role: 'DFTM',
     canManageMembers: true,
+    domain: 1,
     updatedAt: '2026-04-26 09:30',
     stage: '85',
     description: '主芯片 DFT 配置、设计流程与验证数据。',
@@ -54,6 +75,7 @@ const mockProjects: DftProject[] = [
     rootPath: 'D:/Downloads',
     owner: 'Memory Team',
     role: 'Member',
+    domain: 2,
     updatedAt: '2026-04-24 18:10',
     stage: '95',
     description: 'MBIST 环境配置、仿真用例和报告归档。',
@@ -70,6 +92,7 @@ const mockProjects: DftProject[] = [
     rootPath: 'D:/dft/projects',
     owner: 'Verification Team',
     role: 'Member',
+    domain: 3,
     updatedAt: '2026-04-20 14:45',
     stage: '75',
     description: '回归任务配置、集群资源和日志入口。',
@@ -224,7 +247,7 @@ export async function fetchProjectDashboard(currentUser:string): Promise<Project
   // return response.json() as Promise<ProjectDashboard>;
   const data = await response.json();
   const projectDashboard: ProjectDashboard = {
-    projects: data.projects.map((project:DftProject) => ({
+    projects: data.projects.map((project:DftProject & { domainCfg?: unknown; domain_cfg?: unknown }) => ({
       id: project.id.toString(),
       ctmp_id: project.ctmp_id,
       name: project.name,
@@ -232,6 +255,7 @@ export async function fetchProjectDashboard(currentUser:string): Promise<Project
       rootPath: project.local_root,
       owner: project.owner || '',
       canManageMembers: canManageProjectMembers(project),
+      domain: normalizeProjectDomain(project.domain ?? project.domainCfg ?? project.domain_cfg),
       updatedAt: project.updatedAt || '',
       stage: project.stage || '',
       description: project.description || '',
@@ -270,6 +294,28 @@ export async function selectProject(projectId: string): Promise<DftProject> {
   await responseErrorHandler(response, 'Select project failed');
 
   return response.json() as Promise<DftProject>;
+}
+
+export async function updateProjectDomain(projectId: string, domain: ProjectDomain): Promise<void> {
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    const project = mockProjects.find((item) => item.id === projectId);
+    if (!project) {
+      throw new Error(`Project not found: ${projectId}`);
+    }
+    if (!canManageProjectMembers(project)) {
+      throw new Error('只有 DFTM 角色可以管理项目领域');
+    }
+    project.domain = domain;
+    return;
+  }
+
+  const response = await fetch(`${apiBase}/api/dft-ide/projects/${projectId}/domain/`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ domain }),
+  });
+  await responseErrorHandler(response, 'Update project domain failed');
 }
 
 export async function fetchProjectMembers(projectId: string): Promise<ProjectMembersResponse> {
