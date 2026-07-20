@@ -1,0 +1,1470 @@
+diff --git a/src/extension.ts b/src/extension.ts
+index cca1419..956ac50 100644
+--- a/src/extension.ts
++++ b/src/extension.ts
+@@ -594,14 +594,26 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+             throw new Error('Invalid pipeline runtime payload');
+           }
+
++          let snapshot;
+           if (msg.command === 'ensurePipelineRuntime') {
+-            pipelineRuntimeService.ensureRuntime(flowKey, moduleKey, flowLabel);
++            snapshot = pipelineRuntimeService.ensureRuntime(flowKey, moduleKey, flowLabel);
+           } else if (msg.command === 'startPipelineRuntime') {
+             const selectedTaskIds = Array.isArray(msg.selectedTaskIds) && msg.selectedTaskIds.length > 0 ? msg.selectedTaskIds : undefined;
++            const selectedTasks = Array.isArray(msg.selectedTasks)
++              ? msg.selectedTasks.filter((task: unknown): task is { id: string; name: string; command: string; description: string } => {
++                if (!task || typeof task !== 'object') return false;
++                const value = task as Record<string, unknown>;
++                return typeof value.id === 'string'
++                  && typeof value.name === 'string'
++                  && typeof value.command === 'string'
++                  && typeof value.description === 'string';
++              })
++              : undefined;
+             const cwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
+             const envConfig = await readConfig(flowKey);
+             const taskConfig = await readConfig(`${flowKey}/${moduleKey}/config`);
+-            pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel, selectedTaskIds, cwd, envConfig, taskConfig);
++            const runParameters = msg.runParameters;
++            pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel, selectedTaskIds, cwd, envConfig, taskConfig, selectedTasks, runParameters);
+           } else if (msg.command === 'stopPipelineRuntime') {
+             pipelineRuntimeService.stopRuntime(flowKey, moduleKey, flowLabel);
+           } else if (msg.command === 'selectPipelineTask') {
+@@ -616,7 +628,8 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+             currentPanel?.webview.postMessage({
+               command: `${msg.command}Response`,
+               requestId,
+-              success: true
++              success: true,
++              snapshot
+             });
+           }
+         } catch (err) {
+
+diff --git a/src/services/pipelineRuntimeService.ts b/src/services/pipelineRuntimeService.ts
+index 3a89365..b6e757c 100644
+--- a/src/services/pipelineRuntimeService.ts
++++ b/src/services/pipelineRuntimeService.ts
+@@ -57,6 +57,7 @@ interface PipelineExecutionSession {
+   cwd?: string;
+   envConfig?: Record<string, unknown> | null;
+   taskConfig?: Record<string, unknown> | null;
++  runParameters?: unknown;
+   shellPath?: string;
+   currentTaskId?: string;
+   buffer: string;
+@@ -77,6 +78,8 @@ function getPipelineTerminalTitle(flowLabel: string, moduleKey: string): string
+ }
+
+ const PIPELINE_PYTHON_MODULE = 'python/3.10.6';
++const DEFAULT_DONAU_GROUP = 'ug_dft.HIS-HIS-ASIC-HISC-DFT-PLAT-WS';
++const DEFAULT_DONAU_QUEUE = 'normal';
+
+ function quoteCshArgument(value: string): string {
+   return `"${value.replace(/(["\\$`])/g, '\\$1')}"`;
+@@ -111,6 +114,45 @@ function buildStepEndMarker(runId: string, taskId: string): string {
+   return `__DFT_IDE_STEP_END__|${runId}|${taskId}|`;
+ }
+
++function resolveVerificationRunParameters(
++  runParameters: unknown,
++  taskConfig?: Record<string, unknown> | null,
++): unknown {
++  if (!Array.isArray(runParameters)) {
++    return runParameters;
++  }
++
++  const step2 = taskConfig?.step2 as Record<string, unknown> | undefined;
++  const task = step2?.step2Task as Record<string, unknown> | undefined;
++  const fallbackDonau = {
++    group: String(task?.clusterGroup ?? DEFAULT_DONAU_GROUP).trim() || DEFAULT_DONAU_GROUP,
++    queue: String(task?.clusterQueue ?? DEFAULT_DONAU_QUEUE).trim() || DEFAULT_DONAU_QUEUE,
++    cpu: String(task?.cpu ?? '').trim(),
++    mem: String(task?.memory ?? '').trim(),
++  };
++
++  return runParameters.map((row) => {
++    if (!row || typeof row !== 'object') {
++      return row;
++    }
++    const record = row as Record<string, unknown>;
++    const suppliedDonau = record.donau && typeof record.donau === 'object'
++      ? record.donau as Record<string, unknown>
++      : {};
++    const value = (key: keyof typeof fallbackDonau) => (
++      String(suppliedDonau[key] ?? '').trim() || fallbackDonau[key]
++    );
++    return {
++      ...record,
++      donau: {
++        group: value('group'),
++        queue: value('queue'),
++        ...(value('cpu') ? { cpu: value('cpu') } : {}),
++        ...(value('mem') ? { mem: value('mem') } : {}),
++      },
++    };
++  });
++}
+ function buildStepCommands(
+   runId: string,
+   task: PipelineTask,
+@@ -174,9 +216,13 @@ function buildStepCommands(
+   }
+
+   const stepCommand = task.command.trim();
++  const executionCommand = flowKey === 'verification'
++    ? stepCommand
++    : buildPipelineStepExecutionCommand(projectPath, stepCommand);
+   commands.push(`echo "__DFT_IDE_STEP_START__|${runId}|${task.id}"`);
+   commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
+-  commands.push(buildPipelineStepExecutionCommand(projectPath, stepCommand));
++  commands.push(`echo ${quoteCshArgument(`[DFT IDE] 执行命令: ${executionCommand}`)}`);
++  commands.push(executionCommand);
+   commands.push('set dft_ide_step_status = $status');
+   commands.push(`echo "${buildStepEndMarker(runId, task.id)}$dft_ide_step_status"`);
+
+@@ -476,7 +522,9 @@ function runSequentialSimulation(
+         }
+         commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
+         // d. 步骤命令
+-        commands.push(buildPipelineStepExecutionCommand(projectPath, stepCommand));
++        commands.push(flowKey === 'verification'
++          ? stepCommand
++          : buildPipelineStepExecutionCommand(projectPath, stepCommand));
+
+         openTerminal(getPipelineTerminalTitle(flowLabel, moduleKey), commands, cwd);
+       }
+@@ -587,6 +635,8 @@ export class PipelineRuntimeService {
+     cwd?: string,
+     envConfig?: Record<string, unknown> | null,
+     taskConfig?: Record<string, unknown> | null,
++    selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>,
++    runParameters?: unknown,
+   ): PipelineRuntimeSnapshot {
+     const key = getPipelineRuntimeKey(flowKey, moduleKey);
+     const config = pipelineFlowConfigs[flowKey];
+@@ -600,7 +650,13 @@ export class PipelineRuntimeService {
+
+     clearRuntimeTimers(key);
+
+-    const { tasks: parsedTasks, links: parsedLinks } = loadPipelineConfig(flowKey);
++    const loadedPipeline = loadPipelineConfig(flowKey);
++    const parsedTasks = selectedTasks?.length
++      ? selectedTasks.map((task) => makeTask(task.id, task.name, task.command, task.description))
++      : loadedPipeline.tasks;
++    const parsedLinks = selectedTasks?.length
++      ? parsedTasks.slice(1).map((task, index) => ({ source: parsedTasks[index].id, target: task.id }))
++      : loadedPipeline.links;
+     const terminalCapabilities = getExecutionTerminalCapabilities();
+     if (!terminalCapabilities.data) {
+       const failedTasks = parsedTasks.map((task, index) => ({
+@@ -680,6 +736,9 @@ export class PipelineRuntimeService {
+       cwd,
+       envConfig,
+       taskConfig,
++      runParameters: flowKey === 'verification'
++        ? resolveVerificationRunParameters(runParameters, taskConfig)
++        : runParameters,
+       shellPath: this.options.getPipelineShellPath?.() ?? 'csh',
+       buffer: '',
+       seenStarts: new Set<string>(),
+@@ -726,7 +785,9 @@ export class PipelineRuntimeService {
+       const stepCommand = task.command.trim();
+       let commands: string[] = [];
+       commands.push(`echo "=== [DFT IDE] Rerun Step: ${task.name || task.id} ==="`);
+-      commands.push(buildPipelineStepExecutionCommand(resolveProjectPath(flowKey), stepCommand));
++      commands.push(flowKey === 'verification'
++        ? stepCommand
++        : buildPipelineStepExecutionCommand(resolveProjectPath(flowKey), stepCommand));
+       this.options.openTerminal(getPipelineTerminalTitle(runtime.flowLabel, moduleKey), commands);
+     }
+
+@@ -800,6 +861,25 @@ export class PipelineRuntimeService {
+       session.envConfig,
+       session.taskConfig,
+     );
++    const generatedCommand = session.flowKey === 'verification'
++      ? task.command.trim()
++      : buildPipelineStepExecutionCommand(resolveProjectPath(session.flowKey), task.command.trim());
++    const runParameterRows = Array.isArray(session.runParameters)
++      ? session.runParameters.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object')
++      : [];
++    console.group(`[DFT IDE] Pipeline Task: ${session.flowLabel} / ${session.moduleKey} / ${task.name}`);
++    console.log('command:', generatedCommand);
++    console.log('groups:', runParameterRows.map((row) => row.groupNames ?? []));
++    console.log('tcs:', runParameterRows.map((row) => row.tcNames ?? []));
++    console.log('subattrs:', runParameterRows.map((row) => row.subattrNames ?? []));
++    console.log('tools:', runParameterRows.map((row) => row.tools ?? []));
++    console.log('Donau:', runParameterRows.map((row) => row.donau ?? {}));
++    console.log('parameter rows:', runParameterRows);
++    console.groupEnd();
++    this.patchTask(key, task.id, (current) => ({
++      logs: [...current.logs, `[${nowText()}] ${session.logPrefix} 执行命令：${generatedCommand}`],
++    }));
++    this.appendLog(key, session.logPrefix, `${task.name} 执行命令：${generatedCommand}`);
+     void Promise.resolve(
+       this.options.openTerminal(session.terminalTitle, commands, session.cwd, session.shellPath),
+     ).catch((error) => {
+
+diff --git a/src/webview/components/shared/DesignTreePanel.tsx b/src/webview/components/shared/DesignTreePanel.tsx
+index 8322280..9c7e705 100644
+--- a/src/webview/components/shared/DesignTreePanel.tsx
++++ b/src/webview/components/shared/DesignTreePanel.tsx
+@@ -9,7 +9,6 @@ import {
+   List,
+   Modal,
+   Select,
+-  Slider,
+   Space,
+   Tooltip,
+   Typography,
+@@ -43,6 +42,9 @@ import {
+ import { useFlowConfig } from '../../hooks/useFlowConfig';
+ import usePipelineRuntimeStore from '../../store/pipelineRuntimeStore';
+ import { useShallow } from 'zustand/react/shallow';
++import StepSelector, {
++  VERIFICATION_STEP_PRESETS,
++} from '../verification/mode/StepSelector';
+
+ const { Text, Title } = Typography;
+
+@@ -714,9 +716,8 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+       <Modal
+         open={taskModalOpen}
+         title={<Space><PlayCircleOutlined style={{ color: accent }} /><span>选择运行步骤范围</span></Space>}
+-        okText="运行"
+-        cancelText="取消"
+-        onOk={confirmSelectRun}
++        width={1000}
++        footer={null}
+         onCancel={() => setTaskModalOpen(false)}
+       >
+         <Space direction="vertical" size={14} style={{ width: '100%' }}>
+@@ -741,29 +742,11 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+                   {stepList[modalStepRange[0]]?.name} ➔ {stepList[modalStepRange[1]]?.name}
+                 </span>
+               </div>
+-              <Slider
+-                range
+-                min={0}
+-                max={stepList.length - 1}
+-                value={modalStepRange}
+-                onChange={(val) => setModalStepRange(val as [number, number])}
+-                tooltip={{
+-                  formatter: (val) => {
+-                    if (val === undefined) return '';
+-                    const step = stepList[val];
+-                    return step ? `${val + 1}. ${step.name}${step.description ? ` (${step.description})` : ''}` : '';
+-                  }
+-                }}
+-                styles={{
+-                  track: {
+-                    background: accent,
+-                  },
+-                  handle: {
+-                    borderColor: accent,
+-                    backgroundColor: 'var(--vscode-editor-background)',
+-                  }
+-                }}
+-                style={{ margin: '8px 6px 4px' }}
++              <StepSelector
++                steps={stepList}
++                range={modalStepRange}
++                presets={flow === 'verification' ? VERIFICATION_STEP_PRESETS : undefined}
++                onChange={setModalStepRange}
+               />
+             </div>
+           ) : (
+@@ -771,6 +754,22 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+               加载流水线步骤中...
+             </div>
+           )}
++          <div
++            style={{
++              display: 'flex',
++              justifyContent: 'flex-end',
++              gap: 8,
++            }}
++          >
++            <Button onClick={() => setTaskModalOpen(false)}>取消</Button>
++            <Button
++              type="primary"
++              disabled={!stepList.length || !runTargetKeys.length}
++              onClick={confirmSelectRun}
++            >
++              运行
++            </Button>
++          </div>
+         </Space>
+       </Modal>
+     </div>
+
+diff --git a/src/webview/components/shared/PipelineExecutionOverview.tsx b/src/webview/components/shared/PipelineExecutionOverview.tsx
+index 23cd35d..600e4fa 100644
+--- a/src/webview/components/shared/PipelineExecutionOverview.tsx
++++ b/src/webview/components/shared/PipelineExecutionOverview.tsx
+@@ -6,7 +6,6 @@ import {
+   List,
+   Modal,
+   Row,
+-  Slider,
+   Space,
+   Tag,
+   Tooltip,
+@@ -29,11 +28,19 @@ import usePipelineRuntimeStore, {
+ import { PipelineLink, PipelineTask } from './pipelineMockData';
+ import { openExecutionTerminal } from '../../utils/ipc';
+ import { useShallow } from 'zustand/react/shallow';
++import StepSelector, {
++  VERIFICATION_STEP_PRESETS,
++} from '../verification/mode/StepSelector';
+
+ type OverviewRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
+
+ export interface PipelineExecutionRef {
+-  handleExternalRun: (keys: string[], selectedTaskIds?: string[]) => void;
++  handleExternalRun: (
++    keys: string[],
++    selectedTaskIds?: string[],
++    selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>,
++    runParameters?: unknown,
++  ) => void;
+   handleExternalStop: (keys: string[]) => void;
+ }
+
+@@ -42,6 +49,7 @@ interface PipelineExecutionOverviewProps {
+   flowLabel: string;
+   moduleKeys: string[];
+   moduleWorkDirs?: Record<string, string>;
++  defaultTasksByModule?: Record<string, Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>>;
+   activeModuleKey?: string;
+   onActiveModuleChange?: (moduleKey: string) => void;
+ }
+@@ -293,6 +301,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
+   flowLabel,
+   moduleKeys,
+   moduleWorkDirs,
++  defaultTasksByModule,
+   activeModuleKey: externalActiveModuleKey,
+   onActiveModuleChange,
+ }, ref) => {
+@@ -345,9 +354,25 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
+   const visibleRuns = useMemo(() => (
+     selectedModuleKeys.map((moduleKey) => {
+       const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
+-      return summarizeRuntime(moduleKey, flowKey, getFlowLabel(moduleKey), runtime);
++      const defaultTasks = defaultTasksByModule?.[moduleKey];
++      const effectiveRuntime = runtime?.runState === 'idle' && defaultTasks?.length
++        ? {
++          ...runtime,
++          tasks: defaultTasks.map((task) => ({
++            ...task,
++            status: 'pending' as const,
++            attempts: 1,
++            logs: [],
++          })),
++          links: defaultTasks.slice(1).map((task, index) => ({
++            source: defaultTasks[index].id,
++            target: task.id,
++          })),
++        }
++        : runtime;
++      return summarizeRuntime(moduleKey, flowKey, getFlowLabel(moduleKey), effectiveRuntime);
+     })
+-  ), [flowKey, getFlowLabel, runtimes, selectedModuleKeys]);
++  ), [defaultTasksByModule, flowKey, getFlowLabel, runtimes, selectedModuleKeys]);
+
+   const activeModuleData = visibleRuns.find((run) => run.moduleKey === activeModuleKey);
+   const activeHierarchy = useMemo(() => {
+@@ -388,37 +413,53 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
+     onActiveModuleChange?.(moduleKey);
+   }, [onActiveModuleChange]);
+
+-  const prepareRun = useCallback((targets: string[]) => {
++  const prepareRun = useCallback(async (targets: string[]) => {
+     setRunModalTargets(targets);
+     const targetKey = targets[0];
+-    const runtime = runtimes[getPipelineRuntimeKey(flowKey, targetKey)] || activeModuleData;
+-    const tasks = runtime?.tasks || [];
++    const currentRuntime = runtimes[getPipelineRuntimeKey(flowKey, targetKey)];
++    const defaultTasks = defaultTasksByModule?.[targetKey];
++    const runtime = currentRuntime?.tasks.length
++      ? currentRuntime
++      : await ensureRuntime(flowKey, targetKey, getFlowLabel(targetKey));
++    const tasks = runtime?.runState === 'idle' && defaultTasks?.length
++      ? defaultTasks
++      : runtime?.tasks || [];
+     if (tasks.length > 0) {
+       setRunModalRange([0, tasks.length - 1]);
+     } else {
+       setRunModalRange([0, 0]);
+     }
+     setRunModalOpen(true);
+-  }, [activeModuleData, flowKey, runtimes]);
++  }, [defaultTasksByModule, ensureRuntime, flowKey, getFlowLabel, runtimes]);
+
+   const confirmRunModal = useCallback(() => {
+     const targetKey = runModalTargets[0];
+     const runtime = runtimes[getPipelineRuntimeKey(flowKey, targetKey)] || activeModuleData;
+-    const tasks = runtime?.tasks || [];
++    const defaultTasks = defaultTasksByModule?.[targetKey];
++    const tasks = runtime?.runState === 'idle' && defaultTasks?.length
++      ? defaultTasks
++      : runtime?.tasks || [];
+     const targetTasks = tasks.slice(runModalRange[0], runModalRange[1] + 1);
+     const selectedTaskIds = targetTasks.length > 0 ? targetTasks.map((t) => t.id) : undefined;
+
+     runModalTargets.forEach((moduleKey) => {
+       setPeakMetrics((prev) => ({ ...prev, [moduleKey]: { maxCpu: 0, maxMem: 0 } }));
+       ensureRuntimeVisible(moduleKey);
+-      startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), selectedTaskIds, moduleWorkDirs?.[moduleKey]);
++      startRuntime(
++        flowKey,
++        moduleKey,
++        getFlowLabel(moduleKey),
++        selectedTaskIds,
++        moduleWorkDirs?.[moduleKey],
++        defaultTasksByModule?.[moduleKey],
++      );
+     });
+
+     if (runModalTargets.length === 1) {
+       activateModule(runModalTargets[0]);
+     }
+     setRunModalOpen(false);
+-  }, [runModalTargets, runModalRange, runtimes, flowKey, activeModuleData, ensureRuntimeVisible, getFlowLabel, startRuntime, activateModule, moduleWorkDirs]);
++  }, [runModalTargets, runModalRange, runtimes, flowKey, activeModuleData, defaultTasksByModule, ensureRuntimeVisible, getFlowLabel, startRuntime, activateModule, moduleWorkDirs]);
+
+   const stopRun = useCallback((moduleKey: string) => {
+     ensureRuntimeVisible(moduleKey);
+@@ -426,20 +467,20 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
+   }, [ensureRuntimeVisible, flowKey, getFlowLabel, stopRuntime]);
+
+   useImperativeHandle(ref, () => ({
+-    handleExternalRun(keys: string[], selectedTaskIds?: string[]) {
++    handleExternalRun(keys, selectedTaskIds, selectedTasks, runParameters) {
+       const cleanKeys = keys.filter(Boolean);
+       if (selectedTaskIds !== undefined) {
+         const taskIds = selectedTaskIds.length > 0 ? selectedTaskIds : undefined;
+         cleanKeys.forEach((moduleKey) => {
+           setPeakMetrics((prev) => ({ ...prev, [moduleKey]: { maxCpu: 0, maxMem: 0 } }));
+           ensureRuntimeVisible(moduleKey);
+-          startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), taskIds, moduleWorkDirs?.[moduleKey]);
++          startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), taskIds, moduleWorkDirs?.[moduleKey], selectedTasks, runParameters);
+         });
+         if (cleanKeys.length === 1) {
+           activateModule(cleanKeys[0]);
+         }
+       } else {
+-        prepareRun(cleanKeys);
++        void prepareRun(cleanKeys);
+       }
+     },
+     handleExternalStop(keys: string[]) {
+@@ -955,9 +996,8 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
+             <span>启动流水线 (选择步骤范围)</span>
+           </Space>
+         }
+-        okText="运行"
+-        cancelText="取消"
+-        onOk={confirmRunModal}
++        width={1000}
++        footer={null}
+         onCancel={() => setRunModalOpen(false)}
+       >
+         <Space direction="vertical" size={14} style={{ width: '100%' }}>
+@@ -987,35 +1027,33 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
+                       {tasks[runModalRange[0]]?.name} ➔ {tasks[runModalRange[1]]?.name}
+                     </span>
+                   </div>
+-                  <Slider
+-                    range
+-                    min={0}
+-                    max={tasks.length - 1}
+-                    value={runModalRange}
+-                    onChange={(val) => setRunModalRange(val as [number, number])}
+-                    tooltip={{
+-                      formatter: (val) => {
+-                        if (val === undefined) return '';
+-                        const task = tasks[val];
+-                        return task ? `${val + 1}. ${task.name}` : '';
+-                      }
+-                    }}
+-                    styles={{
+-                      track: {
+-                        background: themeStyles.accent,
+-                      },
+-                      handle: {
+-                        borderColor: themeStyles.accent,
+-                        backgroundColor: 'var(--vscode-editor-background)',
+-                      }
+-                    }}
+-                    style={{ margin: '8px 6px 4px' }}
++                  <StepSelector
++                    steps={tasks}
++                    range={runModalRange}
++                    presets={flowKey === 'verification' ? VERIFICATION_STEP_PRESETS : undefined}
++                    onChange={setRunModalRange}
+                   />
+                 </div>
+               );
+             }
+             return null;
+           })()}
++          <div
++            style={{
++              display: 'flex',
++              justifyContent: 'flex-end',
++              gap: 8,
++            }}
++          >
++            <Button onClick={() => setRunModalOpen(false)}>取消</Button>
++            <Button
++              type="primary"
++              disabled={!runModalTargets.length}
++              onClick={confirmRunModal}
++            >
++              运行
++            </Button>
++          </div>
+         </Space>
+       </Modal>
+       </Row>
+
+diff --git a/src/webview/components/verification/Step2_ToolConfig.tsx b/src/webview/components/verification/Step2_ToolConfig.tsx
+index ae303fa..295576f 100644
+--- a/src/webview/components/verification/Step2_ToolConfig.tsx
++++ b/src/webview/components/verification/Step2_ToolConfig.tsx
+@@ -25,6 +25,7 @@ import ControlledPathInput from '../shared/ControlledPathInput';
+ import CollapsibleSection from '../shared/CollapsibleSection';
+ import DonauResourcePicker from '../shared/DonauResourcePicker';
+ import PipelineExecutionOverview, { PipelineExecutionRef as OverviewRef } from '../shared/PipelineExecutionOverview';
++import type { LanderStep } from './mode/types';
+
+ const { Text } = Typography;
+
+@@ -35,10 +36,11 @@ interface Props {
+   onModuleSelect?: (moduleKey: string) => void;
+   moduleKeys: string[];
+   moduleWorkDirs?: Record<string, string>;
++  defaultStepsByModule?: Record<string, LanderStep[]>;
+ }
+
+ export interface PipelineExecutionRef {
+-  handleExternalRun: (keys: string[], selectedTaskIds?: string[]) => void;
++  handleExternalRun: (keys: string[], selectedTaskIds?: string[], selectedTasks?: LanderStep[], runParameters?: unknown) => void;
+   handleExternalStop: (keys: string[]) => void;
+ }
+
+@@ -64,12 +66,18 @@ const toolOptions = [
+   }
+ ]
+
+-const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPrev, moduleKey, onModuleSelect, moduleKeys, moduleWorkDirs }, ref) => {
++const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPrev, moduleKey, onModuleSelect, moduleKeys, moduleWorkDirs, defaultStepsByModule }, ref) => {
+   const [activeTab, setActiveTab] = useState('task');
+   const [taskForm] = Form.useForm();
+   const [designForm] = Form.useForm();
+   const overviewRef = useRef<OverviewRef>(null);
+-  const pendingCommandRef = useRef<{ type: 'run' | 'stop'; keys: string[]; selectedTaskIds?: string[] } | null>(null);
++  const pendingCommandRef = useRef<{
++    type: 'run' | 'stop';
++    keys: string[];
++    selectedTaskIds?: string[];
++    selectedTasks?: LanderStep[];
++    runParameters?: unknown;
++  } | null>(null);
+   const selectedAccount = Form.useWatch('clusterGroup', taskForm);
+   const selectedQueue = Form.useWatch('clusterQueue', taskForm);
+
+@@ -77,15 +85,15 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
+   const flowLabel = 'DFTM';
+
+   useImperativeHandle(ref, () => ({
+-    handleExternalRun(keys: string[], selectedTaskIds?: string[]) {
++    handleExternalRun(keys: string[], selectedTaskIds?: string[], selectedTasks?: LanderStep[], runParameters?: unknown) {
+       const cleanKeys = keys.filter(Boolean);
+       if (!cleanKeys.length) {
+         return;
+       }
+       if (overviewRef.current) {
+-        overviewRef.current.handleExternalRun(cleanKeys, selectedTaskIds);
++        overviewRef.current.handleExternalRun(cleanKeys, selectedTaskIds, selectedTasks, runParameters);
+       } else {
+-        pendingCommandRef.current = { type: 'run', keys: cleanKeys, selectedTaskIds };
++        pendingCommandRef.current = { type: 'run', keys: cleanKeys, selectedTaskIds, selectedTasks, runParameters };
+       }
+       setActiveTab('execution');
+     },
+@@ -110,7 +118,7 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
+     const command = pendingCommandRef.current;
+     pendingCommandRef.current = null;
+     if (command.type === 'run') {
+-      overviewRef.current.handleExternalRun(command.keys, command.selectedTaskIds);
++      overviewRef.current.handleExternalRun(command.keys, command.selectedTaskIds, command.selectedTasks, command.runParameters);
+     } else {
+       overviewRef.current.handleExternalStop(command.keys);
+     }
+@@ -271,6 +279,7 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
+                   flowLabel={flowLabel}
+                   moduleKeys={moduleKeys}
+                   moduleWorkDirs={moduleWorkDirs}
++                  defaultTasksByModule={defaultStepsByModule}
+                   activeModuleKey={moduleKey}
+                   onActiveModuleChange={onModuleSelect}
+                 />
+
+diff --git a/src/webview/components/verification/mode/DonauModal.tsx b/src/webview/components/verification/mode/DonauModal.tsx
+index be3409e..a6fb7e5 100644
+--- a/src/webview/components/verification/mode/DonauModal.tsx
++++ b/src/webview/components/verification/mode/DonauModal.tsx
+@@ -1,6 +1,7 @@
+ import { Input, Modal, Space } from 'antd'
+
+ import type { DonauConfig } from './types'
++import DonauResourcePicker from '../../shared/DonauResourcePicker'
+
+ interface DonauModalProps {
+   open: boolean
+@@ -43,14 +44,28 @@ export default function DonauModal({
+       onOk={onCancel}
+     >
+       <Space direction="vertical" size={10} style={{ width: '100%' }}>
++        <DonauResourcePicker
++          account={value.group}
++          queue={value.queue}
++          onChange={({ account, queue }) => {
++            onChange(cleanDonauValue({
++              ...value,
++              group: account,
++              queue,
++            }))
++          }}
++        />
++
+         <Input
+-          placeholder="group"
++          addonBefore="Group"
++          placeholder="手动输入 Donau Account / Group"
+           value={value.group ?? ''}
+           onChange={(event) => update('group', event.target.value)}
+         />
+
+         <Input
+-          placeholder="queue"
++          addonBefore="Queue"
++          placeholder="手动输入 Donau Queue"
+           value={value.queue ?? ''}
+           onChange={(event) => update('queue', event.target.value)}
+         />
+
+diff --git a/src/webview/components/verification/mode/ModePanel/index.tsx b/src/webview/components/verification/mode/ModePanel/index.tsx
+index ff5e19f..a23a28d 100644
+--- a/src/webview/components/verification/mode/ModePanel/index.tsx
++++ b/src/webview/components/verification/mode/ModePanel/index.tsx
+@@ -31,6 +31,7 @@ export default function ModePanel({
+   title,
+   onSelect,
+   onCheckedChange,
++  onDefaultStepsChange,
+   onRun,
+   onStop,
+ }: ModePanelProps) {
+@@ -115,6 +116,38 @@ export default function ModePanel({
+
+   const searchValue = selection.searchValues[activeTab]
+
++  /**
++   * resources.focusModes may be restored asynchronously from persisted state.
++   * Keep the execution overview in sync even when the user has not changed the
++   * focus selector during the current session.
++   */
++  useEffect(() => {
++    onCheckedChange?.('mode', resources.focusModes)
++  }, [onCheckedChange, resources.focusModes])
++
++  useEffect(() => {
++    if (!onDefaultStepsChange) {
++      return
++    }
++
++    let cancelled = false
++    const focusedNames = new Set(resources.focusModes)
++    const focusedModes = resources.mode.filter((mode) => focusedNames.has(mode.name))
++
++    void Promise.all(focusedModes.map(async (mode) => {
++      const result = await getLanderModePipelines(mode.preMode)
++      return [mode.name, result.success ? result.steps : []] as const
++    })).then((entries) => {
++      if (!cancelled) {
++        onDefaultStepsChange(Object.fromEntries(entries))
++      }
++    })
++
++    return () => {
++      cancelled = true
++    }
++  }, [onDefaultStepsChange, resources.focusModes, resources.mode])
++
+   const focusOptions = useMemo(
+     () =>
+       allItems.map((item) => ({
+
+diff --git a/src/webview/components/verification/mode/RunModal.tsx b/src/webview/components/verification/mode/RunModal.tsx
+index aabb940..ade94b4 100644
+--- a/src/webview/components/verification/mode/RunModal.tsx
++++ b/src/webview/components/verification/mode/RunModal.tsx
+@@ -1,6 +1,6 @@
+ import { useEffect, useMemo, useState } from 'react'
+
+-import { Button, Empty, Modal, Space, Spin, message, Typography } from 'antd'
++import { Button, Empty, Input, Modal, Popconfirm, Select, Space, Spin, message, Typography } from 'antd'
+
+ import type {
+   BaseConfigItem,
+@@ -11,8 +11,9 @@ import type {
+   RunParamRow,
+ } from './types'
+
+-import StepSelector from './StepSelector'
++import StepSelector, { VERIFICATION_STEP_PRESETS } from './StepSelector'
+ import ParamTable from './ParamTable'
++import { useVerificationStageConfig } from './ModePanel/hooks/useVerificationStageConfig'
+
+ interface RunModalProps {
+   open: boolean
+@@ -52,6 +53,18 @@ const cloneRows = (rows: RunParamRow[]): RunParamRow[] => {
+   }))
+ }
+
++type SavedParams = Record<string, RunParamRow[]>
++
++const readSavedParams = (value: unknown): SavedParams => {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) {
++    return {}
++  }
++
++  return Object.fromEntries(
++    Object.entries(value).filter(([, rows]) => Array.isArray(rows)),
++  ) as SavedParams
++}
++
+ export default function RunModal({
+   open,
+   mode,
+@@ -69,6 +82,26 @@ export default function RunModal({
+   const [range, setRange] = useState<[number, number]>([0, 0])
+
+   const [rows, setRows] = useState<RunParamRow[]>([createRunParamRow()])
++  const [scenarioAlias, setScenarioAlias] = useState('')
++  const [selectedAlias, setSelectedAlias] = useState<string>()
++  const [savedParams, setSavedParams] = useState<SavedParams>({})
++  const [savingParams, setSavingParams] = useState(false)
++  const { stageConfig, loading: stageConfigLoading, handleSave } =
++    useVerificationStageConfig()
++
++  useEffect(() => {
++    if (open && mode) {
++      setRows([createRunParamRow()])
++      setScenarioAlias('')
++      setSelectedAlias(undefined)
++    }
++  }, [open, mode?.name])
++
++  useEffect(() => {
++    if (!stageConfigLoading) {
++      setSavedParams(readSavedParams(stageConfig?.params))
++    }
++  }, [stageConfig, stageConfigLoading])
+
+   useEffect(() => {
+     if (!open || !mode) {
+@@ -104,6 +137,7 @@ export default function RunModal({
+         }
+
+         setSteps(result.steps)
++        setRange(result.steps.length > 0 ? [0, result.steps.length - 1] : [0, 0])
+       } catch (error) {
+         if (cancelled) {
+           return
+@@ -128,10 +162,71 @@ export default function RunModal({
+     }
+   }, [open, mode?.preMode, getLanderModePipelines])
+
+-  const stepNames = useMemo(() => {
+-    return steps.slice(range[0], range[1] + 1).map((step) => step.name)
++  const selectedSteps = useMemo(() => {
++    return steps.slice(range[0], range[1] + 1)
+   }, [steps, range])
+
++  const stepNames = useMemo(() => {
++    return selectedSteps.map((step) => step.name)
++  }, [selectedSteps])
++
++  const loadSavedParams = (alias: string) => {
++    const savedRows = savedParams[alias]
++
++    if (!savedRows) {
++      return
++    }
++
++    setSelectedAlias(alias)
++    setScenarioAlias(alias)
++    setRows(cloneRows(savedRows))
++  }
++
++  const saveCurrentParams = async () => {
++    const alias = scenarioAlias.trim()
++
++    if (!alias) {
++      message.warning('请输入场景别名')
++      return
++    }
++
++    const nextParams = {
++      ...savedParams,
++      [alias]: cloneRows(rows),
++    }
++
++    setSavingParams(true)
++    try {
++      if (await handleSave({ params: nextParams })) {
++        setSavedParams(nextParams)
++        setSelectedAlias(alias)
++        setScenarioAlias(alias)
++      }
++    } finally {
++      setSavingParams(false)
++    }
++  }
++
++  const deleteSavedParams = async () => {
++    if (!selectedAlias) {
++      return
++    }
++
++    const nextParams = { ...savedParams }
++    delete nextParams[selectedAlias]
++
++    setSavingParams(true)
++    try {
++      if (await handleSave({ params: nextParams })) {
++        setSavedParams(nextParams)
++        setSelectedAlias(undefined)
++        setScenarioAlias('')
++      }
++    } finally {
++      setSavingParams(false)
++    }
++  }
++
+   const confirm = () => {
+     if (!mode) {
+       return
+@@ -148,6 +243,8 @@ export default function RunModal({
+       preMode: mode.preMode,
+       stepRange: range,
+       stepNames,
++      stepIds: selectedSteps.map((step) => step.id),
++      steps: selectedSteps.map((step) => ({ ...step })),
+       rows: cloneRows(rows),
+     })
+   }
+@@ -183,7 +280,12 @@ export default function RunModal({
+             <Typography.Text strong>Step 选择</Typography.Text>
+
+             {steps.length ? (
+-              <StepSelector steps={steps} range={range} onChange={setRange} />
++              <StepSelector
++                steps={steps}
++                range={range}
++                presets={VERIFICATION_STEP_PRESETS}
++                onChange={setRange}
++              />
+             ) : (
+               <Empty description="暂无 Step" />
+             )}
+@@ -192,6 +294,46 @@ export default function RunModal({
+           <div>
+             <Typography.Text strong>运行参数</Typography.Text>
+
++            <Space.Compact block style={{ margin: '10px 0' }}>
++              <Select
++                allowClear
++                showSearch
++                loading={stageConfigLoading}
++                placeholder="选择已保存场景快速填充"
++                value={selectedAlias}
++                options={Object.keys(savedParams).map((alias) => ({
++                  label: alias,
++                  value: alias,
++                }))}
++                style={{ minWidth: 220, flex: 1 }}
++                onClear={() => setSelectedAlias(undefined)}
++                onChange={loadSavedParams}
++              />
++              <Input
++                placeholder="输入场景别名"
++                value={scenarioAlias}
++                style={{ minWidth: 180, flex: 1 }}
++                onChange={(event) => setScenarioAlias(event.target.value)}
++                onPressEnter={() => void saveCurrentParams()}
++              />
++              <Button
++                type="primary"
++                loading={savingParams}
++                onClick={() => void saveCurrentParams()}
++              >
++                保存场景
++              </Button>
++              <Popconfirm
++                title={`删除场景“${selectedAlias ?? ''}”？`}
++                disabled={!selectedAlias}
++                onConfirm={() => void deleteSavedParams()}
++              >
++                <Button danger disabled={!selectedAlias} loading={savingParams}>
++                  删除
++                </Button>
++              </Popconfirm>
++            </Space.Compact>
++
+             <ParamTable
+               rows={rows}
+               groups={groups}
+
+diff --git a/src/webview/components/verification/mode/StepSelector.tsx b/src/webview/components/verification/mode/StepSelector.tsx
+index d9375c0..f1c23af 100644
+--- a/src/webview/components/verification/mode/StepSelector.tsx
++++ b/src/webview/components/verification/mode/StepSelector.tsx
+@@ -1,17 +1,46 @@
+ import { useMemo } from 'react'
++import type { CSSProperties, ReactNode } from 'react'
+
+-import { Empty, List, Slider, Space, Tag, Typography } from 'antd'
++import { Button, Empty, message, Slider, Space, Tooltip } from 'antd'
+
+-import type { LanderStep } from './types'
++export interface StepSelectorStep {
++  id: string
++  name: string
++}
+
+-const { Text } = Typography
++export type StepSelectorPresets = Record<string, string[]>
+
+ interface StepSelectorProps {
+-  steps: LanderStep[]
++  steps: StepSelectorStep[]
+
+   range: [number, number]
+
+   onChange: (range: [number, number]) => void
++
++  presets?: StepSelectorPresets
++}
++
++interface SliderMark {
++  label: ReactNode
++
++  style: CSSProperties
++}
++
++export const VERIFICATION_STEP_PRESETS: StepSelectorPresets = {
++  Plan: ['gen_plan_env', 'release_plan', 'gen_atpg_setting', 'gen_pdl_env'],
++
++  Env: [
++    'gen_atpg_env_pre',
++    'gen_atpg_env',
++    'gen_crg_env',
++    'run_crg_gen',
++    'run_atpg',
++    'gen_all_scan_env',
++    'run_all_scan',
++    'delivery_data',
++  ],
++
++  Sim: ['sed_3d_tb', 'gen_sim_env', 'run_sim'],
+ }
+
+ const normalizeRange = (
+@@ -25,39 +54,87 @@ const normalizeRange = (
+   return start <= end ? [start, end] : [end, start]
+ }
+
++const findContinuousRange = (
++  steps: StepSelectorStep[],
++  names: string[],
++): [number, number] | undefined => {
++  if (!names.length) {
++    return undefined
++  }
++
++  for (let start = 0; start <= steps.length - names.length; start++) {
++    const matched = names.every(
++      (name, offset) => steps[start + offset]?.name === name,
++    )
++
++    if (matched) {
++      return [start, start + names.length - 1]
++    }
++  }
++
++  return undefined
++}
++
+ export default function StepSelector({
+   steps,
+   range,
+   onChange,
++  presets,
+ }: StepSelectorProps) {
+   const maxIndex = Math.max(steps.length - 1, 0)
+
+-  const safeRange = useMemo(() => {
+-    return normalizeRange(range, maxIndex)
+-  }, [range, maxIndex])
++  const safeRange = useMemo(
++    () => normalizeRange(range, maxIndex),
++    [range, maxIndex],
++  )
+
+-  const selectedStepIds = useMemo(() => {
+-    if (!steps.length) {
+-      return []
+-    }
++  const marks = useMemo(() => {
++    return steps.reduce<Record<number, SliderMark>>((result, step, index) => {
++      result[index] = {
++        style: {
++          cursor: 'help',
++          pointerEvents: 'none',
++        },
++
++        label: (
++          <Tooltip title={step.name} placement="top" mouseEnterDelay={0}>
++            <span
++              style={{
++                position: 'relative',
++                top: -14,
++                display: 'inline-block',
++                minWidth: 24,
++                padding: '14px 4px 2px',
++                lineHeight: '20px',
++                cursor: 'help',
++                pointerEvents: 'none',
++              }}
++            >
++              {index + 1}
++            </span>
++          </Tooltip>
++        ),
++      }
+
+-    return steps.slice(safeRange[0], safeRange[1] + 1).map((step) => step.id)
+-  }, [steps, safeRange])
++      return result
++    }, {})
++  }, [steps])
+
+-  const selectedIdSet = useMemo(() => {
+-    return new Set(selectedStepIds)
+-  }, [selectedStepIds])
++  const applyPreset = (name: string, stepNames?: string[]) => {
++    if (!stepNames?.length) {
++      message.warning(`${name} 未配置 Step`)
++      return
++    }
+
+-  const marks = useMemo(() => {
+-    if (!steps.length) {
+-      return {}
++    const result = findContinuousRange(steps, stepNames)
++
++    if (!result) {
++      message.warning(`${name} 预设不满足当前 Step 顺序`)
++      return
+     }
+
+-    return steps.reduce<Record<number, string>>((acc, step, index) => {
+-      acc[index] = String(index + 1)
+-      return acc
+-    }, {})
+-  }, [steps])
++    onChange(result)
++  }
+
+   if (!steps.length) {
+     return (
+@@ -68,26 +145,28 @@ export default function StepSelector({
+   return (
+     <Space
+       direction="vertical"
+-      size={10}
++      size={14}
+       style={{
+         width: '100%',
+       }}
+     >
+-      <div>
+-        <Text strong>Step 范围</Text>
+-
+-        <Text
+-          type="secondary"
+-          style={{
+-            marginLeft: 8,
+-          }}
+-        >
+-          已选 {selectedStepIds.length} 个 Step
+-        </Text>
+-      </div>
++      {presets && (
++        <Space wrap>
++          {Object.entries(presets).map(([name, value]) => (
++            <Button
++              key={name}
++              size="small"
++              onClick={() => applyPreset(name, value)}
++            >
++              {name}
++            </Button>
++          ))}
++        </Space>
++      )}
+
+       <Slider
+-        range
++        range={{ draggableTrack: true }}
++        dots
+         min={0}
+         max={maxIndex}
+         marks={marks}
+@@ -98,94 +177,15 @@ export default function StepSelector({
+               return ''
+             }
+
+-            return steps[value]?.name ?? String(value + 1)
++            return steps[value]?.name ?? ''
+           },
+         }}
+-        onChange={(value) => {
++        onChange={(value: number[]) => {
+           if (Array.isArray(value) && value.length === 2) {
+-            const nextRange: [number, number] = [value[0], value[1]]
+-
+-            onChange(normalizeRange(nextRange, maxIndex))
++            onChange(normalizeRange([value[0], value[1]], maxIndex))
+           }
+         }}
+       />
+-
+-      <List
+-        size="small"
+-        bordered
+-        dataSource={steps}
+-        style={{
+-          maxHeight: 360,
+-          overflow: 'auto',
+-        }}
+-        renderItem={(step, index) => {
+-          const selected = selectedIdSet.has(step.id)
+-
+-          return (
+-            <List.Item
+-              style={{
+-                opacity: selected ? 1 : 0.55,
+-
+-                background: selected
+-                  ? 'var(--vscode-list-inactiveSelectionBackground, transparent)'
+-                  : undefined,
+-              }}
+-            >
+-              <Space
+-                align="start"
+-                style={{
+-                  width: '100%',
+-                }}
+-              >
+-                <Tag>{index + 1}</Tag>
+-
+-                <div
+-                  style={{
+-                    flex: 1,
+-                    minWidth: 0,
+-                  }}
+-                >
+-                  <Space size={6} wrap>
+-                    <Text strong={selected}>{step.name}</Text>
+-
+-                    {selected && <Tag>selected</Tag>}
+-
+-                    {step.enableGroup && <Tag>Group</Tag>}
+-
+-                    {step.enableTC && <Tag>TC</Tag>}
+-
+-                    {step.enableSubAttr && <Tag>SubAttr</Tag>}
+-                  </Space>
+-
+-                  <div>
+-                    <Text
+-                      type="secondary"
+-                      ellipsis={{
+-                        tooltip: step.command,
+-                      }}
+-                    >
+-                      {step.command}
+-                    </Text>
+-                  </div>
+-
+-                  {step.description && (
+-                    <div>
+-                      <Text
+-                        type="secondary"
+-                        ellipsis={{
+-                          tooltip: step.description,
+-                        }}
+-                      >
+-                        {step.description}
+-                      </div>
+-                  )}
+-                </div>
+-              </Space>
+-            </List.Item>
+-          )
+-        }}
+-      />
+     </Space>
+   )
+ }
+
+diff --git a/src/webview/components/verification/mode/types.ts b/src/webview/components/verification/mode/types.ts
+index 989a998..801ffef 100644
+--- a/src/webview/components/verification/mode/types.ts
++++ b/src/webview/components/verification/mode/types.ts
+@@ -85,6 +85,10 @@ export interface ModeRunPayload {
+
+   stepNames: string[]
+
++  stepIds: string[]
++
++  steps: LanderStep[]
++
+   rows: RunParamRow[]
+ }
+
+@@ -139,6 +143,8 @@ export interface ModePanelProps {
+
+   onCheckedChange?: (tab: ModePanelTab, names: string[]) => void
+
++  onDefaultStepsChange?: (stepsByMode: Record<string, LanderStep[]>) => void
++
+   onRun?: (payload: ModeRunPayload) => void
+
+   onStop?: (names: string[]) => void
+
+diff --git a/src/webview/flows/VerificationFlow.tsx b/src/webview/flows/VerificationFlow.tsx
+index 7589ad3..7d84410 100644
+--- a/src/webview/flows/VerificationFlow.tsx
++++ b/src/webview/flows/VerificationFlow.tsx
+@@ -1,4 +1,4 @@
+-import React, { useRef, useState } from 'react'
++import React, { useCallback, useRef, useState } from 'react'
+
+ import Step1CommonConfig from '../components/verification/Step1_CommonConfig'
+ import Step2ToolConfig, {
+@@ -21,9 +21,21 @@ const VerificationFlow: React.FC = () => {
+   const [selectedModule, setSelectedModule] = useState('')
+   const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>([])
+   const [moduleWorkDirs] = useState<Record<string, string>>({})
++  const [defaultStepsByMode, setDefaultStepsByMode] = useState<Record<string, ModeRunPayload['steps']>>({})
+   const [, setLastRunPayload] = useState<ModeRunPayload>()
+
+   const executionRef = useRef<PipelineExecutionRef>(null)
++  const pendingRunRef = useRef<ModeRunPayload | undefined>(undefined)
++
++  const setExecutionRef = useCallback((instance: PipelineExecutionRef | null) => {
++    executionRef.current = instance
++
++    if (instance && pendingRunRef.current) {
++      const payload = pendingRunRef.current
++      pendingRunRef.current = undefined
++      instance.handleExternalRun([payload.mode.name], payload.stepIds, payload.steps, payload.rows)
++    }
++  }, [])
+
+   const nextStep = () => {
+     setCurrentStep((prev) => Math.min(prev + 1, 3))
+@@ -39,18 +51,25 @@ const VerificationFlow: React.FC = () => {
+     }
+   }
+
+-  const handleCheckedChange = (tab: ModePanelTab, keys: string[]) => {
++  const handleCheckedChange = useCallback((tab: ModePanelTab, keys: string[]) => {
+     if (tab === 'mode') {
+       setExecutionModuleKeys(keys)
+     }
+-  }
++  }, [])
+
+   const handleRun = (payload: ModeRunPayload) => {
+     setLastRunPayload(payload)
+     setSelectedModule(payload.mode.name)
+-    setExecutionModuleKeys([payload.mode.name])
++    setExecutionModuleKeys((current) => (
++      current.includes(payload.mode.name) ? current : [...current, payload.mode.name]
++    ))
+
+-    executionRef.current?.handleExternalRun([payload.mode.name])
++    if (executionRef.current) {
++      executionRef.current.handleExternalRun([payload.mode.name], payload.stepIds, payload.steps, payload.rows)
++    } else {
++      pendingRunRef.current = payload
++      setCurrentStep(1)
++    }
+   }
+
+   const handleStop = (keys: string[]) => {
+@@ -68,13 +87,14 @@ const VerificationFlow: React.FC = () => {
+       description: '仿真工具链',
+       content: (
+         <Step2ToolConfig
+-          ref={executionRef}
++          ref={setExecutionRef}
+           moduleKey={selectedModule}
+           onModuleSelect={setSelectedModule}
+           onNext={nextStep}
+           onPrev={prevStep}
+           moduleKeys={executionModuleKeys}
+           moduleWorkDirs={moduleWorkDirs}
++          defaultStepsByModule={defaultStepsByMode}
+         />
+       ),
+     },
+@@ -107,6 +127,7 @@ const VerificationFlow: React.FC = () => {
+             title="模式与参数配置"
+             onSelect={handleSelect}
+             onCheckedChange={handleCheckedChange}
++            onDefaultStepsChange={setDefaultStepsByMode}
+             onRun={handleRun}
+             onStop={handleStop}
+           />
+
+diff --git a/src/webview/store/pipelineRuntimeStore.ts b/src/webview/store/pipelineRuntimeStore.ts
+index c7c964d..bbf27ad 100644
+--- a/src/webview/store/pipelineRuntimeStore.ts
++++ b/src/webview/store/pipelineRuntimeStore.ts
+@@ -36,8 +36,20 @@ export interface PipelineRuntimeSnapshot {
+
+ interface PipelineRuntimeStore {
+   runtimes: Record<string, PipelineRuntimeSnapshot>;
+-  ensureRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string) => void;
+-  startRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string, selectedTaskIds?: string[], cwd?: string) => void;
++  ensureRuntime: (
++    flowKey: PipelineFlowKey,
++    moduleKey: string,
++    flowLabel: string,
++  ) => Promise<PipelineRuntimeSnapshot | undefined>;
++  startRuntime: (
++    flowKey: PipelineFlowKey,
++    moduleKey: string,
++    flowLabel: string,
++    selectedTaskIds?: string[],
++    cwd?: string,
++    selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>,
++    runParameters?: unknown,
++  ) => void;
+   stopRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string) => void;
+   selectTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string) => void;
+   stopTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string, flowLabel: string) => void;
+@@ -185,21 +197,56 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
+         },
+       };
+     });
+-    void ensurePipelineRuntime({ flowKey, moduleKey, flowLabel });
++    return ensurePipelineRuntime({ flowKey, moduleKey, flowLabel }).then((res) => {
++      const snapshot = res.success ? parseRuntimeSnapshot(res.snapshot) : null;
++      if (snapshot) {
++        set((state) => {
++          const key = getPipelineRuntimeKey(flowKey, moduleKey);
++          const current = state.runtimes[key];
++          // Ignore an ensure response that was sent before this run started.
++          if (current?.runState === 'running' && snapshot.runState === 'idle') {
++            return state;
++          }
++          return { runtimes: applySnapshot(state.runtimes, snapshot) };
++        });
++        return snapshot;
++      }
++      return undefined;
++    });
+   },
+
+-  startRuntime: (flowKey, moduleKey, flowLabel, selectedTaskIds, cwd) => {
++  startRuntime: (flowKey, moduleKey, flowLabel, selectedTaskIds, cwd, selectedTasks, runParameters) => {
++    const normalizedSelectedTaskIds = selectedTaskIds?.length ? selectedTaskIds : undefined;
++    const optimisticTasks: PipelineTask[] = (selectedTasks ?? []).map((task, index) => {
++      const isSelected = !normalizedSelectedTaskIds || normalizedSelectedTaskIds.includes(task.id);
++      const isFirstSelected = isSelected && (
++        normalizedSelectedTaskIds ? task.id === normalizedSelectedTaskIds[0] : index === 0
++      );
++      return {
++        ...task,
++        status: isSelected ? (isFirstSelected ? 'running' : 'pending') : 'skipped',
++        attempts: 1,
++        logs: [],
++      };
++    });
+     set((state) => ({
+       runtimes: applySnapshot(
+         state.runtimes,
+         {
+           ...makeInitialRuntime(flowKey, moduleKey, flowLabel),
++          tasks: optimisticTasks,
++          links: optimisticTasks.slice(1).map((task, index) => ({
++            source: optimisticTasks[index].id,
++            target: task.id,
++          })),
++          selectedTaskId: optimisticTasks.find((task) => task.status === 'running')?.id
++            ?? optimisticTasks[0]?.id,
+           logs: [`${flowLabel} 已提交启动请求，等待 VS Code runtime 同步。`],
+           runState: 'running',
+         },
+       ),
+     }));
+-    void startPipelineRuntime({ flowKey, moduleKey, flowLabel, selectedTaskIds, cwd });
++    void startPipelineRuntime({ flowKey, moduleKey, flowLabel, selectedTaskIds, selectedTasks, cwd, runParameters });
+   },
+
+   stopRuntime: (flowKey, moduleKey, flowLabel) => {
+
+diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
+index bf9d2d1..f63ad38 100644
+--- a/src/webview/utils/ipc.ts
++++ b/src/webview/utils/ipc.ts
+@@ -841,9 +841,9 @@ export async function ensurePipelineRuntime(options: {
+   flowKey: 'hibist' | 'sailor' | 'verification'
+   moduleKey: string
+   flowLabel: string
+-}): Promise<{ success: boolean; error?: string }> {
++}): Promise<{ success: boolean; snapshot?: unknown; error?: string }> {
+   const res = await ipcRequest('ensurePipelineRuntime', options)
+-  return res as { success: boolean; error?: string }
++  return res as { success: boolean; snapshot?: unknown; error?: string }
+ }
+
+ export async function startPipelineRuntime(options: {
+@@ -851,7 +851,14 @@ export async function startPipelineRuntime(options: {
+   moduleKey: string
+   flowLabel: string
+   selectedTaskIds?: string[]
++  selectedTasks?: Array<{
++    id: string
++    name: string
++    command: string
++    description: string
++  }>
+   cwd?: string
++  runParameters?: unknown
+ }): Promise<{ success: boolean; error?: string }> {
+   const res = await ipcRequest('startPipelineRuntime', options)
+   return res as { success: boolean; error?: string }
