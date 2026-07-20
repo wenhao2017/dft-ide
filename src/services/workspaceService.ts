@@ -6,7 +6,7 @@ import {
   LOCAL_STATE_DIR_NAME,
   LOCAL_STATE_SUBDIR,
 } from './constants';
-import { executeFileCommand, pathExists, isRecord, getDirectory } from './utils';
+import { executeFileCommand, pathExists, isRecord } from './utils';
 import dayjs from 'dayjs';
 import { DftProject } from '../webview/services/projectService';
 import { inferDftFlow } from './diagnosticsService';
@@ -678,9 +678,20 @@ export function getProjectRepoRoot(repo: 'hibist' | 'sailor' | 'data' | 'verific
   return path.join(projectRoot, repo);
 }
 
-export async function getFlowConfigsDirectory(flow: 'hibist' | 'sailor' | 'verification'): Promise<string> {
+export async function getFlowConfigsDirectory(flow: 'hibist' | 'sailor' | 'verification', stage?: string): Promise<string> {
   const repoRoot = await resolveProjectRepoRoot(flow);
-  return path.join(repoRoot, `${flow}/cfg`);
+  return stage ? path.join(repoRoot, normalizeStageName(stage), flow, 'cfg') : path.join(repoRoot, flow, 'cfg');
+}
+
+export function normalizeStageName(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new Error('Stage name is required.');
+  }
+  const stage = value.trim();
+  if (!stage || stage === '.' || stage === '..' || path.basename(stage) !== stage || !/^[A-Za-z0-9._-]+$/.test(stage)) {
+    throw new Error(`Invalid stage name: ${String(value)}`);
+  }
+  return stage;
 }
 
 export async function resolveProjectRepoRoot(repo: 'hibist' | 'sailor' | 'data' | 'verification'): Promise<string> {
@@ -811,19 +822,6 @@ export function getSyncedArtifactPath(
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-export interface DefaultConfigLog {
-  requestId?: string;
-  flow: 'hibist' | 'sailor' | 'verification';
-  scriptPath: string;
-  designTree: string;
-  normTable: string;
-  timemilles?: string;
-  timestamp?: string;
-  logFile?: string;
-  configDirectory: string;
-  success?: boolean;
-}
-
 type TerminalDataEvent = { terminal: vscode.Terminal; data: string };
 type TerminalShellEndEvent = { terminal: vscode.Terminal; exitCode?: number };
 type WindowWithTerminalEvents = typeof vscode.window & {
@@ -837,6 +835,23 @@ type WindowWithTerminalEvents = typeof vscode.window & {
 
 const activeDefaultConfigRuns = new Set<string>();
 const defaultConfigTimeoutMs = 60 * 60 * 1000;
+
+export interface TransformLog {
+  requestId?: string;
+  flow: 'hibist' | 'sailor' | 'verification';
+  scriptPath: string;
+  configPath: string;
+  designTree?: string;
+  normTable?: string;
+  module?: string;
+  stage?: string;
+  landerAssistant?: string;
+  timemilles?: string;
+  timestamp?: string;
+  time?: string;
+  logFile?: string;
+  success?: boolean;
+}
 
 function quoteCshArg(value: string): string {
   return `"${value.replace(/(["\\$`])/g, '\\$1')}"`;
@@ -877,16 +892,17 @@ async function waitForDefaultConfigTerminalReady(terminal: vscode.Terminal): Pro
   });
 }
 
-export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
+export async function doConfigTransform(transformLog: TransformLog): Promise<TransformLog> {
   const timestamp = dayjs().format('YYYY-MM-DD HH:mm:ss');
   const timemilles = Date.now().toString();
-  await ensureLocalConfigDirectory(`${defaultConfigLog.configDirectory}/.logs`);
-  const logFile = `${defaultConfigLog.configDirectory}/.logs/${defaultConfigLog.flow}-${defaultConfigLog.requestId}-${timemilles}.log`;
-  defaultConfigLog = {...defaultConfigLog, logFile, timestamp, timemilles};
+  const logsDirectory = path.join(transformLog.configPath, '.logs');
+  await ensureLocalConfigDirectory(logsDirectory);
+  const logFile = path.join(logsDirectory, `${transformLog.flow}-${transformLog.requestId ?? 'request'}-${timemilles}.log`);
+  transformLog = { ...transformLog, logFile, timestamp, timemilles };
 
-  const runKey = defaultConfigLog.flow;
+  const runKey = `${transformLog.flow}:${transformLog.stage ?? ''}`;
   if (activeDefaultConfigRuns.has(runKey)) {
-    throw new Error(`${defaultConfigLog.flow} 默认配置生成任务正在运行，请等待当前任务完成。`);
+    throw new Error(`${transformLog.flow} 默认配置生成任务正在运行，请等待当前任务完成。`);
   }
   activeDefaultConfigRuns.add(runKey);
 
@@ -896,10 +912,10 @@ export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
     throw new Error('当前 VS Code 环境不支持 terminal 执行完成监控，无法可靠生成默认配置。');
   }
 
-  const marker = `__DFT_IDE_DEFAULT_CONFIG_END__|${defaultConfigLog.requestId ?? timemilles}|`;
+  const marker = `__DFT_IDE_DEFAULT_CONFIG_END__|${transformLog.requestId ?? timemilles}|`;
   const terminal = vscode.window.createTerminal({
-    name: `DFT IDE Default Config / ${defaultConfigLog.flow} / ${defaultConfigLog.requestId ?? timemilles}`,
-    cwd: defaultConfigLog.configDirectory,
+    name: `DFT IDE Default Config / ${transformLog.flow} / ${transformLog.requestId ?? timemilles}`,
+    cwd: transformLog.configPath,
     shellPath: getPipelineShellPath(),
   });
 
@@ -920,7 +936,6 @@ export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
         if (error) {
           reject(error);
         } else {
-          defaultConfigLog = {...defaultConfigLog, success: true};
           // terminal.dispose();
           resolve();
         }
@@ -942,7 +957,10 @@ export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
             return;
           }
           const exitCodeText = normalized.slice(markerIndex + marker.length).match(/-?\d+/)?.[0];
-          const exitCode = exitCodeText === undefined ? 0 : Number(exitCodeText);
+          if (exitCodeText === undefined) {
+            return;
+          }
+          const exitCode = Number(exitCodeText);
           if (exitCode === 0) {
             settle();
           } else {
@@ -966,12 +984,7 @@ export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
         }));
       }
 
-      const command = [
-        `${quoteCshArg(defaultConfigLog.scriptPath)} ${quoteCshArg(defaultConfigLog.designTree)} ${quoteCshArg(defaultConfigLog.normTable)} | tee ${quoteCshArg(logFile)}`,
-        'set dft_ide_default_config_status = $status',
-        `echo "${marker}$dft_ide_default_config_status"`,
-      ].join('; ');
-
+      const command = getFlowTransformCommand(transformLog, marker);
       void waitForDefaultConfigTerminalReady(terminal).then(() => {
         terminal.sendText(command);
       });
@@ -981,7 +994,30 @@ export async function genDefaultConfigs(defaultConfigLog: DefaultConfigLog) {
     activeDefaultConfigRuns.delete(runKey);
     throw error;
   }
-  return defaultConfigLog;
+  return transformLog;
+}
+
+function getFlowTransformCommand(transformLog: TransformLog, marker: string): string {
+  switch (transformLog.flow) {
+    case 'verification':
+      if (!transformLog.landerAssistant) {
+        throw new Error('请选择 LANDER_ASSISTANT.json。');
+      }
+      return [
+        `${quoteCshArg(transformLog.scriptPath)} ${quoteCshArg(transformLog.landerAssistant)} | tee ${quoteCshArg(transformLog.logFile!)}`,
+        'set dft_ide_default_config_status = $status',
+        `echo "${marker}$dft_ide_default_config_status"`,
+      ].join('; ');
+    default:
+      if (!transformLog.designTree || !transformLog.normTable || !transformLog.module) {
+        throw new Error('缺少 design tree、归一化表格或 module。');
+      }
+      return [
+        `${quoteCshArg(transformLog.scriptPath)} ${quoteCshArg(transformLog.designTree)} ${quoteCshArg(transformLog.normTable)} ${quoteCshArg(transformLog.module)} | tee ${quoteCshArg(transformLog.logFile!)}`,
+        'set dft_ide_default_config_status = $status',
+        `echo "${marker}$dft_ide_default_config_status"`,
+      ].join('; ');
+  }
 }
 
 export async function isDirectoryExists(dir: string) {
@@ -1000,4 +1036,33 @@ export async function copyDirectory(srcDir: string, destDir: string) {
       console.error('stage 复制目录失败:', error);
       throw error;
   }
+}
+
+export async function getNormalizeTablePath(flow: string): Promise<{ designTree: string; normTable: string }> {
+  const normalizedFlow = normalizeProjectRepo(flow);
+  if (!normalizedFlow || normalizedFlow === 'data') {
+    throw new Error(`不支持的转换流程：${flow}`);
+  }
+
+  const filePath = resolveConfigPath('common');
+  if (!filePath) {
+    throw new Error('未找到 Common 配置文件。');
+  }
+
+  const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
+  const parsed: unknown = JSON.parse(Buffer.from(bytes).toString('utf-8'));
+  if (!isRecord(parsed)) {
+    throw new Error('Common 配置格式无效。');
+  }
+
+  const flowConfig = isRecord(parsed[normalizedFlow]) ? parsed[normalizedFlow] : undefined;
+  const designTree = getSyncedArtifactPath(parsed, normalizedFlow, 'designTree')
+    ?? (typeof flowConfig?.designTree === 'string' ? flowConfig.designTree.trim() : '');
+  const normTable = getSyncedArtifactPath(parsed, normalizedFlow, 'normTable')
+    ?? (typeof flowConfig?.normTable === 'string' ? flowConfig.normTable.trim() : '');
+
+  if (!designTree || !normTable) {
+    throw new Error(`Common 配置中缺少 ${normalizedFlow} 的 design tree 或归一化表格。`);
+  }
+  return { designTree, normTable };
 }

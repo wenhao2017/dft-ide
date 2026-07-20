@@ -41,6 +41,11 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+export function parseModuleString(value: unknown): string[] {
+  const match = String(value ?? '').match(/:(.*)/);
+  return match ? match[1].trim().split(/\s+/) : [];
+}
+
 export const getFileNameAndExtension = (filePath: string) => {
   const normalizedPath = filePath.replace(/\\/g, '/');
   const fileName = normalizedPath.split('/').pop();

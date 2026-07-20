@@ -6,25 +6,13 @@
  * 单向的通知（如 openFile）直接用 vscode.postMessage。
  */
 
-import vscode from './vscode'
-import { DftProject } from '../services/projectService'
-import { z } from 'zod'
-import type { LanderStep } from '../components/verification/mode/types'
-import { CommonSyncArtifact } from '../../services/commonSyncArtifacts'
-export interface DefaultConfigLog {
-  requestId?: string
-  flow: 'hibist' | 'sailor' | 'verification'
-  scriptPath: string
-  designTree: string
-  normTable: string
-  timemilles?: string
-  timestamp?: string
-  time?: string
-  logFile?: string
-  success?: boolean
-}
+import vscode from './vscode';
+import type { DftProject } from '../services/projectService';
+import { z } from 'zod';
+import type { LanderStep } from '../../services/landerPipelineService';
+import type { CommonSyncArtifact } from '../../services/commonSyncArtifacts';
 
-let _reqId = 0
+let _reqId = 0;
 /** 等待响应的 Promise 回调池：key = `{command}Response:{requestId}` */
 const pendingCallbacks = new Map<
   string,
@@ -553,26 +541,22 @@ export async function deleteFlowConfigFile(
 }
 
 export async function generateDefaultFlowConfigs(
-  flow: 'hibist' | 'sailor' | 'verification',
-  scriptPath: string,
-): Promise<{
-  success: boolean
-  configs: FlowConfigFileInfo[]
-  configsDir?: string
-  created: number
-  error?: string
-}> {
-  const res = await ipcRequest('generateDefaultFlowConfigs', {
-    flow,
-    scriptPath,
-  })
-  return res as unknown as {
-    success: boolean
-    configs: FlowConfigFileInfo[]
-    configsDir?: string
-    created: number
-    error?: string
-  }
+  flow: 'hibist' | 'sailor', module: string, stage?: string
+): Promise<TransformResponse> {
+  const res = await ipcRequest('generateDefaultFlowConfigs', { flow, module, stage });
+  return res as unknown as TransformResponse;
+}
+
+export async function generateLanderConfigs(
+  stage: string,
+  landerAssistant: string
+): Promise<TransformResponse> {
+  const res = await ipcRequest('generateLanderConfigs', {
+    flow: 'verification',
+    stage,
+    landerAssistant,
+  });
+  return res as unknown as TransformResponse;
 }
 
 export interface LocalConfigInfo {
@@ -972,12 +956,40 @@ export async function openVsCodeDiff(options: {
   return res as any
 }
 
-export async function fetchDefaultConfigLogs(
-  flow: 'hibist' | 'sailor' | 'verification',
-): Promise<{ success: boolean; history: DefaultConfigLog[] }> {
-  const res = await ipcRequest('fetchDefaultConfigLogs', { flow })
-  return res as unknown as { success: boolean; history: DefaultConfigLog[] }
+export interface TransformLog {
+  requestId?: string;
+  flow: 'hibist' | 'sailor' | 'verification';
+  scriptPath: string;
+  configPath: string;
+  designTree?: string;
+  normTable?: string;
+  module?: string;
+  stage?: string;
+  landerAssistant?: string;
+  timemilles?: string;
+  timestamp?: string;
+  time?: string;
+  logFile?: string;
+  success?: boolean;
 }
+
+export interface TransformResponse {
+  success: boolean;
+  result?: TransformLog;
+  error?: string;
+}
+
+export async function fetchTransformLogs(
+  flow: 'hibist' | 'sailor' | 'verification',
+  stage?: string
+): Promise<{ success: boolean; history: TransformLog[]; error?: string }> {
+  const res = await ipcRequest('fetchTransformLogs', { flow, stage });
+  return res as unknown as { success: boolean; history: TransformLog[]; error?: string };
+}
+
+// Compatibility for the existing history component and saved-flow surface.
+export type DefaultConfigLog = TransformLog;
+export const fetchDefaultConfigLogs = fetchTransformLogs;
 
 export async function appendLanderStage(
   flow: 'verification',
@@ -1023,4 +1035,11 @@ export async function getLanderModePipelines(
   return ipcRequest<GetLanderModePipelinesResult>('getLanderModePipelines', {
     preMode,
   })
+}
+
+export async function getModules(
+  flow: 'hibist' | 'sailor'
+): Promise<{ success: boolean; modules: string[]; error?: string }> {
+  const res = await ipcRequest('getModules', { flow });
+  return res as unknown as { success: boolean; modules: string[]; error?: string };
 }

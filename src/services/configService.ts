@@ -1,18 +1,17 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { pathExists, readJsonFile, isRecord, getFileNameAndExtension, getDirectory } from './utils';
-import { obsTrackingService } from './obsTrackingService';
+import { pathExists, readJsonFile, isRecord, getFileNameAndExtension } from './utils';
 import {
   resolveConfigPath,
   resolveProjectRepoRoot,
   getFlowConfigsDirectory,
   ensureLocalConfigDirectory,
-  normalizeConfigFlow,
   getSyncedArtifactPath,
   resolveProjectRoot,
-  DefaultConfigLog,
+  type TransformLog,
 } from './workspaceService';
+import { obsTrackingService } from './obsTrackingService';
 
 export interface FlowConfigFileInfo {
   key: string;
@@ -156,20 +155,61 @@ export async function deleteFlowConfigFile(
   await vscode.workspace.fs.delete(vscode.Uri.file(resolveCfgPath(configsDir, moduleName)));
 }
 
-export async function downLoadObsScripts(flow: 'hibist' | 'sailor' | 'verification'): Promise<string> {
-  const configsDir = await getFlowConfigsDirectory(flow);
+interface ObsScriptEntrance {
+  dir: string;
+  fileName: string;
+}
+
+interface ObsScriptPathConfig {
+  dir?: string;
+  files?: unknown[];
+  entrance?: ObsScriptEntrance;
+}
+
+export async function downLoadObsScripts(
+  context: vscode.ExtensionContext,
+  flow: 'hibist' | 'sailor' | 'verification',
+  stage?: string
+): Promise<[configPath: string, scriptPath: string] | []> {
+  const configsDir = await getFlowConfigsDirectory(flow, stage);
   await ensureLocalConfigDirectory(configsDir);
 
   // 1. 去特定空间下载转换脚本（具体空间与路径在 package.json 预留，可留空后填）
   const obsConfig = vscode.workspace.getConfiguration('dftIde.obs');
   const scriptSpace = obsConfig.get<string>('scriptSpace', '').trim();
-  const scriptPaths = obsConfig.get<Record<string, Record<string, any>>>('scriptPaths', {});
-  const remoteScriptPath = scriptPaths?.[flow]?.dir.trim() || '';
-  const remoteScriptFiles = scriptPaths?.[flow]?.files || [];
+  const scriptPaths = obsConfig.get<Record<string, ObsScriptPathConfig>>('scriptPaths', {});
+  const flowConfig = scriptPaths[flow];
+  const remoteScriptPath = flowConfig?.dir?.trim() ?? '';
+  const remoteScriptFiles = flowConfig?.files ?? [];
+  const entrance = flowConfig?.entrance ?? {
+    dir: 'scripts/transform',
+    fileName: flow === 'verification' ? 'run_gen_lander_cfg' : 'run_gen_cfg',
+  };
 
   if (scriptSpace && remoteScriptPath) {
     try {
-      for (const filename of remoteScriptFiles){
+      if (!entrance?.dir?.trim() || !entrance.fileName?.trim()) {
+        throw new Error(`Missing scriptPaths.${flow}.entrance configuration.`);
+      }
+      if (path.basename(entrance.fileName) !== entrance.fileName) {
+        throw new Error(`Invalid transform entrance file name: ${entrance.fileName}`);
+      }
+
+      const extensionRoot = path.resolve(context.extensionPath);
+      const sourceScript = path.resolve(extensionRoot, entrance.dir, entrance.fileName);
+      const sourceRelativePath = path.relative(extensionRoot, sourceScript);
+      if (sourceRelativePath.startsWith('..') || path.isAbsolute(sourceRelativePath)) {
+        throw new Error(`Transform entrance must stay inside the extension: ${sourceScript}`);
+      }
+      const targetPath = path.join(configsDir, entrance.fileName);
+      await fs.promises.copyFile(sourceScript, targetPath);
+      try {
+        await fs.promises.chmod(targetPath, 0o755);
+      } catch (error) {
+        console.warn(`[DFT IDE] Transform entrance copied but chmod failed: ${targetPath}`, error);
+      }
+
+      for (const filename of remoteScriptFiles) {
         if (typeof filename !== 'string' || path.basename(filename) !== filename) {
           throw new Error(`Invalid OBS script file name: ${String(filename)}`);
         }
@@ -183,16 +223,15 @@ export async function downLoadObsScripts(flow: 'hibist' | 'sailor' | 'verificati
         } catch (error) {
           console.warn(`[DFT IDE] OBS script downloaded but chmod failed: ${localScriptPath}`, error);
         }
-        console.log(`[DFT IDE] OBS script downloaded from [${scriptSpace}] to: ${localScriptPath}`);
       }
-      return configsDir;
+      return [configsDir, targetPath];
     } catch (err) {
       console.warn(`[DFT IDE] 从 OBS 空间 [${scriptSpace}] 下载转换脚本失败:`, err);
-      return '';
+      return [];
     }
   } else {
     console.info(`[DFT IDE] 尚未配置 dftIde.obs.scriptSpace 或 scriptPaths.${flow}，预留空项待填`);
-    return '';
+    return [];
   }
 }
 
@@ -329,60 +368,50 @@ export function collectModuleNames(value: unknown, modules: Set<string>): void {
   });
 }
 
-export async function saveDefaultConfigLogs(defaultConfigLog: DefaultConfigLog) {
-  try{
-    const flow = defaultConfigLog.flow;
-    const configsDir = await getFlowConfigsDirectory(flow);
+export async function saveTransformLogs(transformLog: TransformLog, stage?: string): Promise<TransformLog> {
+  const configsDir = await getFlowConfigsDirectory(transformLog.flow, stage);
+  const timestampKey = transformLog.timemilles ?? Date.now().toString();
+  const status = transformLog.logFile ? await checkTransformStatus(transformLog.logFile) : false;
+  const savedLog: TransformLog = {
+    ...transformLog,
+    scriptPath: await copyLogFile(transformLog.scriptPath, timestampKey, configsDir),
+    designTree: transformLog.designTree
+      ? await copyLogFile(transformLog.designTree, timestampKey, configsDir)
+      : undefined,
+    normTable: transformLog.normTable
+      ? await copyLogFile(transformLog.normTable, timestampKey, configsDir)
+      : undefined,
+    landerAssistant: transformLog.landerAssistant
+      ? await copyLogFile(transformLog.landerAssistant, timestampKey, configsDir)
+      : undefined,
+    success: status,
+  };
 
-    const scriptPath = await copyLogFile(defaultConfigLog.scriptPath, defaultConfigLog.timemilles || '', configsDir);
-    const designTree = await copyLogFile(defaultConfigLog.designTree, defaultConfigLog.timemilles || '', configsDir);
-    const normTable = await copyLogFile(defaultConfigLog.normTable, defaultConfigLog.timemilles || '', configsDir);
-    const success = await checkExecuteStatus(defaultConfigLog.logFile || '');
-    const maxHistoryCounts = vscode.workspace.getConfiguration('dftIde').get<number>('maxHistoryCounts', 10);
+  const maxHistoryCounts = Math.max(
+    1,
+    vscode.workspace.getConfiguration('dftIde').get<number>('maxHistoryCounts', 10)
+  );
+  const filePath = resolveCfgPath(configsDir, 'history');
+  await ensureLocalConfigDirectory(path.dirname(filePath));
 
-    const filePath = resolveCfgPath(configsDir, "history");
-    let content = [
-      `{flow: "${flow}"`,
-      `scriptPath: "${scriptPath.replace(/\\/g, '/')}"`,
-      `designTree: "${designTree.replace(/\\/g, '/')}"`,
-      `normTable: "${normTable.replace(/\\/g, '/')}"`,
-      `logFile: "${defaultConfigLog.logFile?.replace(/\\/g, '/')}"`,
-      `time: "${defaultConfigLog.timestamp}"`,
-      `success: ${success}}`,
-    ].join(',');
-    if (await pathExists(filePath)) {
-      const data = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
-      let existingContent = Buffer.from(data).toString();
-      const rows = existingContent.split('\n');
-      if (rows.length < maxHistoryCounts) {
-        content +=  "\n" + existingContent;
-      } else {
-        const removed = rows.pop();
-        await removeLogFile(removed || '');
-        rows.forEach(row => {
-          content += "\n" + row;
-        });
-      }
-    }
-    await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), Buffer.from(content, 'utf-8'));
-    return { defaultConfigLog };
-  }catch (error) {
-    vscode.window.showErrorMessage(`${(error as Error).message}`);
-    return undefined;
+  const existing = await readTransformLogFile(filePath);
+  const retained = [savedLog, ...existing].slice(0, maxHistoryCounts);
+  for (const removed of existing.slice(Math.max(0, maxHistoryCounts - 1))) {
+    await removeLogFiles(removed);
   }
+  const content = retained.map((item) => JSON.stringify(item)).join('\n');
+  await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), Buffer.from(content, 'utf-8'));
+  return savedLog;
 }
 
 export async function copyLogFile(filePath: string, timemilles: string, configsDir: string): Promise<string> {
-  try {
-    const { name, extension } = getFileNameAndExtension(filePath);
-    const fullName = `${configsDir}/.logs/${name}_${timemilles}${extension ? '.' + extension : ''}`;
-    await vscode.workspace.fs.copy(vscode.Uri.file(filePath),
-      vscode.Uri.file(fullName));
-    return fullName;
-  } catch (error) {
-    vscode.window.showErrorMessage(`${(error as Error).message}`);
-    return '';
+  const { name, extension } = getFileNameAndExtension(filePath);
+  if (!name) {
+    throw new Error(`Invalid transform log source path: ${filePath}`);
   }
+  const fullName = path.join(configsDir, '.logs', `${name}_${timemilles}${extension ? `.${extension}` : ''}`);
+  await vscode.workspace.fs.copy(vscode.Uri.file(filePath), vscode.Uri.file(fullName));
+  return fullName;
 }
 
 export async function moveLogFile(filePath: string, configsDir: string): Promise<string> {
@@ -398,46 +427,78 @@ export async function moveLogFile(filePath: string, configsDir: string): Promise
   }
 }
 
-export async function removeLogFile(content: string): Promise<void> {
-  try {
-    const obj: DefaultConfigLog = new Function("return " + `${content}`)();
-    await vscode.workspace.fs.delete(vscode.Uri.file(obj.scriptPath), { recursive: false });
-    await vscode.workspace.fs.delete(vscode.Uri.file(obj.designTree), { recursive: false });
-    await vscode.workspace.fs.delete(vscode.Uri.file(obj.normTable), { recursive: false });
-    await vscode.workspace.fs.delete(vscode.Uri.file(obj.logFile || ''), { recursive: false });
-  } catch (error) {}
+async function removeLogFiles(log: TransformLog): Promise<void> {
+  const paths = [log.scriptPath, log.designTree, log.normTable, log.landerAssistant, log.logFile]
+    .filter((value): value is string => typeof value === 'string' && Boolean(value));
+  for (const filePath of paths) {
+    try {
+      await vscode.workspace.fs.delete(vscode.Uri.file(filePath), { recursive: false });
+    } catch {
+      // History cleanup is best-effort.
+    }
+  }
 }
 
-export async function checkExecuteStatus(logFile: string): Promise<boolean> {
+export async function checkTransformStatus(logFile: string): Promise<boolean> {
   try {
     const document = await vscode.workspace.openTextDocument(vscode.Uri.file(logFile));
     const text = document.getText();
     const pattern = /\berror\b|\bexception\b/gi;
     const matches = text.match(pattern);
-    if (matches && matches.length > 0) {
-      return false;
-    } else {
-        return true;
-    }
+    return matches && matches.length > 0 ? false : true;
   } catch (error) {
     vscode.window.showErrorMessage(`${(error as Error).message}`);
     return false;
   }
 }
 
-export async function getDefaultConfigLogs(flow: 'hibist' | 'sailor' | 'verification') {
-  const configsDir = await getFlowConfigsDirectory(flow);
+export async function fetchTransformLogs(
+  flow: 'hibist' | 'sailor' | 'verification',
+  stage?: string
+): Promise<TransformLog[]> {
+  const configsDir = await getFlowConfigsDirectory(flow, stage);
   await ensureLocalConfigDirectory(configsDir);
-  const filePath = resolveCfgPath(configsDir, "history");
+  const filePath = resolveCfgPath(configsDir, 'history');
+  return readTransformLogFile(filePath);
+}
 
-  let history: DefaultConfigLog[] = [];
-  if (await pathExists(filePath)) {
-    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
-    for (let i = 0; i < document.lineCount; i++) {
-      const line = document.lineAt(i);
-      const obj: DefaultConfigLog = new Function("return " + `${line.text}`)();
-      if(obj.flow) history.push(obj);
+async function readTransformLogFile(filePath: string): Promise<TransformLog[]> {
+  if (!await pathExists(filePath)) {
+    return [];
+  }
+  const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+  const logs: TransformLog[] = [];
+  for (let i = 0; i < document.lineCount; i += 1) {
+    const text = document.lineAt(i).text.trim();
+    if (!text) {
+      continue;
+    }
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (isRecord(parsed) && typeof parsed.flow === 'string' && typeof parsed.scriptPath === 'string') {
+        logs.push(parsed as unknown as TransformLog);
+      }
+    } catch {
+      const legacy = parseLegacyTransformLog(text);
+      if (legacy) {
+        logs.push(legacy);
+      }
     }
   }
-  return history;
+  return logs;
+}
+
+function parseLegacyTransformLog(text: string): TransformLog | undefined {
+  const values: Record<string, string | boolean> = {};
+  const fieldPattern = /(flow|scriptPath|configPath|designTree|normTable|module|stage|timemilles|timestamp|time|logFile|success)\s*:\s*(?:"([^"]*)"|(true|false))/g;
+  for (const match of text.matchAll(fieldPattern)) {
+    values[match[1]] = match[2] ?? match[3] === 'true';
+  }
+  if (
+    (values.flow !== 'hibist' && values.flow !== 'sailor' && values.flow !== 'verification')
+    || typeof values.scriptPath !== 'string'
+  ) {
+    return undefined;
+  }
+  return values as unknown as TransformLog;
 }

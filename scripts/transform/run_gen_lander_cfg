@@ -1,0 +1,23 @@
+#!/bin/csh -f
+
+if ($#argv != 1) then
+    echo "Usage: $0 <LANDER_ASSISTANT.json>"
+    exit 1
+endif
+
+set lander_assistant = "$1"
+if (! -f "$lander_assistant") then
+    echo "Error: LANDER_ASSISTANT file not found: $lander_assistant"
+    exit 1
+endif
+
+tar -zxvf lander_env.tar.gz
+if ($status != 0) exit $status
+
+cp "$lander_assistant" lander_env/LANDER_ASSISTANT.json
+if ($status != 0) exit $status
+
+cd lander_env
+python lander_assistant_2_0.py
+if ($status != 0) exit $status
+python lander_cfg_mode_2_0.py

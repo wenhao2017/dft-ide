@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
+import * as XLSX from 'xlsx';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { submitJob, queryJobStatus, getDonauResources } from './services/donauService';
@@ -50,7 +51,9 @@ import {
   ensureLocalConfigDirectory,
   isDirectoryExists,
   copyDirectory,
-  genDefaultConfigs,
+  getNormalizeTablePath,
+  doConfigTransform,
+  normalizeStageName,
 } from './services/workspaceService';
 
 // Import config services
@@ -61,10 +64,10 @@ import {
   renameFlowConfigFile,
   deleteFlowConfigFile,
   mergeConfigFile,
-  saveDefaultConfigLogs,
-  getDefaultConfigLogs,
+  fetchTransformLogs,
   readConfig,
   downLoadObsScripts,
+  saveTransformLogs,
 } from './services/configService';
 
 // Import design tree services
@@ -110,6 +113,7 @@ import {
   openObsReadonlyDocument,
   cleanupObsReadonlyDocument,
 } from './services/obsPreviewService';
+import { parseModuleString } from './services/utils';
 
 const execFileAsync = promisify(execFile);
 
@@ -1577,52 +1581,99 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'generateDefaultFlowConfigs': {
         const requestId: string = msg.requestId;
         const flow = normalizeConfigFlow(msg.flow);
-        const scriptPath = msg.scriptPath;
+        const module = typeof msg.module === 'string' ? msg.module.trim() : '';
+        const stage = typeof msg.stage === 'string' ? msg.stage.trim() : undefined;
         try {
-          if (!flow) {
+          if (!flow || flow === 'verification') {
             throw new Error('Unsupported flow for config files.');
           }
-          if (!scriptPath) {
-            throw new Error('Unsupported flow for script files.');
+          if (!module) {
+            throw new Error('请选择至少一个 module。');
           }
           // 根据flow 获取归一化表格文件和design tree, 归一化表格配置都在common.json中，所以传参'common'
-          const filePath = resolveConfigPath('common');
-          if (!filePath) {
-            currentPanel?.webview.postMessage({
-              command: 'generateDefaultFlowConfigsResponse', requestId, success: false, error: '获取归一化表格和designTree配置失败'
-            });
-            return;
-          }
-
-          const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
-          const data = JSON.parse(Buffer.from(bytes).toString('utf-8'));
-          if(!data[flow]){
-            currentPanel?.webview.postMessage({
-              command: 'generateDefaultFlowConfigsResponse', requestId, success: false, error: '获取归一化表格和designTree失败'
-            });
-            return;
-          }
-          const designTree = data[flow].designTree;
-          const normTable = data[flow].normTable;
+          const files = await getNormalizeTablePath(flow);
+          const designTree = files.designTree;
+          const normTable = files.normTable;
           // 从obs获取python脚本
-          const configDirectory = await downLoadObsScripts(flow);
-          if (!configDirectory) {
+          const [configPath, scriptPath] = await downLoadObsScripts(context, flow, stage);
+          if (!configPath || !scriptPath) {
             currentPanel?.webview.postMessage({
               command: 'generateDefaultFlowConfigsResponse', requestId, success: false, error: '从obs获取py脚本失败'
             });
             return;
           }
-          const configLog = await genDefaultConfigs({requestId, flow, scriptPath, configDirectory, designTree ,normTable});
-          const result = await saveDefaultConfigLogs(configLog);
+          const transformLog = await doConfigTransform({
+            requestId,
+            flow,
+            scriptPath,
+            configPath,
+            designTree,
+            normTable,
+            module,
+            stage,
+          });
+          const result = await saveTransformLogs(transformLog, stage);
+          if (!result.success) {
+            throw new Error(`配置转换日志检测到错误：${result.logFile ?? 'unknown log'}`);
+          }
           currentPanel?.webview.postMessage({
             command: 'generateDefaultFlowConfigsResponse',
             requestId,
             success: true,
-            ...result
+            result,
           });
         } catch (err) {
           currentPanel?.webview.postMessage({
             command: 'generateDefaultFlowConfigsResponse',
+            requestId,
+            success: false,
+            error: String(err)
+          });
+        }
+        return;
+      }
+
+      case 'generateLanderConfigs': {
+        const requestId: string = msg.requestId;
+        const flow = normalizeConfigFlow(msg.flow);
+        const landerAssistant = typeof msg.landerAssistant === 'string' ? msg.landerAssistant.trim() : '';
+        try {
+          if (flow !== 'verification') {
+            throw new Error('Unsupported flow for config files.');
+          }
+          const stage = normalizeStageName(msg.stage);
+          if (!landerAssistant) {
+            throw new Error('请选择 LANDER_ASSISTANT.json。');
+          }
+          // 从obs获取python脚本
+          const [configPath, scriptPath] = await downLoadObsScripts(context, flow, stage);
+          if (!configPath || !scriptPath) {
+            currentPanel?.webview.postMessage({
+              command: 'generateLanderConfigsResponse', requestId, success: false, error: '从obs获取py脚本失败'
+            });
+            return;
+          }
+          const transformLog = await doConfigTransform({
+            requestId,
+            flow,
+            scriptPath,
+            configPath,
+            stage,
+            landerAssistant,
+          });
+          const result = await saveTransformLogs(transformLog, stage);
+          if (!result.success) {
+            throw new Error(`Verification 配置转换日志检测到错误：${result.logFile ?? 'unknown log'}`);
+          }
+          currentPanel?.webview.postMessage({
+            command: 'generateLanderConfigsResponse',
+            requestId,
+            success: true,
+            result
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'generateLanderConfigsResponse',
             requestId,
             success: false,
             error: String(err)
@@ -2069,18 +2120,23 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
-      case 'fetchDefaultConfigLogs': {
+      case 'fetchTransformLogs': {
         const requestId: string = msg.requestId;
         try {
-          const history = await getDefaultConfigLogs(msg.flow);
+          const flow = normalizeConfigFlow(msg.flow);
+          if (!flow) {
+            throw new Error('Unsupported flow for transform history.');
+          }
+          const stage = msg.stage === undefined ? undefined : normalizeStageName(msg.stage);
+          const history = await fetchTransformLogs(flow, stage);
           currentPanel?.webview.postMessage({
-            command: 'fetchDefaultConfigLogsResponse', requestId,
+            command: 'fetchTransformLogsResponse', requestId,
             success: true,
             history
           });
         } catch (err) {
           currentPanel?.webview.postMessage({
-            command: 'fetchDefaultConfigLogsResponse', requestId,
+            command: 'fetchTransformLogsResponse', requestId,
             success: false, error: String(err)
           });
         }
@@ -2090,19 +2146,23 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'appendLanderStage': {
         const requestId: string = msg.requestId;
         try {
-          const repoRoot = await resolveProjectRepoRoot(msg.flow);
-          const addStage = path.join(repoRoot, msg.addStage);
+          if (normalizeConfigFlow(msg.flow) !== 'verification') {
+            throw new Error('Unsupported flow for stages.');
+          }
+          const repoRoot = await resolveProjectRepoRoot('verification');
+          const addStageName = normalizeStageName(msg.addStage);
+          const addStage = path.join(repoRoot, addStageName);
           const addExists = await isDirectoryExists(addStage);
           if (addExists){
             currentPanel?.webview.postMessage({
               command: 'appendLanderStageResponse', requestId,
-              success: false, error: `stage ${msg.addStage} aready exists`
+              success: false, error: `stage ${addStageName} already exists`
             });
             return;
           }
           await ensureLocalConfigDirectory(addStage);
           if (msg.extendStage) {
-            const extendStage = path.join(repoRoot, msg.extendStage);
+            const extendStage = path.join(repoRoot, normalizeStageName(msg.extendStage));
             const extendExists = await isDirectoryExists(extendStage);
             if (extendExists){
               await copyDirectory(extendStage, addStage);
@@ -2114,7 +2174,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           });
         } catch (err) {
           currentPanel?.webview.postMessage({
-            command: 'initLanderStageResponse', requestId,
+            command: 'appendLanderStageResponse', requestId,
             success: false, error: String(err)
           });
         }
@@ -2124,7 +2184,10 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'getLanderStages': {
         const requestId: string = msg.requestId;
         try {
-          const repoRoot = await resolveProjectRepoRoot(msg.flow);
+          if (normalizeConfigFlow(msg.flow) !== 'verification') {
+            throw new Error('Unsupported flow for stages.');
+          }
+          const repoRoot = await resolveProjectRepoRoot('verification');
           const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(repoRoot));
           const stages = entries
                 .filter(([name, type]) => (type === vscode.FileType.Directory && !name.startsWith('.')))
@@ -2146,8 +2209,11 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'removeLanderStage': {
         const requestId: string = msg.requestId;
         try {
-          const repoRoot = await resolveProjectRepoRoot(msg.flow);
-          const stage = path.join(repoRoot, msg.stage);
+          if (normalizeConfigFlow(msg.flow) !== 'verification') {
+            throw new Error('Unsupported flow for stages.');
+          }
+          const repoRoot = await resolveProjectRepoRoot('verification');
+          const stage = path.join(repoRoot, normalizeStageName(msg.stage));
           await vscode.workspace.fs.delete(vscode.Uri.file(stage), { recursive: true });
           currentPanel?.webview.postMessage({
             command: 'removeLanderStageResponse', requestId,
@@ -2157,6 +2223,48 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           currentPanel?.webview.postMessage({
             command: 'removeLanderStageResponse', requestId,
             success: false, error: String(err)
+          });
+        }
+        return;
+      }
+
+      case 'getModules': {
+        const requestId: string = msg.requestId;
+        const flow = normalizeConfigFlow(msg.flow);
+        try {
+          if (!flow) {
+            throw new Error('Unsupported repository.');
+          }
+          const files = await getNormalizeTablePath(flow);
+          const normTable = files.normTable;
+          const fileBuffer = fs.readFileSync(normTable);
+          const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+
+          const modules = new Set<string>();
+          const cellAddress = XLSX.utils.encode_cell({ r: 0, c: 0 });
+          for(const sheetName of workbook.SheetNames){
+            const worksheet = workbook.Sheets[sheetName];
+            const cell = worksheet[cellAddress];
+            if (cell && cell.v !== undefined) {
+              parseModuleString(cell.v).forEach((moduleName) => modules.add(moduleName));
+            } else {
+              vscode.window.showInformationMessage(
+                  `Sheet: [${sheetName}] | 坐标: ${cellAddress} | 内容为空`
+              );
+            }
+          }
+          currentPanel?.webview.postMessage({
+            command: 'getModulesResponse',
+            requestId,
+            success: true,
+            modules: [...modules]
+          });
+        } catch (error) {
+          currentPanel?.webview.postMessage({
+            command: 'getModulesResponse',
+            requestId,
+            success: false,
+            error: error instanceof Error ? error.message : String(error)
           });
         }
         return;

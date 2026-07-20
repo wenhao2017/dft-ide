@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Badge, Button, Card, Form, message, Modal, Select, Space, Spin, } from 'antd';
+import { Button, Form, Space, Spin, Modal, Typography, Divider, message } from 'antd';
 import {
   BranchesOutlined,
-  FileAddOutlined,
+  CaretRightOutlined,
   HistoryOutlined,
   RightOutlined,
   SaveOutlined,
@@ -10,87 +10,36 @@ import {
 import { useVscodePath } from '../../hooks/useVscodePath';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 import PathInput from '../shared/PathInput';
-import { appendLanderStage, generateDefaultFlowConfigs, getGitInfo, getLanderStages, removeLanderStage, RepoKey } from '../../utils/ipc';
+import { getGitInfo, type RepoKey, appendLanderStage, removeLanderStage, getLanderStages, generateLanderConfigs } from '../../utils/ipc';
 import useWizardStore from '../../store/wizardStore';
-import CollapsibleSection from '../shared/CollapsibleSection';
-import DefaultConfgHistory from '../design/DefaultConfgHistory';
-import StageSelect from './StageSelect';
+import TransformHistory from '../shared/TransformHistory';
+import StageSelect from '../shared/TransformStageSelect';
+
+const { Title } = Typography;
 
 interface Props {
   onNext?: () => void;
+  moduleKey?: string;
+  category?: string;
 }
 
-const templateOptions = [
-  {
-    value: 1,
-    label:'联接'
-  },
-  {
-    value: 2,
-    label:'无线终端'
-  },
-  {
-    value: 3,
-    label:'图灵'
-  },
-];
-
-const modeOptions = [
-  {
-    value: 1,
-    label:'merge_3d流程'
-  },
-  {
-    value: 2,
-    label:'MBIST_SUB模式'
-  },
-  {
-    value: 3,
-    label: 'MBIST_TOP模式'
-  },
-  {
-    value: 4,
-    label: 'MBIST_TOP_REPAIR模式'
-  },
-  {
-    value: 5,
-    label: 'ATPG验证'
-  },
-  {
-    value: 6,
-    label: 'IP验证'
-  },
-  {
-    value: 7,
-    label: 'JTAG验证'
-  },
-  {
-    value: 8,
-    label: 'FML验证'
-  },
-];
-
-const pageStyle: React.CSSProperties = {
-  padding: 4,
-  color: 'var(--vscode-foreground)',
-};
-
-const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
-  const project = useVscodePath();
-  const commandCfg = useVscodePath();
-
+const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey }) => {
+  const flowKey = 'verification';
   const [currentBranch, setCurrentBranch] = useState<string>('');
   const [stage, setStage] = useState<string>('');
-  const [template, setTemplate] = useState<number>();
+  const project = useVscodePath();
+  const landerAssistant = useVscodePath();
+
+  const [repoRoot, setRepoRoot] = useState<string>('');
   const [generating, setGenerating] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [repoRoot, setRepoRoot] = useState<string>('');
   const updatePayload = useWizardStore((state) => state.updatePayload);
 
-  const { savedData, loading, saving, hasUnsaved, handleSave } = useFlowConfig('verification');
+  const { savedData, loading, saving, handleSave } =
+    useFlowConfig(moduleKey ? `${flowKey}/${moduleKey}/config` : flowKey);
 
   useEffect(() => {
-    getGitInfo('verification' as RepoKey)
+    getGitInfo(flowKey as RepoKey)
       .then((res) => {
         if (res && res.branch) {
           const branchName = res.branch as string;
@@ -102,57 +51,80 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
         }
       })
       .catch(() => setCurrentBranch('Git Error'));
-  }, [updatePayload]);
+  }, [updatePayload, flowKey]);
 
   useEffect(() => {
+    clearForm();
     if (!savedData) return;
     const source = (savedData.step1 as Record<string, unknown> | undefined) ?? savedData;
     if (source.project) project.setValue(String(source.project));
-    if (source.commandCfg) commandCfg.setValue(String(source.commandCfg));
+    if (source.landerAssistant) landerAssistant.setValue(String(source.landerAssistant));
     if (source.stage) setStage(String(source.stage));
-    if (source.template) setTemplate(Number(source.template));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedData]);
+  }, [savedData, moduleKey]);
 
-  const collectFormData = () => ({
-    project: project.value,
-    stage,
-    template,
-    commandCfg: commandCfg.value,
-  });
+  const collectFormData = () => {
+    const source = savedData
+      ? ((savedData.step1 as Record<string, unknown> | undefined) ?? savedData)
+      : {};
+    return {
+      ...source,
+      project: project.value,
+      landerAssistant: landerAssistant.value,
+      stage,
+    };
+  };
 
   const onSave = () => {
     const data = collectFormData();
-    void handleSave({ moduleKey: 'verification', step1: data });
+    if (!moduleKey) {
+      void handleSave(data);
+      return;
+    }
+    void handleSave({ moduleKey, step1: data });
+  };
+
+  const clearForm = () => {
+    project.setValue("");
+    landerAssistant.setValue("");
+    setStage("");
   };
 
   const onGenerateDefaults = async () => {
+    if (!stage) {
+      message.warning('请先选择 stage。');
+      return;
+    }
+    if (!landerAssistant.value) {
+      message.warning('请选择 LANDER_ASSISTANT.json。');
+      return;
+    }
     setGenerating(true);
     try {
-      const result = await generateDefaultFlowConfigs('verification', '');
+      const result = await generateLanderConfigs(stage, landerAssistant.value);
       if (!result.success) {
-        message.error(result.error ?? '生成默认配置失败');
-        return;
+        throw new Error(result.error ?? 'Verification 配置转换失败');
       }
-      message.success(`生成默认配置完成`);
+      message.success('Verification 配置转换完成。');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
     } finally {
       setGenerating(false);
     }
   };
 
-  const appendStage = async(
+  const appendStage = async (
     addValue: string, extendValue: string
   ): Promise<{ success: boolean; error?: string }> => {
     const result = await appendLanderStage('verification', addValue, extendValue);
     return result;
   };
 
-  const removeStage = async(removeValue: string): Promise<{ success: boolean; error?: string }> => {
+  const removeStage = async (removeValue: string): Promise<{ success: boolean; error?: string }> => {
     const result = await removeLanderStage('verification', removeValue);
     return result;
   };
 
-  const listStages = async(): Promise<{ success: boolean; stages: string[]; error?: string }> => {
+  const listStages = async (): Promise<{ success: boolean; stages: string[]; error?: string }> => {
     const result = await getLanderStages('verification');
     return result;
   };
@@ -160,33 +132,42 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
   return (
     <Spin spinning={loading} tip="读取配置中...">
       <Form layout="horizontal" labelCol={{ span: 4 }} wrapperCol={{ span: 20 }}>
-        <div style={pageStyle}>
-          <Card size="small" style={{ marginBottom: 14 }} styles={{ body: { padding: 18 } }}>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
-              <Button shape="round" icon={<BranchesOutlined />} style={{ cursor: 'default' }}>
-                {currentBranch || '获取分支中...'}
-              </Button>
-            </div>
-            <Form.Item label="project.cshrc">
-              <PathInput
-                state={project}
-                pathSources={['local']}
-                localRootPath={repoRoot}
-                placeholder="请选择 project.cshrc"
-                showOpen
-                showSelectFile
-              />
-            </Form.Item>
-          </Card>
-
-          <Card size="small" style={{ marginBottom: 14 }} styles={{ body: { padding: 18 } }}>
-            <CollapsibleSection title="stage 配置">
-              <div style={{ marginBottom: 12, textAlign: 'right' }}>
-                <Button size="small" icon={<HistoryOutlined />} onClick={() => setHistoryOpen(true)}>
-                  历史记录
+        <div style={{ maxWidth: 860, margin: '0 auto' }}>
+          <div
+            style={{
+              border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.24))',
+              borderRadius: 8,
+              padding: 18,
+              background: 'var(--vscode-editor-background)',
+            }}
+          >
+            <Space style={{ width: '100%', justifyContent: 'space-between' }} align="start" wrap>
+              <Space direction="vertical" size={6}>
+                <Title level={4} style={{ margin: 0 }}>
+                  归一化表格转config
+                </Title>
+              </Space>
+              <Space>
+                <Button shape="round" icon={<BranchesOutlined />} style={{ cursor: 'default' }}>
+                  {currentBranch || '获取分支中...'}
                 </Button>
-              </div>
-              <Form.Item label="stage">
+              </Space>
+            </Space>
+
+            <Divider style={{ margin: '16px 0' }} />
+
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Form.Item label="project.cshrc">
+                <PathInput
+                  state={project}
+                  pathSources={['local']}
+                  localRootPath={repoRoot}
+                  placeholder="请选择 project.cshrc"
+                  showOpen
+                  showSelectFile
+                />
+              </Form.Item>
+              <Form.Item label="选择stage">
                 <StageSelect
                   currentStage={stage}
                   setCurrentStage={setStage}
@@ -195,40 +176,42 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
                   listStages={listStages}
                 />
               </Form.Item>
-              <Form.Item label="选择模板">
-                <Select
-                  value={template}
-                  onChange={(value) => setTemplate(value)}
-                  allowClear
-                  placeholder="请选择模板"
-                  options={templateOptions}
-                />
-              </Form.Item>
-              <Form.Item label="执行脚本">
+              <Form.Item label="lander_assistant">
                 <PathInput
-                  state={commandCfg}
+                  state={landerAssistant}
                   pathSources={['local']}
                   localRootPath={repoRoot}
-                  placeholder="请选择执行脚本"
+                  placeholder="请选择 LANDER_ASSISTANT.json"
                   showOpen
                   showSelectFile
                 />
               </Form.Item>
-            </CollapsibleSection>
-          </Card>
+            </Space>
 
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
-            <Button icon={<FileAddOutlined />} loading={generating} onClick={onGenerateDefaults}>
-              产生默认配置
-            </Button>
-            <Badge dot={hasUnsaved} offset={[-4, 4]}>
-              <Button icon={<SaveOutlined />} loading={saving} onClick={onSave}>
-                保存
+            <Divider style={{ margin: '18px 0 14px' }} />
+
+            <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
+              <Space>
+                <Button icon={<SaveOutlined />} loading={saving} onClick={onSave}>
+                  保存
+                </Button>
+                <Button
+                  type="primary"
+                  loading={generating}
+                  onClick={onGenerateDefaults}
+                  icon={<CaretRightOutlined />}
+                  style={{ width: 150 }}
+                >
+                  表格转cfg
+                </Button>
+                <Button icon={<HistoryOutlined />} onClick={() => setHistoryOpen(true)}>
+                  转换历史记录
+                </Button>
+              </Space>
+              <Button type="primary" onClick={onNext}>
+                下一页 <RightOutlined />
               </Button>
-            </Badge>
-            <Button type="primary" onClick={onNext}>
-              下一页 <RightOutlined />
-            </Button>
+            </Space>
           </div>
         </div>
       </Form>
@@ -236,11 +219,11 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
       <Modal
         title={
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '90%' }}>
-            <span style={{ fontSize: 16, fontWeight: 700 }}>配置生成历史记录</span>
+            <span style={{ fontSize: 16, fontWeight: 700 }}>转换历史记录</span>
           </div>
         }
         open={historyOpen}
-        onCancel={() => {setHistoryOpen(false)}}
+        onCancel={() => { setHistoryOpen(false) }}
         footer={null}
         width={1600}
         style={{ top: 40 }}
@@ -256,7 +239,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext }) => {
             marginBottom: 16
           }}>
             <Space direction="vertical" size={16} style={{ width: '100%' }}>
-              <DefaultConfgHistory flowKey={'verification'} />
+              <TransformHistory flowKey={flowKey} stage={stage} />
             </Space>
           </div>
         </div>

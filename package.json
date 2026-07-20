@@ -182,23 +182,37 @@
                 "XFlow_read_xls.py",
                 "eco_table.py",
                 "sailor_cfg_demo.json"
-              ]
+              ],
+              "entrance": {
+                "dir": "scripts/transform",
+                "fileName": "run_gen_cfg"
+              }
             },
             "sailor": {
               "dir": "scripts/sailor",
               "files": [
                 "gen_cfg.py",
                 "gen_design_tree_xls2flow.py",
-                "gen_dft_sig_xls2flow.py"
-              ]
+                "gen_dft_sig_xls2flow.py",
+                "Pre_check.py",
+                "XFlow_read_xls.py",
+                "eco_table.py",
+                "sailor_cfg_demo.json"
+              ],
+              "entrance": {
+                "dir": "scripts/transform",
+                "fileName": "run_gen_cfg"
+              }
             },
             "verification": {
               "dir": "scripts/verification",
               "files": [
-                "gen_cfg.py",
-                "gen_design_tree_xls2flow.py",
-                "gen_dft_sig_xls2flow.py"
-              ]
+                "lander_env.tar.gz"
+              ],
+              "entrance": {
+                "dir": "scripts/transform",
+                "fileName": "run_gen_lander_cfg"
+              }
             }
           },
           "description": "Remote file paths of conversion scripts in the script space for each flow."

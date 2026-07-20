@@ -1,0 +1,29 @@
+#!/bin/csh -f
+
+if ($#argv != 3) then
+    echo "Usage: $0 <design_tree> <normalize_table> <module>"
+    exit 1
+endif
+
+set design_script = "gen_design_tree_xls2flow.py"
+set dft_script = "gen_dft_sig_xls2flow.py"
+set cfg_script = "gen_cfg.py"
+
+set design_tree = "$1"
+set normalize_table = "$2"
+set module = "$3"
+
+foreach script ($design_script $dft_script $cfg_script)
+    if (! -e $script) then
+        echo "Error: Script '$script' not found!"
+        exit 1
+    endif
+end
+
+python "$design_script" "$design_tree" "$module"
+if ($status != 0) exit $status
+
+python "$dft_script" "$normalize_table" "$module"
+if ($status != 0) exit $status
+
+python "$cfg_script" "$normalize_table" "$module"
