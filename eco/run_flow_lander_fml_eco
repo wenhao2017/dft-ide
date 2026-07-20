@@ -1,6 +1,6 @@
 #!/bin/csh -f
 
-# Project-level Lander FML ECO dispatcher.
+# Lander FML 项目级 ECO 调度入口。
 if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE) exit 2
 set step = "$DFT_IDE_STEP"
 set phase = "$DFT_IDE_ECO_PHASE"
@@ -16,10 +16,10 @@ case "run_fml":
 case "upload_fml_database_pre":
 case "upload_fml_database":
 case "gen_report":
-    # Split into dedicated case blocks and add project/domain ECO calls as needed.
+    # 请按需拆分独立的 case 分支，并添加领域或项目 ECO 调用。
     breaksw
 default:
-    echo "[DFT IDE] Unknown Lander FML ECO step: $step"
+    echo "[DFT IDE] 未知的 Lander FML ECO Step: $step"
     exit 2
 endsw
 exit 0

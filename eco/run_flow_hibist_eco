@@ -1,62 +1,62 @@
 #!/bin/csh -f
 
-# Project-level Hibist ECO dispatcher.
-# Add project/domain ECO commands inside the matching step and phase branch.
+# Hibist 项目级 ECO 调度入口。
+# 请在对应的 Step 和执行阶段分支中添加领域或项目 ECO 命令。
 
 if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE) then
-    echo "[DFT IDE] DFT_IDE_STEP and DFT_IDE_ECO_PHASE are required."
+    echo "[DFT IDE] 未设置 DFT_IDE_STEP 或 DFT_IDE_ECO_PHASE。"
     exit 2
 endif
 
 set step = "$DFT_IDE_STEP"
 set phase = "$DFT_IDE_ECO_PHASE"
 if ("$phase" != "before" && "$phase" != "after") then
-    echo "[DFT IDE] Unsupported Hibist ECO phase: $phase"
+    echo "[DFT IDE] 不支持的 Hibist ECO 阶段: $phase"
     exit 2
 endif
 
 switch ("$step")
 case "gen_analysis_env":
-    # Add before/after ECO commands for gen_analysis_env here.
+    # 在此添加 gen_analysis_env 的前置/后置 ECO 命令。
     breaksw
 case "run_analysis":
-    # Add before/after ECO commands for run_analysis here.
+    # 在此添加 run_analysis 的前置/后置 ECO 命令。
     breaksw
 case "gen_insert_env":
-    # Add before/after ECO commands for gen_insert_env here.
+    # 在此添加 gen_insert_env 的前置/后置 ECO 命令。
     breaksw
 case "run_insert":
-    # Add before/after ECO commands for run_insert here.
+    # 在此添加 run_insert 的前置/后置 ECO 命令。
     breaksw
 case "gen_build_env":
-    # Add before/after ECO commands for gen_build_env here.
+    # 在此添加 gen_build_env 的前置/后置 ECO 命令。
     breaksw
 case "run_build":
-    # Add before/after ECO commands for run_build here.
+    # 在此添加 run_build 的前置/后置 ECO 命令。
     breaksw
 case "gen_syn_env":
-    # Add before/after ECO commands for gen_syn_env here.
+    # 在此添加 gen_syn_env 的前置/后置 ECO 命令。
     breaksw
 case "run_syn":
-    # Add before/after ECO commands for run_syn here.
+    # 在此添加 run_syn 的前置/后置 ECO 命令。
     breaksw
 case "gen_fml_env":
-    # Add before/after ECO commands for gen_fml_env here.
+    # 在此添加 gen_fml_env 的前置/后置 ECO 命令。
     breaksw
 case "run_fml":
-    # Add before/after ECO commands for run_fml here.
+    # 在此添加 run_fml 的前置/后置 ECO 命令。
     breaksw
 case "gen_sim_env":
-    # Add before/after ECO commands for gen_sim_env here.
+    # 在此添加 gen_sim_env 的前置/后置 ECO 命令。
     breaksw
 case "run_sim":
-    # Add before/after ECO commands for run_sim here.
+    # 在此添加 run_sim 的前置/后置 ECO 命令。
     breaksw
 case "release":
-    # Add before/after ECO commands for release here.
+    # 在此添加 release 的前置/后置 ECO 命令。
     breaksw
 default:
-    echo "[DFT IDE] Unknown Hibist ECO step: $step"
+    echo "[DFT IDE] 未知的 Hibist ECO Step: $step"
     exit 2
 endsw
 

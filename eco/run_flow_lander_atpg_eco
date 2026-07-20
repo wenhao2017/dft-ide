@@ -1,16 +1,16 @@
 #!/bin/csh -f
 
-# Project-level Lander ATPG ECO dispatcher.
+# Lander ATPG 项目级 ECO 调度入口。
 
 if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE) then
-    echo "[DFT IDE] DFT_IDE_STEP and DFT_IDE_ECO_PHASE are required."
+    echo "[DFT IDE] 未设置 DFT_IDE_STEP 或 DFT_IDE_ECO_PHASE。"
     exit 2
 endif
 
 set step = "$DFT_IDE_STEP"
 set phase = "$DFT_IDE_ECO_PHASE"
 if ("$phase" != "before" && "$phase" != "after") then
-    echo "[DFT IDE] Unsupported Lander ATPG ECO phase: $phase"
+    echo "[DFT IDE] 不支持的 Lander ATPG ECO 阶段: $phase"
     exit 2
 endif
 
@@ -32,10 +32,10 @@ case "delivery_data":
 case "sed_3d_tb":
 case "gen_sim_env":
 case "run_sim":
-    # Split this into a dedicated case block when the step needs ECO commands.
+    # 某个 Step 需要 ECO 时，请拆分成独立的 case 分支并添加调用命令。
     breaksw
 default:
-    echo "[DFT IDE] Unknown Lander ATPG ECO step: $step"
+    echo "[DFT IDE] 未知的 Lander ATPG ECO Step: $step"
     exit 2
 endsw
 

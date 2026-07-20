@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Standalone Sailor Flow CLI with ECO hooks, repository clone and env management."""
+"""Sailor 独立 Flow CLI，支持 ECO Hook、仓库克隆和环境变量管理。"""
 
 import argparse
 import json
@@ -14,7 +14,8 @@ from pathlib import Path
 FLOW = "sailor"
 FLOW_LABEL = "Sailor"
 TOOL = "ddf"
-REPO_SUFFIX = "sailor"
+FLOW_REPO = "sailor"
+PROJECT_REPOS = ("data", "hibist", "sailor", "verification")
 ECO_FILE = "run_flow_sailor_eco"
 DEFAULT_GITLAB_HOST = "http://code-dg.hisi.huawei.com/DFT_IDE_PROJECTS"
 STEPS = (
@@ -33,6 +34,37 @@ RESERVED_ENV = {
 }
 
 
+def configure_utf8_io():
+    """让当前脚本不依赖终端 locale，始终以 UTF-8 输出中文。"""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, ValueError):
+                pass
+
+
+class ChineseArgumentParser(argparse.ArgumentParser):
+    """将 argparse 的固定帮助标题转换为中文。"""
+
+    def __init__(self, *args, **kwargs):
+        kwargs["add_help"] = False
+        super().__init__(*args, **kwargs)
+        self.add_argument("-h", "--help", action="help", help="显示帮助信息并退出")
+
+    def format_help(self):
+        return (
+            super().format_help()
+            .replace("usage:", "用法:")
+            .replace("options:", "选项:")
+            .replace("positional arguments:", "位置参数:")
+        )
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        self.exit(2, f"{self.prog}: 参数错误: {message}\n")
+
+
 def fail(message, code=2):
     print(f"[DFT IDE] {message}", file=sys.stderr)
     raise SystemExit(code)
@@ -47,6 +79,27 @@ def resolve_work_path(explicit=None):
     return work_path
 
 
+def resolve_project_name(explicit=None):
+    project_name = explicit or os.environ.get("DFT_IDE_PROJECT_NAME") or os.environ.get("project_name")
+    if not project_name:
+        fail("未设置 DFT_IDE_PROJECT_NAME，也未提供项目名称")
+    project_name = project_name.strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", project_name):
+        fail(f"非法的项目名称: {project_name}")
+    return project_name
+
+
+def infer_project_name(work_path, env):
+    configured = env.get("DFT_IDE_PROJECT_NAME") or env.get("project_name")
+    if configured:
+        return resolve_project_name(configured)
+    for repo in PROJECT_REPOS:
+        suffix = f"_{repo}"
+        if work_path.name.endswith(suffix):
+            return resolve_project_name(work_path.name[:-len(suffix)])
+    return resolve_project_name(work_path.parent.name)
+
+
 def resolve_env_file(work_path, explicit=None):
     return Path(explicit).expanduser().resolve() if explicit else work_path / ENV_FILE_NAME
 
@@ -57,9 +110,9 @@ def load_managed_env(env_file):
     try:
         data = json.loads(env_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        fail(f"Cannot read environment file {env_file}: {error}")
+        fail(f"无法读取环境变量文件 {env_file}: {error}")
     if not isinstance(data, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in data.items()):
-        fail(f"Environment file must contain a JSON object of string values: {env_file}")
+        fail(f"环境变量文件必须是仅包含字符串键值的 JSON 对象: {env_file}")
     return data
 
 
@@ -71,13 +124,13 @@ def save_managed_env(env_file, values):
 
 
 def env_command(argv):
-    parser = argparse.ArgumentParser(prog=f"{Path(sys.argv[0]).name} env")
-    parser.add_argument("action", choices=("list", "get", "set", "unset"))
-    parser.add_argument("name", nargs="?")
-    parser.add_argument("value", nargs="?")
-    parser.add_argument("--work-path")
-    parser.add_argument("--env-file")
-    parser.add_argument("--all", action="store_true", dest="show_all")
+    parser = ChineseArgumentParser(prog=f"{Path(sys.argv[0]).name} env", description="查看和管理 Flow 环境变量。")
+    parser.add_argument("action", choices=("list", "get", "set", "unset"), help="操作类型：查看、读取、设置或删除变量")
+    parser.add_argument("name", nargs="?", help="环境变量名称")
+    parser.add_argument("value", nargs="?", help="环境变量值")
+    parser.add_argument("--work-path", help="Flow 业务仓根目录")
+    parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
+    parser.add_argument("--all", action="store_true", dest="show_all", help="显示当前进程的全部环境变量")
     args = parser.parse_args(argv)
     work_path = resolve_work_path(args.work_path)
     env_file = resolve_env_file(work_path, args.env_file)
@@ -92,9 +145,9 @@ def env_command(argv):
             print(f"{name}={output[name]}")
         return 0
     if not args.name:
-        fail(f"env {args.action} requires NAME")
+        fail(f"env {args.action} 需要提供变量名 NAME")
     if not ENV_NAME_PATTERN.fullmatch(args.name):
-        fail(f"Invalid environment variable name: {args.name}")
+        fail(f"非法的环境变量名: {args.name}")
     if args.action == "get":
         if args.name in values:
             print(values[args.name])
@@ -104,10 +157,10 @@ def env_command(argv):
             return 0
         return 1
     if args.name in RESERVED_ENV:
-        fail(f"{args.name} is managed by the Flow runtime and cannot be persisted")
+        fail(f"{args.name} 由 Flow 运行时管理，不能持久化修改")
     if args.action == "set":
         if args.value is None:
-            fail("env set requires NAME and VALUE")
+            fail("env set 需要提供变量名 NAME 和变量值 VALUE")
         values[args.name] = args.value
         save_managed_env(env_file, values)
         print(f"{args.name}={args.value}")
@@ -117,34 +170,148 @@ def env_command(argv):
     return 0 if removed is not None else 1
 
 
+def parse_clone_ref_specs(args):
+    selected = {}
+    specs = (
+        ("branch", args.branch, "分支"),
+        ("tag", args.tag, "Tag"),
+        ("commit", args.commit, "Commit"),
+    )
+    for kind, values, label in specs:
+        for spec in values:
+            repo_name = None
+            ref_value = spec
+            if "=" in spec:
+                repo_name, ref_value = spec.split("=", 1)
+                if repo_name not in PROJECT_REPOS:
+                    fail(f"未知的仓库名称: {repo_name}")
+                targets = (repo_name,)
+            elif kind == "commit":
+                targets = (FLOW_REPO,)
+            else:
+                targets = PROJECT_REPOS
+            if not ref_value:
+                fail(f"{label} 不能为空")
+            for repo in targets:
+                previous = selected.get(repo)
+                if previous and previous[0] != kind:
+                    fail(f"仓库 {repo} 同时指定了多种版本类型")
+                selected[repo] = (kind, ref_value)
+    return selected
+
+
 def clone_command(argv):
-    parser = argparse.ArgumentParser(prog=f"{Path(sys.argv[0]).name} clone")
-    parser.add_argument("project")
-    parser.add_argument("--gitlab-host", default=os.environ.get("DFT_IDE_GITLAB_HOST", DEFAULT_GITLAB_HOST))
-    parser.add_argument("--repo-name")
-    parser.add_argument("--repo-url")
-    parser.add_argument("--dest")
-    parser.add_argument("--branch")
+    parser = ChineseArgumentParser(
+        prog=f"{Path(sys.argv[0]).name} clone",
+        description="根据项目名克隆 data、hibist、sailor 和 verification 四个业务仓。",
+    )
+    parser.add_argument("project", nargs="?", help="项目名称；默认读取 DFT_IDE_PROJECT_NAME")
+    parser.add_argument(
+        "--dest",
+        help="本地项目根目录；默认读取 DFT_IDE_PROJECTS_ROOT，未设置时使用当前目录",
+    )
+    parser.add_argument(
+        "--branch",
+        action="append",
+        default=[],
+        metavar="[仓库=]分支",
+        help="指定分支；不写仓库名时应用到四个仓库，可重复使用",
+    )
+    parser.add_argument(
+        "--tag",
+        action="append",
+        default=[],
+        metavar="[仓库=]标签",
+        help="指定 Tag；不写仓库名时应用到四个仓库，可重复使用",
+    )
+    parser.add_argument(
+        "--commit",
+        action="append",
+        default=[],
+        metavar="[仓库=]提交ID",
+        help="指定 Commit；不写仓库名时应用到当前 Flow 仓库，可重复使用",
+    )
     args = parser.parse_args(argv)
-    repo_name = args.repo_name or f"{args.project}_{REPO_SUFFIX}"
-    repo_url = args.repo_url or f"{args.gitlab_host.rstrip('/')}/{repo_name}.git"
-    destination = Path(args.dest).expanduser().resolve() if args.dest else Path.cwd() / repo_name
-    if destination.exists():
-        fail(f"Clone destination already exists: {destination}")
-    command = ["git", "clone"]
-    if args.branch:
-        command.extend(("--branch", args.branch))
-    command.extend((repo_url, str(destination)))
-    print("[DFT IDE] " + shlex.join(command))
-    result = subprocess.run(command, check=False)
-    if result.returncode == 0:
-        print(f"DFT_IDE_WORK_PATH={destination}")
-    return result.returncode
+    project_name = resolve_project_name(args.project)
+    selected_refs = parse_clone_ref_specs(args)
+    projects_root = Path(
+        args.dest or os.environ.get("DFT_IDE_PROJECTS_ROOT") or os.getcwd()
+    ).expanduser().resolve()
+    project_root = projects_root / project_name
+    if project_root.exists() and not project_root.is_dir():
+        fail(f"项目目录不是文件夹: {project_root}")
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    gitlab_host = os.environ.get("DFT_IDE_GITLAB_HOST", DEFAULT_GITLAB_HOST).rstrip("/")
+    credential_helper = os.environ.get(
+        "DFT_IDE_GIT_CREDENTIAL_HELPER", "cache --timeout=43200"
+    ).strip()
+    git_prefix = ["git"]
+    if credential_helper:
+        git_prefix.extend(("-c", f"credential.helper={credential_helper}"))
+        print("[DFT IDE] Git 凭据将在内存中缓存，首次认证后其余仓库无需重复输入。")
+
+    def execute_git(command, failure_message):
+        print("[DFT IDE] " + shlex.join(command))
+        try:
+            result = subprocess.run(command, check=False)
+        except FileNotFoundError:
+            fail("找不到 Git 可执行程序", 127)
+        if result.returncode != 0:
+            print(f"[DFT IDE] {failure_message}", file=sys.stderr)
+        return result.returncode
+
+    repo_paths = {}
+    for repo in PROJECT_REPOS:
+        repo_name = f"{project_name}_{repo}"
+        repo_url = f"{gitlab_host}/{repo_name}.git"
+        repo_path = project_root / repo_name
+        repo_paths[repo] = repo_path
+        repo_exists = repo_path.exists()
+        if repo_exists and not (repo_path / ".git").is_dir():
+            fail(f"仓库目标目录已存在但不是 Git 仓库: {repo_path}")
+        if not repo_exists:
+            command = git_prefix + ["clone", repo_url, str(repo_path)]
+            status = execute_git(command, f"仓库克隆失败: {repo_url}")
+            if status != 0:
+                return status
+        elif repo not in selected_refs:
+            print(f"[DFT IDE] 仓库已存在，跳过克隆: {repo_path}")
+            continue
+
+        selected_ref = selected_refs.get(repo)
+        if not selected_ref:
+            continue
+        if repo_exists:
+            fetch_command = git_prefix + ["-C", str(repo_path), "fetch", "--all", "--tags"]
+            status = execute_git(fetch_command, f"仓库远端引用更新失败: {repo_path}")
+            if status != 0:
+                return status
+        kind, ref_value = selected_ref
+        if kind == "branch":
+            checkout_args = ["checkout", ref_value]
+        elif kind == "tag":
+            checkout_args = ["checkout", "--detach", f"refs/tags/{ref_value}"]
+        else:
+            checkout_args = ["checkout", "--detach", ref_value]
+        checkout_command = git_prefix + ["-C", str(repo_path)] + checkout_args
+        status = execute_git(
+            checkout_command,
+            f"仓库版本切换失败: {repo_path} -> {kind} {ref_value}",
+        )
+        if status != 0:
+            return status
+        print(f"[DFT IDE] 仓库已切换到 {kind}: {repo} -> {ref_value}")
+
+    print(f"DFT_IDE_PROJECT_NAME={project_name}")
+    print(f"DFT_IDE_PROJECT_ROOT={project_root}")
+    print(f"DFT_IDE_WORK_PATH={repo_paths[FLOW_REPO]}")
+    return 0
 
 
 def csh_quote(value):
     if "\n" in value or "\r" in value:
-        fail("Newlines are not allowed in Csh command arguments")
+        fail("Csh 命令参数中不允许包含换行符")
     return "'" + value.replace("'", "'\\''") + "'"
 
 
@@ -159,7 +326,8 @@ def run_csh(lines, env, log_file=None):
             script_path = handle.name
         process = subprocess.Popen(
             [shell, "-f", script_path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, errors="replace", env=env,
+            text=True, encoding=env.get("DFT_IDE_OUTPUT_ENCODING", "utf-8"),
+            errors="replace", env=env,
         )
         log_handle = open(log_file, "w", encoding="utf-8") if log_file else None
         try:
@@ -175,7 +343,7 @@ def run_csh(lines, env, log_file=None):
                 log_handle.close()
         return process.wait()
     except FileNotFoundError:
-        fail(f"Csh executable not found: {shell}", 127)
+        fail(f"找不到 Csh 可执行程序: {shell}", 127)
     finally:
         if script_path:
             try:
@@ -201,18 +369,21 @@ def run_eco(work_path, env, source_file, phase):
 
 def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=None, source=None, no_eco=False):
     if step not in STEPS:
-        fail(f"Unknown {FLOW_LABEL} step: {step}")
+        fail(f"未知的 {FLOW_LABEL} Step: {step}")
     work_path = resolve_work_path(work_path)
     if not work_path.is_dir():
-        fail(f"Work path does not exist: {work_path}")
+        fail(f"Work Path 不存在: {work_path}")
     managed = load_managed_env(resolve_env_file(work_path, env_file))
     runtime_env = dict(os.environ)
     runtime_env.update(managed)
+    runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
     module_name = module or runtime_env.get("DFT_IDE_MODULE") or runtime_env.get("module")
     if not module_name:
-        fail("DFT_IDE_MODULE or --module is required")
+        fail("必须设置 DFT_IDE_MODULE 或提供 --module")
+    project_name = infer_project_name(work_path, runtime_env)
     runtime_env.update({
         "DFT_IDE_FLOW": FLOW, "DFT_IDE_STEP": step,
+        "DFT_IDE_PROJECT_NAME": project_name,
         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODULE": module_name,
         "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
     })
@@ -221,7 +392,7 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
     if source_file is None and (work_path / "project.cshrc").is_file():
         source_file = work_path / "project.cshrc"
     if source_file is not None and not source_file.is_file():
-        fail(f"Environment source file does not exist: {source_file}")
+        fail(f"环境初始化文件不存在: {source_file}")
     cfg_file = Path(cfg).expanduser().resolve() if cfg else work_path / "cfg" / module_name / f"{module_name}.sailor.cfg"
     log_path = work_path / "work" / module_name / "log"
     log_path.mkdir(parents=True, exist_ok=True)
@@ -229,39 +400,66 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
     if not no_eco:
         before_status = run_eco(work_path, runtime_env, source_file, "before")
         if before_status:
-            print(f"[DFT IDE] {FLOW_LABEL} before ECO failed: step={step} status={before_status}", file=sys.stderr)
+            print(f"[DFT IDE] {FLOW_LABEL} 前置 ECO 执行失败: step={step} status={before_status}", file=sys.stderr)
             return before_status
 
     lines = source_lines(source_file)
     lines.extend(("alias dsubrun_I >& /dev/null", 'if ($status != 0) alias dsubrun_I ""'))
     command = [TOOL, step, "-cfg", str(cfg_file)] + list(step_args)
     lines.extend(("dsubrun_I " + " ".join(csh_quote(item) for item in command), "exit $status"))
-    print(f"[DFT IDE] {FLOW_LABEL} step start: {step}")
+    print(f"[DFT IDE] {FLOW_LABEL} Step 开始执行: {step}")
     flow_status = run_csh(lines, runtime_env, log_path / f"{step}.log")
     runtime_env["DFT_IDE_STEP_STATUS"] = str(flow_status)
     after_status = 0 if no_eco else run_eco(work_path, runtime_env, source_file, "after")
     if flow_status:
-        print(f"[DFT IDE] {FLOW_LABEL} step failed: step={step} status={flow_status}", file=sys.stderr)
+        print(f"[DFT IDE] {FLOW_LABEL} Step 执行失败: step={step} status={flow_status}", file=sys.stderr)
         return flow_status
     if after_status:
-        print(f"[DFT IDE] {FLOW_LABEL} after ECO failed: step={step} status={after_status}", file=sys.stderr)
+        print(f"[DFT IDE] {FLOW_LABEL} 后置 ECO 执行失败: step={step} status={after_status}", file=sys.stderr)
         return after_status
-    print(f"[DFT IDE] {FLOW_LABEL} step completed: {step}")
+    print(f"[DFT IDE] {FLOW_LABEL} Step 执行完成: {step}")
     return 0
 
 
 def print_help():
     name = Path(sys.argv[0]).name
-    print(f"""Usage:
-  {name} <step> [step arguments...]
-  {name} run [options] <step> [step arguments...]
+    print(f"""用法:
+  {name} <step> [step参数...]
+  {name} run [运行参数] <step> [step参数...]
   {name} steps
-  {name} clone <project> [options]
-  {name} env <list|get|set|unset> [NAME] [VALUE] [options]
+  {name} clone [项目名称] [--dest 本地项目根目录]
+  {name} env <list|get|set|unset> [NAME] [VALUE] [环境参数]
 
-Run options (place before <step>):
-  --work-path PATH  --module NAME  --cfg FILE  --env-file FILE
-  --source FILE     --no-eco
+命令:
+  steps    查看当前 Flow 支持的全部 Step
+  run      执行指定 Step
+  clone    按固定地址一次克隆项目的四个业务仓
+  env      查看或管理环境变量
+
+运行参数（必须放在 <step> 之前）:
+  --work-path PATH  Flow 业务仓根目录
+  --module NAME     当前模块名称
+  --cfg FILE        显式指定 CFG 文件
+  --env-file FILE   环境变量 JSON 文件
+  --source FILE     需要 source 的 Csh 环境文件
+  --no-eco          跳过前置和后置 ECO
+
+Clone 说明:
+  项目名默认读取 DFT_IDE_PROJECT_NAME。
+  四个业务仓统一克隆到 <本地项目根目录>/<项目名>/ 下。
+  Git 凭据默认在内存中缓存 12 小时，通常只需认证一次。
+  --branch/--tag 不指定仓库名时应用到四个仓库。
+  --commit 不指定仓库名时只应用到当前 Flow 仓库。
+  也可以使用 sailor=xxx、verification=xxx 等形式单独指定。
+
+示例:
+  {name} steps
+  {name} env list
+  {name} clone SDV1000714 --dest /home/user/work
+  {name} clone SDV1000714 --branch develop
+  {name} clone SDV1000714 --commit sailor=abc123
+  {name} run --module module_A {STEPS[0]}
+  {name} {STEPS[0]}
 """)
 
 
@@ -278,14 +476,14 @@ def main(argv):
     if command == "env":
         return env_command(argv[1:])
     if command == "run":
-        parser = argparse.ArgumentParser(prog=f"{Path(sys.argv[0]).name} run")
-        parser.add_argument("--work-path")
-        parser.add_argument("--module")
-        parser.add_argument("--cfg")
-        parser.add_argument("--env-file")
-        parser.add_argument("--source")
-        parser.add_argument("--no-eco", action="store_true")
-        parser.add_argument("step", choices=STEPS)
+        parser = ChineseArgumentParser(prog=f"{Path(sys.argv[0]).name} run", description="执行指定 Flow Step。")
+        parser.add_argument("--work-path", help="Flow 业务仓根目录")
+        parser.add_argument("--module", help="当前模块名称")
+        parser.add_argument("--cfg", help="显式指定 CFG 文件")
+        parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
+        parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
+        parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
+        parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
         args, step_args = parser.parse_known_args(argv[1:])
         if step_args[:1] == ["--"]:
             step_args = step_args[1:]
@@ -294,4 +492,5 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    configure_utf8_io()
     raise SystemExit(main(sys.argv[1:]))

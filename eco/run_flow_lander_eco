@@ -1,22 +1,22 @@
 #!/bin/csh -f
 
-# Fallback project-level Lander ECO dispatcher.
-# Mode pipelines use run_flow_lander_<DFT_IDE_LANDER_MODE>_eco when the mode
-# variable is set. Keep generic cross-mode ECO commands in this file.
+# Lander 通用项目级 ECO 调度入口。
+# 设置 DFT_IDE_LANDER_MODE 后，Mode 流程将调用对应的
+# run_flow_lander_<mode>_eco；跨 Mode 的通用规则可放在本文件中。
 
 if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE) then
-    echo "[DFT IDE] DFT_IDE_STEP and DFT_IDE_ECO_PHASE are required."
+    echo "[DFT IDE] 未设置 DFT_IDE_STEP 或 DFT_IDE_ECO_PHASE。"
     exit 2
 endif
 
 set step = "$DFT_IDE_STEP"
 set phase = "$DFT_IDE_ECO_PHASE"
 if ("$phase" != "before" && "$phase" != "after") then
-    echo "[DFT IDE] Unsupported Lander ECO phase: $phase"
+    echo "[DFT IDE] 不支持的 Lander ECO 阶段: $phase"
     exit 2
 endif
 
-# Add generic Lander ECO dispatch rules here. With no matching action, return 0.
+# 在此添加通用 Lander ECO 调度规则；没有匹配动作时正常返回 0。
 switch ("$step")
 case "prepare_workspace":
 case "load_config":
@@ -25,10 +25,10 @@ case "submit_mode":
 case "collect_result":
 case "parse_report":
 case "publish_dashboard":
-    # Add a dedicated case block when this step needs an ECO action.
+    # 某个 Step 需要 ECO 时，请拆分成独立的 case 分支并添加调用命令。
     breaksw
 default:
-    echo "[DFT IDE] Unknown Lander ECO step: $step"
+    echo "[DFT IDE] 未知的 Lander ECO Step: $step"
     exit 2
 endsw
 

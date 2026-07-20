@@ -1,103 +1,103 @@
 #!/bin/csh -f
 
-# Project-level Sailor ECO dispatcher.
-# Add project/domain ECO commands inside the matching step and phase branch.
-# Examples:
+# Sailor 项目级 ECO 调度入口。
+# 请在对应的 Step 和执行阶段分支中添加领域或项目 ECO 命令。
+# 调用示例：
 #   tclsh "$DFT_IDE_WORK_PATH/eco/Kirin/xxx.tcl"
 #   python3 "$DFT_IDE_WORK_PATH/eco/project_eco/xxx.py"
 #   /bin/csh -f "$DFT_IDE_WORK_PATH/eco/project_eco/xxx.csh"
 
 if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE) then
-    echo "[DFT IDE] DFT_IDE_STEP and DFT_IDE_ECO_PHASE are required."
+    echo "[DFT IDE] 未设置 DFT_IDE_STEP 或 DFT_IDE_ECO_PHASE。"
     exit 2
 endif
 
 set step = "$DFT_IDE_STEP"
 set phase = "$DFT_IDE_ECO_PHASE"
 if ("$phase" != "before" && "$phase" != "after") then
-    echo "[DFT IDE] Unsupported Sailor ECO phase: $phase"
+    echo "[DFT IDE] 不支持的 Sailor ECO 阶段: $phase"
     exit 2
 endif
 
 switch ("$step")
 case "gen_libcell_env":
-    # Add before/after ECO commands for gen_libcell_env here.
+    # 在此添加 gen_libcell_env 的前置/后置 ECO 命令。
     breaksw
 case "run_libcell_syn":
-    # Add before/after ECO commands for run_libcell_syn here.
+    # 在此添加 run_libcell_syn 的前置/后置 ECO 命令。
     breaksw
 case "gen_analysis_env":
-    # Add before/after ECO commands for gen_analysis_env here.
+    # 在此添加 gen_analysis_env 的前置/后置 ECO 命令。
     breaksw
 case "run_analysis":
-    # Add before/after ECO commands for run_analysis here.
+    # 在此添加 run_analysis 的前置/后置 ECO 命令。
     breaksw
 case "gen_prescan_env":
-    # Add before/after ECO commands for gen_prescan_env here.
+    # 在此添加 gen_prescan_env 的前置/后置 ECO 命令。
     breaksw
 case "run_prescan":
-    # Add before/after ECO commands for run_prescan here.
+    # 在此添加 run_prescan 的前置/后置 ECO 命令。
     breaksw
 case "gen_scan_env":
-    # Add before/after ECO commands for gen_scan_env here.
+    # 在此添加 gen_scan_env 的前置/后置 ECO 命令。
     breaksw
 case "run_scan":
     if ("$phase" == "before") then
-        # Add run_scan before ECO commands here.
+        # 在此添加 run_scan 的前置 ECO 命令。
     else
-        # Add run_scan after ECO commands here.
+        # 在此添加 run_scan 的后置 ECO 命令。
     endif
     breaksw
 case "gen_edt_env":
-    # Add before/after ECO commands for gen_edt_env here.
+    # 在此添加 gen_edt_env 的前置/后置 ECO 命令。
     breaksw
 case "run_edt_gen":
-    # Add before/after ECO commands for run_edt_gen here.
+    # 在此添加 run_edt_gen 的前置/后置 ECO 命令。
     breaksw
 case "gen_ip_env":
-    # Add before/after ECO commands for gen_ip_env here.
+    # 在此添加 gen_ip_env 的前置/后置 ECO 命令。
     breaksw
 case "gen_bscan_env":
-    # Add before/after ECO commands for gen_bscan_env here.
+    # 在此添加 gen_bscan_env 的前置/后置 ECO 命令。
     breaksw
 case "run_bscan_gen":
-    # Add before/after ECO commands for run_bscan_gen here.
+    # 在此添加 run_bscan_gen 的前置/后置 ECO 命令。
     breaksw
 case "gen_bscan_insert":
-    # Add before/after ECO commands for gen_bscan_insert here.
+    # 在此添加 gen_bscan_insert 的前置/后置 ECO 命令。
     breaksw
 case "gen_ioshare_env":
-    # Add before/after ECO commands for gen_ioshare_env here.
+    # 在此添加 gen_ioshare_env 的前置/后置 ECO 命令。
     breaksw
 case "gen_ijtag_env":
-    # Add before/after ECO commands for gen_ijtag_env here.
+    # 在此添加 gen_ijtag_env 的前置/后置 ECO 命令。
     breaksw
 case "run_ijtag_gen":
-    # Add before/after ECO commands for run_ijtag_gen here.
+    # 在此添加 run_ijtag_gen 的前置/后置 ECO 命令。
     breaksw
 case "gen_compile_env":
-    # Add before/after ECO commands for gen_compile_env here.
+    # 在此添加 gen_compile_env 的前置/后置 ECO 命令。
     breaksw
 case "run_compile":
-    # Add before/after ECO commands for run_compile here.
+    # 在此添加 run_compile 的前置/后置 ECO 命令。
     breaksw
 case "gen_assemble_env":
-    # Add before/after ECO commands for gen_assemble_env here.
+    # 在此添加 gen_assemble_env 的前置/后置 ECO 命令。
     breaksw
 case "run_assemble":
-    # Add before/after ECO commands for run_assemble here.
+    # 在此添加 run_assemble 的前置/后置 ECO 命令。
     breaksw
 case "gen_release_env":
-    # Add before/after ECO commands for gen_release_env here.
+    # 在此添加 gen_release_env 的前置/后置 ECO 命令。
     breaksw
 case "run_release":
-    # Add before/after ECO commands for run_release here.
+    # 在此添加 run_release 的前置/后置 ECO 命令。
     breaksw
 case "deliver":
-    # Add before/after ECO commands for deliver here.
+    # 在此添加 deliver 的前置/后置 ECO 命令。
     breaksw
 default:
-    echo "[DFT IDE] Unknown Sailor ECO step: $step"
+    echo "[DFT IDE] 未知的 Sailor ECO Step: $step"
     exit 2
 endsw
 
