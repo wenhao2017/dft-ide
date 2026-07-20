@@ -353,7 +353,7 @@ def source_lines(source_file):
 
 
 def run_eco(work_path, env, source_file, phase):
-    eco_file = work_path / "eco" / ECO_FILE
+    eco_file = work_path / "scripts" / "eco" / ECO_FILE
     if not eco_file.is_file():
         return 0
     eco_env = dict(env)
