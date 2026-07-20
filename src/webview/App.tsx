@@ -560,7 +560,7 @@ const App: React.FC = () => {
                   <Tag color={activeMeta?.accent ?? 'blue'} icon={<ThunderboltOutlined />} style={{ margin: 0 }}>
                     DFT IDE
                   </Tag>
-                  {activeProject && (
+                  {/* {activeProject && (
                     <>
                       <Tag color="green" style={{ margin: 0 }}>
                         {activeProject.name}
@@ -569,7 +569,7 @@ const App: React.FC = () => {
                         领域：{getProjectDomainLabel(activeProject.domain)}
                       </Tag>
                     </>
-                  )}
+                  )} */}
                   {/* 优化1：未保存变更提示 */}
                   {dirtyFlows.has(flowContext.category) && (
                     <Tag color="warning" style={{ margin: 0 }}>

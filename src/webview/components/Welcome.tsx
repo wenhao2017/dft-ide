@@ -725,10 +725,10 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
           title="我的项目"
           extra={
             <Space size={6} wrap>
-              {workspaceProject && <Tag color="blue">当前加载：{workspaceProject.name}</Tag>}
+              {/* {workspaceProject && <Tag color="blue">当前加载：{workspaceProject.name}</Tag>}
               {workspaceProject && (
                 <Tag color="purple">领域：{getProjectDomainLabel(workspaceProject.domain)}</Tag>
-              )}
+              )} */}
               {!workspaceProject && currentProject && <Tag>上次：{currentProject.name}</Tag>}
             </Space>
           }

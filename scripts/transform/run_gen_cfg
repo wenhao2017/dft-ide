@@ -20,10 +20,6 @@ foreach script ($design_script $dft_script $cfg_script)
     endif
 end
 
-python "$design_script" "$design_tree" "$module"
-if ($status != 0) exit $status
-
-python "$dft_script" "$normalize_table" "$module"
-if ($status != 0) exit $status
-
-python "$cfg_script" "$normalize_table" "$module"
+$design_script $design_tree
+$dft_script $normalize_table
+$cfg_script $normalize_table

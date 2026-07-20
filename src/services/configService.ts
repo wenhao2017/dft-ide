@@ -179,8 +179,8 @@ export async function downLoadObsScripts(
   const scriptSpace = obsConfig.get<string>('scriptSpace', '').trim();
   const scriptPaths = obsConfig.get<Record<string, ObsScriptPathConfig>>('scriptPaths', {});
   const flowConfig = scriptPaths[flow];
-  const remoteScriptPath = flowConfig?.dir?.trim() ?? '';
-  const remoteScriptFiles = flowConfig?.files ?? [];
+  const remoteScriptPath = flowConfig?.dir?.trim() as string;
+  const remoteScriptFiles = flowConfig?.files as [];
   const entrance = flowConfig?.entrance ?? {
     dir: 'scripts/transform',
     fileName: flow === 'verification' ? 'run_gen_lander_cfg' : 'run_gen_cfg',
