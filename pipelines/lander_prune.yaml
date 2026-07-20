@@ -3,20 +3,20 @@
 
 - id: create_project
   name: create_project
-  command: "run_flow_lander create_project"
+  command: "run_flow_lander_prune create_project"
   description: 创建每个步骤文件目录
 
 - id: gen_design_info
   name: gen_design_info
-  command: "run_flow_lander gen_design_info"
+  command: "run_flow_lander_prune gen_design_info"
   description: 生成工具所需文件
 
 - id: gen_prune_env
   name: gen_prune_env
-  command: "run_flow_lander gen_prune_env"
+  command: "run_flow_lander_prune gen_prune_env"
   description: 生成prune环境
 
 - id: run_prune
   name: run_prune
-  command: "run_flow_lander run_prune"
+  command: "run_flow_lander_prune run_prune"
   description: 执行prune

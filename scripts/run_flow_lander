@@ -1,24 +1,296 @@
-#!/bin/csh -f
+#!/usr/bin/env python3
+"""Standalone Lander Flow CLI with ECO hooks, repository clone and env management."""
 
-set log_path = "$project_path/logs/$module"
-if (! -e $log_path) then
-    mkdir -p $log_path
-endif
+import argparse
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
-set step = $1
-set cfg_file = "$project_path/configs/$module.cfg"
-set log_file = "$log_path/$step.log"
-set dsub = `alias dsubrun_I`
-if ("$dsub" == "") then
-    alias dsubrun_I ""
-endif
+FLOW = "lander"
+FLOW_LABEL = "Lander"
+TOOL = "ddv"
+REPO_SUFFIX = "lander"
+ECO_FILE = "run_flow_lander_eco"
+DEFAULT_GITLAB_HOST = "http://code-dg.hisi.huawei.com/DFT_IDE_PROJECTS"
+STEPS = (
+    "prepare_workspace", "load_config", "check_env", "submit_mode",
+    "collect_result", "parse_report", "publish_dashboard",
+)
+ENV_FILE_NAME = ".dft_ide_env.json"
+ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+RESERVED_ENV = {
+    "DFT_IDE_FLOW", "DFT_IDE_STEP", "DFT_IDE_ECO_PHASE",
+    "DFT_IDE_STEP_STATUS", "DFT_IDE_WORK_PATH", "DFT_IDE_MODULE",
+}
 
-if ($step == "create_project") then
-    dsubrun_I ddv $step -cfg $cfg_file
-else if ($step == "gen_design_info") then
-    # sed -i ...
-    dsubrun_I ddv $step -cfg $cfg_file | & tee $log_file
-    sleep 1s
-else
-    dsubrun_I ddv $step -cfg $cfg_file | & tee $log_file
-endif
+
+def fail(message, code=2):
+    print(f"[DFT IDE] {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def resolve_work_path(explicit=None):
+    raw = explicit or os.environ.get("DFT_IDE_WORK_PATH") or os.environ.get("project_path") or os.getcwd()
+    work_path = Path(raw).expanduser().resolve()
+    legacy = work_path / "verification"
+    if not explicit and not os.environ.get("DFT_IDE_WORK_PATH") and legacy.is_dir():
+        work_path = legacy
+    return work_path
+
+
+def resolve_env_file(work_path, explicit=None):
+    return Path(explicit).expanduser().resolve() if explicit else work_path / ENV_FILE_NAME
+
+
+def load_managed_env(env_file):
+    if not env_file.exists():
+        return {}
+    try:
+        data = json.loads(env_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        fail(f"Cannot read environment file {env_file}: {error}")
+    if not isinstance(data, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in data.items()):
+        fail(f"Environment file must contain a JSON object of string values: {env_file}")
+    return data
+
+
+def save_managed_env(env_file, values):
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = env_file.with_name(f"{env_file.name}.tmp.{os.getpid()}")
+    temp_file.write_text(json.dumps(values, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temp_file.replace(env_file)
+
+
+def env_command(argv):
+    parser = argparse.ArgumentParser(prog=f"{Path(sys.argv[0]).name} env")
+    parser.add_argument("action", choices=("list", "get", "set", "unset"))
+    parser.add_argument("name", nargs="?")
+    parser.add_argument("value", nargs="?")
+    parser.add_argument("--work-path")
+    parser.add_argument("--env-file")
+    parser.add_argument("--all", action="store_true", dest="show_all")
+    args = parser.parse_args(argv)
+    work_path = resolve_work_path(args.work_path)
+    env_file = resolve_env_file(work_path, args.env_file)
+    values = load_managed_env(env_file)
+
+    if args.action == "list":
+        output = dict(os.environ) if args.show_all else {}
+        output.update(values)
+        output.setdefault("DFT_IDE_FLOW", FLOW)
+        output.setdefault("DFT_IDE_WORK_PATH", str(work_path))
+        for name in sorted(output):
+            print(f"{name}={output[name]}")
+        return 0
+    if not args.name:
+        fail(f"env {args.action} requires NAME")
+    if not ENV_NAME_PATTERN.fullmatch(args.name):
+        fail(f"Invalid environment variable name: {args.name}")
+    if args.action == "get":
+        if args.name in values:
+            print(values[args.name])
+            return 0
+        if args.name in os.environ:
+            print(os.environ[args.name])
+            return 0
+        return 1
+    if args.name in RESERVED_ENV:
+        fail(f"{args.name} is managed by the Flow runtime and cannot be persisted")
+    if args.action == "set":
+        if args.value is None:
+            fail("env set requires NAME and VALUE")
+        values[args.name] = args.value
+        save_managed_env(env_file, values)
+        print(f"{args.name}={args.value}")
+        return 0
+    removed = values.pop(args.name, None)
+    save_managed_env(env_file, values)
+    return 0 if removed is not None else 1
+
+
+def clone_command(argv):
+    parser = argparse.ArgumentParser(prog=f"{Path(sys.argv[0]).name} clone")
+    parser.add_argument("project")
+    parser.add_argument("--gitlab-host", default=os.environ.get("DFT_IDE_GITLAB_HOST", DEFAULT_GITLAB_HOST))
+    parser.add_argument("--repo-name")
+    parser.add_argument("--repo-url")
+    parser.add_argument("--dest")
+    parser.add_argument("--branch")
+    args = parser.parse_args(argv)
+    repo_name = args.repo_name or f"{args.project}_{REPO_SUFFIX}"
+    repo_url = args.repo_url or f"{args.gitlab_host.rstrip('/')}/{repo_name}.git"
+    destination = Path(args.dest).expanduser().resolve() if args.dest else Path.cwd() / repo_name
+    if destination.exists():
+        fail(f"Clone destination already exists: {destination}")
+    command = ["git", "clone"]
+    if args.branch:
+        command.extend(("--branch", args.branch))
+    command.extend((repo_url, str(destination)))
+    print("[DFT IDE] " + shlex.join(command))
+    result = subprocess.run(command, check=False)
+    if result.returncode == 0:
+        print(f"DFT_IDE_WORK_PATH={destination}")
+    return result.returncode
+
+
+def csh_quote(value):
+    if "\n" in value or "\r" in value:
+        fail("Newlines are not allowed in Csh command arguments")
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def run_csh(lines, env, log_file=None):
+    shell = env.get("DFT_IDE_FLOW_SHELL", "/bin/csh")
+    script_path = None
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".csh", encoding="utf-8", newline="\n", delete=False) as handle:
+            handle.write("#!/bin/csh -f\n")
+            handle.write("\n".join(lines))
+            handle.write("\n")
+            script_path = handle.name
+        process = subprocess.Popen(
+            [shell, "-f", script_path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, errors="replace", env=env,
+        )
+        log_handle = open(log_file, "w", encoding="utf-8") if log_file else None
+        try:
+            assert process.stdout is not None
+            for line in process.stdout:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                if log_handle:
+                    log_handle.write(line)
+                    log_handle.flush()
+        finally:
+            if log_handle:
+                log_handle.close()
+        return process.wait()
+    except FileNotFoundError:
+        fail(f"Csh executable not found: {shell}", 127)
+    finally:
+        if script_path:
+            try:
+                Path(script_path).unlink()
+            except OSError:
+                pass
+
+
+def source_lines(source_file):
+    return [f"source {csh_quote(str(source_file))}"] if source_file else []
+
+
+def run_eco(work_path, env, source_file, phase):
+    eco_file = work_path / "eco" / ECO_FILE
+    if not eco_file.is_file():
+        return 0
+    eco_env = dict(env)
+    eco_env["DFT_IDE_ECO_PHASE"] = phase
+    lines = source_lines(source_file)
+    lines.extend((f"source {csh_quote(str(eco_file))}", "exit $status"))
+    return run_csh(lines, eco_env)
+
+
+def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=None, source=None, no_eco=False):
+    if step not in STEPS:
+        fail(f"Unknown {FLOW_LABEL} step: {step}")
+    work_path = resolve_work_path(work_path)
+    if not work_path.is_dir():
+        fail(f"Work path does not exist: {work_path}")
+    managed = load_managed_env(resolve_env_file(work_path, env_file))
+    runtime_env = dict(os.environ)
+    runtime_env.update(managed)
+    module_name = module or runtime_env.get("DFT_IDE_MODULE") or runtime_env.get("module")
+    if not module_name:
+        fail("DFT_IDE_MODULE or --module is required")
+    runtime_env.update({
+        "DFT_IDE_FLOW": FLOW, "DFT_IDE_STEP": step,
+        "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODULE": module_name,
+        "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
+    })
+    source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
+    source_file = Path(source_value).expanduser().resolve() if source_value else None
+    if source_file is None and (work_path / "project.cshrc").is_file():
+        source_file = work_path / "project.cshrc"
+    if source_file is not None and not source_file.is_file():
+        fail(f"Environment source file does not exist: {source_file}")
+    cfg_file = Path(cfg).expanduser().resolve() if cfg else work_path / "configs" / f"{module_name}.cfg"
+    log_path = work_path / "logs" / module_name
+    log_path.mkdir(parents=True, exist_ok=True)
+
+    if not no_eco:
+        before_status = run_eco(work_path, runtime_env, source_file, "before")
+        if before_status:
+            print(f"[DFT IDE] {FLOW_LABEL} before ECO failed: step={step} status={before_status}", file=sys.stderr)
+            return before_status
+
+    lines = source_lines(source_file)
+    lines.extend(("alias dsubrun_I >& /dev/null", 'if ($status != 0) alias dsubrun_I ""'))
+    if step == "check_env":
+        command = [TOOL, step, "-cfg", str(cfg_file)] + list(step_args)
+    else:
+        command = ["lander", step] + list(step_args)
+    lines.extend(("dsubrun_I " + " ".join(csh_quote(item) for item in command), "exit $status"))
+    print(f"[DFT IDE] {FLOW_LABEL} step start: {step}")
+    flow_status = run_csh(lines, runtime_env, log_path / f"{step}.log")
+    runtime_env["DFT_IDE_STEP_STATUS"] = str(flow_status)
+    after_status = 0 if no_eco else run_eco(work_path, runtime_env, source_file, "after")
+    if flow_status:
+        print(f"[DFT IDE] {FLOW_LABEL} step failed: step={step} status={flow_status}", file=sys.stderr)
+        return flow_status
+    if after_status:
+        print(f"[DFT IDE] {FLOW_LABEL} after ECO failed: step={step} status={after_status}", file=sys.stderr)
+        return after_status
+    print(f"[DFT IDE] {FLOW_LABEL} step completed: {step}")
+    return 0
+
+
+def print_help():
+    name = Path(sys.argv[0]).name
+    print(f"""Usage:
+  {name} <step> [step arguments...]
+  {name} run [options] <step> [step arguments...]
+  {name} steps
+  {name} clone <project> [options]
+  {name} env <list|get|set|unset> [NAME] [VALUE] [options]
+
+Run options (place before <step>):
+  --work-path PATH  --module NAME  --cfg FILE  --env-file FILE
+  --source FILE     --no-eco
+""")
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print_help()
+        return 0
+    command = argv[0]
+    if command == "steps":
+        print("\n".join(STEPS))
+        return 0
+    if command == "clone":
+        return clone_command(argv[1:])
+    if command == "env":
+        return env_command(argv[1:])
+    if command == "run":
+        parser = argparse.ArgumentParser(prog=f"{Path(sys.argv[0]).name} run")
+        parser.add_argument("--work-path")
+        parser.add_argument("--module")
+        parser.add_argument("--cfg")
+        parser.add_argument("--env-file")
+        parser.add_argument("--source")
+        parser.add_argument("--no-eco", action="store_true")
+        parser.add_argument("step", choices=STEPS)
+        args, step_args = parser.parse_known_args(argv[1:])
+        if step_args[:1] == ["--"]:
+            step_args = step_args[1:]
+        return run_step(args.step, step_args, args.work_path, args.module, args.cfg, args.env_file, args.source, args.no_eco)
+    return run_step(command, argv[1:])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Standalone Hibist Flow CLI with ECO hooks, repository clone and env management."""
+"""Standalone Lander IP Flow CLI with ECO hooks, repository clone and env management."""
 
 import argparse
 import json
@@ -11,16 +11,16 @@ import sys
 import tempfile
 from pathlib import Path
 
-FLOW = "hibist"
-FLOW_LABEL = "Hibist"
-TOOL = "dftm"
-REPO_SUFFIX = "hibist"
-ECO_FILE = "run_flow_hibist_eco"
+FLOW = "lander"
+FLOW_LABEL = "Lander IP"
+TOOL = "ddv"
+REPO_SUFFIX = "lander"
+ECO_FILE = "run_flow_lander_ip_eco"
 DEFAULT_GITLAB_HOST = "http://code-dg.hisi.huawei.com/DFT_IDE_PROJECTS"
 STEPS = (
-    "gen_analysis_env", "run_analysis", "gen_insert_env", "run_insert",
-    "gen_build_env", "run_build", "gen_syn_env", "run_syn",
-    "gen_fml_env", "run_fml", "gen_sim_env", "run_sim", "release",
+    "create_project", "gen_design_info", "gen_plan_env", "release_plan",
+    "gen_pdl_env", "gen_run_env", "run_ip_gen", "gen_sim_env",
+    "run_sim", "upload_simu_database_pre", "upload_simu_database",
 )
 ENV_FILE_NAME = ".dft_ide_env.json"
 ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -38,7 +38,7 @@ def fail(message, code=2):
 def resolve_work_path(explicit=None):
     raw = explicit or os.environ.get("DFT_IDE_WORK_PATH") or os.environ.get("project_path") or os.getcwd()
     work_path = Path(raw).expanduser().resolve()
-    legacy = work_path / FLOW
+    legacy = work_path / "verification"
     if not explicit and not os.environ.get("DFT_IDE_WORK_PATH") and legacy.is_dir():
         work_path = legacy
     return work_path
@@ -212,6 +212,7 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
         "DFT_IDE_FLOW": FLOW, "DFT_IDE_STEP": step,
         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODULE": module_name,
         "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
+        "DFT_IDE_LANDER_MODE": "ip",
     })
     source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
     source_file = Path(source_value).expanduser().resolve() if source_value else None
@@ -219,8 +220,8 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
         source_file = work_path / "project.cshrc"
     if source_file is not None and not source_file.is_file():
         fail(f"Environment source file does not exist: {source_file}")
-    cfg_file = Path(cfg).expanduser().resolve() if cfg else work_path / "cfg" / module_name / f"{module_name}.sailor.cfg"
-    log_path = work_path / "work" / module_name / "log"
+    cfg_file = Path(cfg).expanduser().resolve() if cfg else work_path / "configs" / f"{module_name}.cfg"
+    log_path = work_path / "logs" / module_name
     log_path.mkdir(parents=True, exist_ok=True)
 
     if not no_eco:

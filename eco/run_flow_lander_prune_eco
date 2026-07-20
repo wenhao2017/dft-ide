@@ -1,0 +1,20 @@
+#!/bin/csh -f
+
+# Project-level Lander prune ECO dispatcher.
+if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE) exit 2
+set step = "$DFT_IDE_STEP"
+set phase = "$DFT_IDE_ECO_PHASE"
+if ("$phase" != "before" && "$phase" != "after") exit 2
+
+switch ("$step")
+case "create_project":
+case "gen_design_info":
+case "gen_prune_env":
+case "run_prune":
+    # Split into dedicated case blocks and add project/domain ECO calls as needed.
+    breaksw
+default:
+    echo "[DFT IDE] Unknown Lander prune ECO step: $step"
+    exit 2
+endsw
+exit 0

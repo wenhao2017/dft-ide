@@ -3,12 +3,12 @@
 
 - id: prepare_workspace
   name: prepare_workspace
-  command: "lander prepare_workspace --dir ./verify_run"
+  command: "run_flow_lander prepare_workspace --dir ./verify_run"
   description: 准备 verification workspace
 
 - id: load_config
   name: load_config
-  command: "lander load_config --file lander_verify.cfg"
+  command: "run_flow_lander load_config --file lander_verify.cfg"
   description: 加载 lander 配置
 
 - id: check_env
@@ -18,21 +18,21 @@
 
 - id: submit_mode
   name: submit_mode
-  command: "lander submit_mode --mode scan_test"
+  command: "run_flow_lander submit_mode --mode scan_test"
   description: 提交仿真 mode 任务
 
 - id: collect_result
   name: collect_result
-  command: "lander collect_result --dir ./verify_run"
+  command: "run_flow_lander collect_result --dir ./verify_run"
   description: 收集仿真结果
 
 - id: parse_report
   name: parse_report
-  command: "lander parse_report --out report.json"
+  command: "run_flow_lander parse_report --out report.json"
   description: 解析 pass / fail / error 报告
 
 - id: publish_dashboard
   name: publish_dashboard
-  command: "lander publish_dashboard --server ide-board"
+  command: "run_flow_lander publish_dashboard --server ide-board"
   description: 发布结果到 IDE 看板
 

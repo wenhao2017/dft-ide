@@ -1,0 +1,35 @@
+#!/bin/csh -f
+
+# Fallback project-level Lander ECO dispatcher.
+# Mode pipelines use run_flow_lander_<DFT_IDE_LANDER_MODE>_eco when the mode
+# variable is set. Keep generic cross-mode ECO commands in this file.
+
+if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE) then
+    echo "[DFT IDE] DFT_IDE_STEP and DFT_IDE_ECO_PHASE are required."
+    exit 2
+endif
+
+set step = "$DFT_IDE_STEP"
+set phase = "$DFT_IDE_ECO_PHASE"
+if ("$phase" != "before" && "$phase" != "after") then
+    echo "[DFT IDE] Unsupported Lander ECO phase: $phase"
+    exit 2
+endif
+
+# Add generic Lander ECO dispatch rules here. With no matching action, return 0.
+switch ("$step")
+case "prepare_workspace":
+case "load_config":
+case "check_env":
+case "submit_mode":
+case "collect_result":
+case "parse_report":
+case "publish_dashboard":
+    # Add a dedicated case block when this step needs an ECO action.
+    breaksw
+default:
+    echo "[DFT IDE] Unknown Lander ECO step: $step"
+    exit 2
+endsw
+
+exit 0

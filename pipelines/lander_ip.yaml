@@ -3,55 +3,55 @@
 
 - id: create_project
   name: create_project
-  command: "run_flow_lander create_project"
+  command: "run_flow_lander_ip create_project"
   description: 创建每个步骤文件目录
 
 - id: gen_design_info
   name: gen_design_info
-  command: "run_flow_lander gen_design_info"
+  command: "run_flow_lander_ip gen_design_info"
   description: 生成工具所需文件
 
 - id: gen_plan_env
   name: gen_plan_env
-  command: "run_flow_lander gen_plan_env"
+  command: "run_flow_lander_ip gen_plan_env"
   description: 生成验证tc和分组plan
 
 - id: release_plan
   name: release_plan
-  command: "run_flow_lander release_plan"
+  command: "run_flow_lander_ip release_plan"
   description: 打包交付tc和分组plan
 
 - id: gen_pdl_env
   name: gen_pdl_env
-  command: "run_flow_lander gen_pdl_env"
+  command: "run_flow_lander_ip gen_pdl_env"
   description: 生成setup pdl文件
 
 - id: gen_run_env
   name: gen_run_env
-  command: "run_flow_lander gen_run_env"
+  command: "run_flow_lander_ip gen_run_env"
   description: 生成tb和wgl所需的中间件
 
 - id: run_ip_gen
   name: run_ip_gen
-  command: "run_flow_lander run_ip_gen"
+  command: "run_flow_lander_ip run_ip_gen"
   description: 执行gen向量进程
 
 - id: gen_sim_env
   name: gen_sim_env
-  command: "run_flow_lander gen_sim_env"
+  command: "run_flow_lander_ip gen_sim_env"
   description: 生成仿真环境
 
 - id: run_sim
   name: run_sim
-  command: "run_flow_lander run_sim"
+  command: "run_flow_lander_ip run_sim"
   description: 运行仿真
 
 - id: upload_simu_database_pre
   name: upload_simu_database_pre
-  command: "run_flow_lander upload_simu_database_pre"
+  command: "run_flow_lander_ip upload_simu_database_pre"
   description: 上传数据库前准备工作
 
 - id: upload_simu_database
   name: upload_simu_database
-  command: "run_flow_lander upload_simu_database"
+  command: "run_flow_lander_ip upload_simu_database"
   description: 上传数据到数据库

@@ -3,45 +3,45 @@
 
 - id: create_project
   name: create_project
-  command: "run_flow_lander create_project"
+  command: "run_flow_lander_fml create_project"
   description: 创建每个步骤文件目录
 
 - id: gen_design_info
   name: gen_design_info
-  command: "run_flow_lander gen_design_info"
+  command: "run_flow_lander_fml gen_design_info"
   description: 生成工具所需文件
 
 - id: gen_plan_env
   name: gen_plan_env
-  command: "run_flow_lander gen_plan_env"
+  command: "run_flow_lander_fml gen_plan_env"
   description: 生成验证tc和分组plan
 
 - id: release_plan
   name: release_plan
-  command: "run_flow_lander release_plan"
+  command: "run_flow_lander_fml release_plan"
   description: 打包交付tc和分组plan
 
 - id: gen_fml_env
   name: gen_fml_env
-  command: "run_flow_lander gen_fml_env"
+  command: "run_flow_lander_fml gen_fml_env"
   description: 生成 Formality 验证环境
 
 - id: run_fml
   name: run_fml
-  command: "run_flow_lander run_fml"
+  command: "run_flow_lander_fml run_fml"
   description: 生成 Formality 验证环境
 
 - id: upload_fml_database_pre
   name: upload_fml_database_pre
-  command: "run_flow_lander upload_fml_database_pre"
+  command: "run_flow_lander_fml upload_fml_database_pre"
   description: 上传数据库前准备工作
 
 - id: upload_fml_database
   name: upload_fml_database
-  command: "run_flow_lander upload_fml_database"
+  command: "run_flow_lander_fml upload_fml_database"
   description: 上传数据到数据库
 
 - id: gen_report
   name: gen_report
-  command: "run_flow_lander gen_report"
+  command: "run_flow_lander_fml gen_report"
   description: 生成报告summary

@@ -1,0 +1,63 @@
+#!/bin/csh -f
+
+# Project-level Hibist ECO dispatcher.
+# Add project/domain ECO commands inside the matching step and phase branch.
+
+if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE) then
+    echo "[DFT IDE] DFT_IDE_STEP and DFT_IDE_ECO_PHASE are required."
+    exit 2
+endif
+
+set step = "$DFT_IDE_STEP"
+set phase = "$DFT_IDE_ECO_PHASE"
+if ("$phase" != "before" && "$phase" != "after") then
+    echo "[DFT IDE] Unsupported Hibist ECO phase: $phase"
+    exit 2
+endif
+
+switch ("$step")
+case "gen_analysis_env":
+    # Add before/after ECO commands for gen_analysis_env here.
+    breaksw
+case "run_analysis":
+    # Add before/after ECO commands for run_analysis here.
+    breaksw
+case "gen_insert_env":
+    # Add before/after ECO commands for gen_insert_env here.
+    breaksw
+case "run_insert":
+    # Add before/after ECO commands for run_insert here.
+    breaksw
+case "gen_build_env":
+    # Add before/after ECO commands for gen_build_env here.
+    breaksw
+case "run_build":
+    # Add before/after ECO commands for run_build here.
+    breaksw
+case "gen_syn_env":
+    # Add before/after ECO commands for gen_syn_env here.
+    breaksw
+case "run_syn":
+    # Add before/after ECO commands for run_syn here.
+    breaksw
+case "gen_fml_env":
+    # Add before/after ECO commands for gen_fml_env here.
+    breaksw
+case "run_fml":
+    # Add before/after ECO commands for run_fml here.
+    breaksw
+case "gen_sim_env":
+    # Add before/after ECO commands for gen_sim_env here.
+    breaksw
+case "run_sim":
+    # Add before/after ECO commands for run_sim here.
+    breaksw
+case "release":
+    # Add before/after ECO commands for release here.
+    breaksw
+default:
+    echo "[DFT IDE] Unknown Hibist ECO step: $step"
+    exit 2
+endsw
+
+exit 0

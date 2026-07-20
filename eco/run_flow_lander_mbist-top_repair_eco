@@ -1,0 +1,31 @@
+#!/bin/csh -f
+
+# Project-level Lander MBIST top repair ECO dispatcher.
+if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE) exit 2
+set step = "$DFT_IDE_STEP"
+set phase = "$DFT_IDE_ECO_PHASE"
+if ("$phase" != "before" && "$phase" != "after") exit 2
+
+switch ("$step")
+case "create_project":
+case "gen_design_info":
+case "gen_plan_env":
+case "release_plan":
+case "gen_pdl_env":
+case "gen_dftm_excel":
+case "gen_mbist_setting":
+case "gen_run_env":
+case "run_mbist_gen":
+case "sed_3d_tb":
+case "gen_sim_env":
+case "run_sim":
+case "upload_simu_database_pre":
+case "upload_simu_database":
+case "run_wgl_check":
+    # Split into dedicated case blocks and add project/domain ECO calls as needed.
+    breaksw
+default:
+    echo "[DFT IDE] Unknown Lander MBIST top repair ECO step: $step"
+    exit 2
+endsw
+exit 0

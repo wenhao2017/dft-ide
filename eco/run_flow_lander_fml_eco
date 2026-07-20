@@ -1,0 +1,25 @@
+#!/bin/csh -f
+
+# Project-level Lander FML ECO dispatcher.
+if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE) exit 2
+set step = "$DFT_IDE_STEP"
+set phase = "$DFT_IDE_ECO_PHASE"
+if ("$phase" != "before" && "$phase" != "after") exit 2
+
+switch ("$step")
+case "create_project":
+case "gen_design_info":
+case "gen_plan_env":
+case "release_plan":
+case "gen_fml_env":
+case "run_fml":
+case "upload_fml_database_pre":
+case "upload_fml_database":
+case "gen_report":
+    # Split into dedicated case blocks and add project/domain ECO calls as needed.
+    breaksw
+default:
+    echo "[DFT IDE] Unknown Lander FML ECO step: $step"
+    exit 2
+endsw
+exit 0

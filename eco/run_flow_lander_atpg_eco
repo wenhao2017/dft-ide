@@ -1,0 +1,42 @@
+#!/bin/csh -f
+
+# Project-level Lander ATPG ECO dispatcher.
+
+if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE) then
+    echo "[DFT IDE] DFT_IDE_STEP and DFT_IDE_ECO_PHASE are required."
+    exit 2
+endif
+
+set step = "$DFT_IDE_STEP"
+set phase = "$DFT_IDE_ECO_PHASE"
+if ("$phase" != "before" && "$phase" != "after") then
+    echo "[DFT IDE] Unsupported Lander ATPG ECO phase: $phase"
+    exit 2
+endif
+
+switch ("$step")
+case "create_project":
+case "gen_design_info":
+case "gen_plan_env":
+case "release_plan":
+case "gen_atpg_setting":
+case "gen_pdl_env":
+case "gen_atpg_env_pre":
+case "gen_atpg_env":
+case "gen_crg_env":
+case "run_crg_gen":
+case "run_atpg":
+case "gen_all_scan_env":
+case "run_all_scan":
+case "delivery_data":
+case "sed_3d_tb":
+case "gen_sim_env":
+case "run_sim":
+    # Split this into a dedicated case block when the step needs ECO commands.
+    breaksw
+default:
+    echo "[DFT IDE] Unknown Lander ATPG ECO step: $step"
+    exit 2
+endsw
+
+exit 0

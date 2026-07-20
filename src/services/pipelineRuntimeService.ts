@@ -76,7 +76,13 @@ function getPipelineTerminalTitle(flowLabel: string, moduleKey: string): string 
   return `${flowLabel} / ${moduleKey}`;
 }
 
-function buildPipelineStepSourceCommand(projectPath: string | undefined, stepCommand: string): string {
+const PIPELINE_PYTHON_MODULE = 'python/3.10.6';
+
+function quoteCshArgument(value: string): string {
+  return `"${value.replace(/(["\\$`])/g, '\\$1')}"`;
+}
+
+function buildPipelineStepExecutionCommand(projectPath: string | undefined, stepCommand: string): string {
   let scriptPath = '';
   const scriptName = stepCommand.split(' ')[0];
   if (projectPath) {
@@ -85,7 +91,9 @@ function buildPipelineStepSourceCommand(projectPath: string | undefined, stepCom
   if (!scriptPath || !fs.existsSync(scriptPath)) {
     scriptPath = path.resolve(__dirname, '../scripts', scriptName);
   }
-  return `source ${scriptPath}${stepCommand.substring(scriptName.length)}`;
+  const stepArguments = stepCommand.substring(scriptName.length).trim();
+  const argumentsSuffix = stepArguments ? ` ${stepArguments}` : '';
+  return `ma ${PIPELINE_PYTHON_MODULE} && python3 ${quoteCshArgument(scriptPath)}${argumentsSuffix}`;
 }
 
 function stripAnsi(value: string): string {
@@ -168,7 +176,7 @@ function buildStepCommands(
   const stepCommand = task.command.trim();
   commands.push(`echo "__DFT_IDE_STEP_START__|${runId}|${task.id}"`);
   commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
-  commands.push(buildPipelineStepSourceCommand(projectPath, stepCommand));
+  commands.push(buildPipelineStepExecutionCommand(projectPath, stepCommand));
   commands.push('set dft_ide_step_status = $status');
   commands.push(`echo "${buildStepEndMarker(runId, task.id)}$dft_ide_step_status"`);
 
@@ -468,7 +476,7 @@ function runSequentialSimulation(
         }
         commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
         // d. 步骤命令
-        commands.push(buildPipelineStepSourceCommand(projectPath, stepCommand));
+        commands.push(buildPipelineStepExecutionCommand(projectPath, stepCommand));
 
         openTerminal(getPipelineTerminalTitle(flowLabel, moduleKey), commands, cwd);
       }
@@ -718,7 +726,7 @@ export class PipelineRuntimeService {
       const stepCommand = task.command.trim();
       let commands: string[] = [];
       commands.push(`echo "=== [DFT IDE] Rerun Step: ${task.name || task.id} ==="`);
-      commands.push(buildPipelineStepSourceCommand(resolveProjectPath(flowKey), stepCommand));
+      commands.push(buildPipelineStepExecutionCommand(resolveProjectPath(flowKey), stepCommand));
       this.options.openTerminal(getPipelineTerminalTitle(runtime.flowLabel, moduleKey), commands);
     }
 
