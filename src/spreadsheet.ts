@@ -29,19 +29,17 @@ type SpreadsheetSheet = {
 };
 
 type CompareSession = {
-  fileBufferA?: Buffer;
-  fileBufferB?: Buffer;
-  webviewPanelA?: vscode.WebviewPanel;
-  webviewPanelB?: vscode.WebviewPanel;
-  spreadsheetDataA?: SpreadsheetSheet[];
-  spreadsheetDataB?: SpreadsheetSheet[];
+  fileBufferA: Buffer;
+  webviewPanelA: vscode.WebviewPanel;
+  spreadsheetDataA: SpreadsheetSheet[];
   commitHashA?: string;
-  commitHashB?: string;
+  createdAt: number;
+  isGitDocumentA: boolean;
   repoRoot: string | null;
 };
 
 export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider {
-  private compareSession: CompareSession = { repoRoot: './' };
+  private readonly compareSessions = new Map<string, CompareSession>();
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -53,7 +51,7 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
     return {
       uri,
       dispose: () => {
-        this.resetCompareSession();
+        this.compareSessions.delete(this.comparisonKey(uri.fsPath));
       },
     };
   }
@@ -185,16 +183,18 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
         vscode.window.showErrorMessage('当前文件不在 Git 仓库中，无法读取历史版本文件。');
         return;
       }
-      this.renderGitComparison(webviewPanel, fileBuffer, spreadsheetData, commitHash, repoRoot);
-      return;
     }
 
-    webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview, spreadsheetData);
-    webviewPanel.webview.onDidReceiveMessage(async (message: unknown) => {
-      if (this.isSaveMessage(message)) {
-        await this.writeDataToFile(document.uri.fsPath, message.data);
-      }
-    });
+    // An SCM diff pairs a Git virtual document with a regular file: document.
+    // Register both sides so whichever resolves second can trigger cell highlighting.
+    this.renderComparisonCandidate(webviewPanel, fileBuffer, spreadsheetData, commitHash, repoRoot, filePath, isGitDocument);
+    if (!isGitDocument) {
+      webviewPanel.webview.onDidReceiveMessage(async (message: unknown) => {
+        if (this.isSaveMessage(message)) {
+          await this.writeDataToFile(document.uri.fsPath, message.data);
+        }
+      });
+    }
   }
 
   private async readDocumentBuffer(uri: vscode.Uri): Promise<{
@@ -237,61 +237,77 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
     };
   }
 
-  private renderGitComparison(
+  private renderComparisonCandidate(
     webviewPanel: vscode.WebviewPanel,
     fileBuffer: Buffer,
     spreadsheetData: SpreadsheetSheet[],
     commitHash: string | undefined,
-    repoRoot: string
+    repoRoot: string | null,
+    filePath: string,
+    isGitDocument: boolean
   ): void {
-    const session = this.compareSession;
+    const now = Date.now();
+    for (const [candidateKey, candidate] of this.compareSessions) {
+      if (now - candidate.createdAt > 30_000) {
+        this.compareSessions.delete(candidateKey);
+      }
+    }
 
-    if (!session.fileBufferA) {
-      this.compareSession = {
+    const key = this.comparisonKey(filePath);
+    const session = this.compareSessions.get(key);
+    if (!session || session.webviewPanelA === webviewPanel) {
+      this.compareSessions.set(key, {
         fileBufferA: fileBuffer,
         spreadsheetDataA: spreadsheetData,
         webviewPanelA: webviewPanel,
         commitHashA: commitHash,
+        createdAt: now,
+        isGitDocumentA: isGitDocument,
         repoRoot,
-      };
+      });
+      webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview, spreadsheetData);
+      return;
+    }
+
+    if (!session.isGitDocumentA && !isGitDocument) {
+      this.compareSessions.set(key, {
+        fileBufferA: fileBuffer,
+        spreadsheetDataA: spreadsheetData,
+        webviewPanelA: webviewPanel,
+        commitHashA: commitHash,
+        createdAt: now,
+        isGitDocumentA: false,
+        repoRoot,
+      });
       webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview, spreadsheetData);
       return;
     }
 
     try {
-      session.fileBufferB = fileBuffer;
-      session.webviewPanelB = webviewPanel;
-      session.spreadsheetDataB = spreadsheetData;
-      session.commitHashB = commitHash;
-      session.repoRoot = repoRoot;
+      const firstIsV1 = session.isGitDocumentA || !isGitDocument;
+      const v1 = firstIsV1
+        ? { buffer: session.fileBufferA, data: session.spreadsheetDataA, panel: session.webviewPanelA, ref: session.commitHashA }
+        : { buffer: fileBuffer, data: spreadsheetData, panel: webviewPanel, ref: commitHash };
+      const v2 = firstIsV1
+        ? { buffer: fileBuffer, data: spreadsheetData, panel: webviewPanel, ref: commitHash }
+        : { buffer: session.fileBufferA, data: session.spreadsheetDataA, panel: session.webviewPanelA, ref: session.commitHashA };
 
-      if (!session.webviewPanelA || !session.spreadsheetDataA || !session.spreadsheetDataB) {
-        throw new Error('Spreadsheet comparison session is incomplete.');
-      }
-
-      let diffResult: unknown;
-      if (this.compareCommitOrder(repoRoot, session.commitHashA ?? '', session.commitHashB ?? '')) {
-        diffResult = compareXlsxBuffers(session.fileBufferB, session.fileBufferA, session.commitHashB, session.commitHashA);
-        this.applyDiffStyles(session.spreadsheetDataA, diffResult, 'v1');
-        this.applyDiffStyles(session.spreadsheetDataB, diffResult, 'v2');
-      } else {
-        diffResult = compareXlsxBuffers(session.fileBufferA, session.fileBufferB, session.commitHashA, session.commitHashB);
-        this.applyDiffStyles(session.spreadsheetDataB, diffResult, 'v1');
-        this.applyDiffStyles(session.spreadsheetDataA, diffResult, 'v2');
-      }
-
-      session.webviewPanelA.webview.html = this.getHtmlForWebview(session.webviewPanelA.webview, session.spreadsheetDataA);
-      webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview, session.spreadsheetDataB);
+      const diffResult = compareXlsxBuffers(v1.buffer, v2.buffer, v1.ref, v2.ref);
+      this.applyDiffStyles(v1.data, diffResult, 'v1');
+      this.applyDiffStyles(v2.data, diffResult, 'v2');
+      v1.panel.webview.html = this.getHtmlForWebview(v1.panel.webview, v1.data);
+      v2.panel.webview.html = this.getHtmlForWebview(v2.panel.webview, v2.data);
     } catch (error) {
       console.error(`Failed to compare spreadsheet commits ${commitHash ?? ''}:`, error);
       throw error;
     } finally {
-      this.resetCompareSession();
+      this.compareSessions.delete(key);
     }
   }
 
-  private resetCompareSession(): void {
-    this.compareSession = { repoRoot: './' };
+  private comparisonKey(filePath: string): string {
+    const resolved = path.resolve(filePath);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
   }
 
   private parseGitRef(query: string): string {
@@ -647,13 +663,7 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
     }
 
     for (const cell of cells) {
-      if (!cell.changeType) {
-        continue;
-      }
-      if (version === 'v1' && cell.changeType === 'New') {
-        continue;
-      }
-      if (version === 'v2' && cell.changeType === 'Deleted') {
+      if (cell.version !== version) {
         continue;
       }
 
@@ -664,10 +674,10 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
 
       const row = sheet.rows[cell.row] ?? { cells: {} };
       const cellData = row.cells[cell.col] ?? { text: '' };
-      if (cell.changeType === 'New') {
+      if (version === 'v2' && cell.changeType === 'Deleted') {
         cellData.style = 1;
         cellData.dftDiff = 'added';
-      } else if (cell.changeType === 'Deleted') {
+      } else if (version === 'v1' && cell.changeType === 'New') {
         cellData.style = 3;
         cellData.dftDiff = 'deleted';
       } else if (cell.changeType === 'Change') {
@@ -679,7 +689,7 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
     }
   }
 
-  private getDiffCells(diffResult: unknown): Array<{ sheet: string; row: number; col: number; changeType: string }> {
+  private getDiffCells(diffResult: unknown): Array<{ sheet: string; row: number; col: number; changeType: string; version: 'v1' | 'v2' }> {
     if (!diffResult || typeof diffResult !== 'object') {
       return [];
     }
@@ -687,13 +697,14 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
     if (!Array.isArray(cells)) {
       return [];
     }
-    return cells.filter((cell): cell is { sheet: string; row: number; col: number; changeType: string } => (
+    return cells.filter((cell): cell is { sheet: string; row: number; col: number; changeType: string; version: 'v1' | 'v2' } => (
       Boolean(cell) &&
       typeof cell === 'object' &&
       typeof (cell as { sheet?: unknown }).sheet === 'string' &&
       typeof (cell as { row?: unknown }).row === 'number' &&
       typeof (cell as { col?: unknown }).col === 'number' &&
-      typeof (cell as { changeType?: unknown }).changeType === 'string'
+      typeof (cell as { changeType?: unknown }).changeType === 'string' &&
+      ((cell as { version?: unknown }).version === 'v1' || (cell as { version?: unknown }).version === 'v2')
     ));
   }
 
