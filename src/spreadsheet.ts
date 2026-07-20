@@ -9,6 +9,7 @@ type SpreadsheetCell = {
   text?: string;
   style?: number;
   merge?: [number, number];
+  dftDiff?: 'added' | 'changed' | 'deleted';
 };
 
 type SpreadsheetRow = {
@@ -24,7 +25,7 @@ type SpreadsheetSheet = {
   name: string;
   rows: SpreadsheetRows;
   merges: string[];
-  styles?: Array<Record<string, string>>;
+  styles?: Array<Record<string, unknown>>;
 };
 
 type CompareSession = {
@@ -337,7 +338,13 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
     const xSpreadsheetJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'node_modules', 'x-data-spreadsheet', 'dist', 'xspreadsheet.js'));
     const xSpreadsheetLocales = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'node_modules', 'x-data-spreadsheet', 'dist', 'locale', 'zh-cn.js'));
 
-    const hasDiff = workbookData.some((sheet) => sheet.styles?.some((style) => typeof style.dftDiff === 'string'));
+    const hasDiff = workbookData.some((sheet) => (
+      sheet.styles?.some((style) => typeof style.dftDiff === 'string') ||
+      Object.values(sheet.rows).some((row) => (
+        typeof row === 'object' && row !== null &&
+        Object.values(row.cells).some((cell) => typeof cell.dftDiff === 'string')
+      ))
+    ));
 
     return `
       <!DOCTYPE html>
@@ -397,6 +404,22 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
           .x-spreadsheet-toolbar,
           .x-spreadsheet-bottombar {
             background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-editor-background)) !important;
+            border-color: var(--vscode-panel-border) !important;
+          }
+          .x-spreadsheet-toolbar-divider {
+            border-color: var(--vscode-panel-border) !important;
+          }
+          .x-spreadsheet-icon .x-spreadsheet-icon-img {
+            opacity: 0.72;
+          }
+          body.vscode-dark .x-spreadsheet-icon .x-spreadsheet-icon-img,
+          body.vscode-high-contrast .x-spreadsheet-icon .x-spreadsheet-icon-img {
+            /* The library ships a black SVG sprite, so color/inherit cannot recolor it. */
+            filter: invert(1) brightness(1.35);
+            opacity: 0.86;
+          }
+          body.vscode-high-contrast-light .x-spreadsheet-icon .x-spreadsheet-icon-img {
+            opacity: 1;
           }
           .x-spreadsheet-item,
           .x-spreadsheet-form-field,
@@ -408,13 +431,19 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
             border-color: var(--vscode-input-border, var(--vscode-panel-border)) !important;
           }
           .x-spreadsheet-item:hover,
-          .x-spreadsheet-bottombar li:hover {
+          .x-spreadsheet-bottombar li:hover,
+          .x-spreadsheet-toolbar .x-spreadsheet-toolbar-btn:hover {
             background: var(--vscode-list-hoverBackground) !important;
           }
           .x-spreadsheet-bottombar li.active,
-          .x-spreadsheet-item.active {
+          .x-spreadsheet-item.active,
+          .x-spreadsheet-toolbar .x-spreadsheet-toolbar-btn.active {
             color: var(--vscode-list-activeSelectionForeground) !important;
             background: var(--vscode-list-activeSelectionBackground) !important;
+          }
+          .x-spreadsheet-selector .x-spreadsheet-selector-area,
+          .x-spreadsheet-editor .x-spreadsheet-editor-area {
+            border-color: var(--vscode-focusBorder, #007fd4) !important;
           }
           .x-spreadsheet-scrollbar > div {
             background: var(--vscode-scrollbarSlider-background) !important;
@@ -450,18 +479,17 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
             return value || fallback;
           };
           const isDark = () => document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast');
-          const isHighContrast = () => document.body.classList.contains('vscode-high-contrast') || document.body.classList.contains('vscode-high-contrast-light');
           const themePalette = () => ({
             background: cssColor('--vscode-editor-background', isDark() ? '#1e1e1e' : '#ffffff'),
             foreground: cssColor('--vscode-editor-foreground', isDark() ? '#d4d4d4' : '#1f2328'),
             header: cssColor('--vscode-editorGroupHeader-tabsBackground', isDark() ? '#252526' : '#f4f5f8'),
             border: cssColor('--vscode-panel-border', isDark() ? '#454545' : '#d0d7de'),
-            added: isDark() ? '#163d2a' : '#d4edda',
-            changed: isDark() ? '#4a3813' : '#fff3cd',
-            deleted: isDark() ? '#4a1f24' : '#f8d7da',
-            addedBorder: cssColor('--vscode-gitDecoration-addedResourceForeground', '#2ea043'),
-            changedBorder: cssColor('--vscode-gitDecoration-modifiedResourceForeground', '#d29922'),
-            deletedBorder: cssColor('--vscode-gitDecoration-deletedResourceForeground', '#f85149'),
+            added: isDark() ? '#205a3a' : '#d4edda',
+            changed: isDark() ? '#6a5018' : '#fff3cd',
+            deleted: isDark() ? '#702b32' : '#f8d7da',
+            addedBorder: cssColor('--vscode-gitDecoration-addedResourceForeground', isDark() ? '#56d48f' : '#2ea043'),
+            changedBorder: cssColor('--vscode-gitDecoration-modifiedResourceForeground', isDark() ? '#f0c454' : '#b78103'),
+            deletedBorder: cssColor('--vscode-gitDecoration-deletedResourceForeground', isDark() ? '#ff7b83' : '#cf222e'),
           });
 
           const cloneAndThemeData = (data) => {
@@ -469,21 +497,45 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
             const palette = themePalette();
             for (let sheetIndex = 0; sheetIndex < themed.length; sheetIndex += 1) {
               const sheet = themed[sheetIndex];
-              if (!Array.isArray(sheet.styles)) continue;
-              const originalStyles = initialWorkbookData[sheetIndex]?.styles || [];
-              sheet.styles = sheet.styles.map((style, styleIndex) => {
-                const kind = style?.dftDiff || originalStyles[styleIndex]?.dftDiff;
-                if (!style || !kind) return style;
+              const originalSheet = initialWorkbookData[sheetIndex];
+              if (!originalSheet) continue;
+
+              const sourceStyles = Array.isArray(originalSheet.styles) ? originalSheet.styles : [];
+              sheet.styles = Array.isArray(sheet.styles)
+                ? sheet.styles.filter((style) => !style?.dftDiff)
+                : [];
+
+              const styleIndexes = {};
+              ['added', 'changed', 'deleted'].forEach((kind) => {
                 const color = kind === 'added' ? palette.added : kind === 'deleted' ? palette.deleted : palette.changed;
                 const borderColor = kind === 'added' ? palette.addedBorder : kind === 'deleted' ? palette.deletedBorder : palette.changedBorder;
-                return {
-                  ...style,
+                styleIndexes[kind] = sheet.styles.length;
+                sheet.styles.push({
                   bgcolor: color,
-                  border: isHighContrast() ? {
+                  color: palette.foreground,
+                  dftDiff: kind,
+                  border: {
                     top: ['thin', borderColor], right: ['thin', borderColor],
                     bottom: ['thin', borderColor], left: ['thin', borderColor],
-                  } : style.border,
-                };
+                  },
+                });
+              });
+
+              Object.keys(originalSheet.rows || {}).forEach((rowKey) => {
+                if (rowKey === 'len') return;
+                const originalRow = originalSheet.rows[rowKey];
+                if (!originalRow?.cells) return;
+                Object.keys(originalRow.cells).forEach((cellKey) => {
+                  const originalCell = originalRow.cells[cellKey];
+                  const kind = originalCell?.dftDiff || sourceStyles[originalCell?.style]?.dftDiff;
+                  if (!kind || styleIndexes[kind] === undefined) return;
+                  const targetRow = sheet.rows[rowKey] || { cells: {} };
+                  const targetCell = targetRow.cells[cellKey] || { text: '' };
+                  targetCell.style = styleIndexes[kind];
+                  targetCell.dftDiff = kind;
+                  targetRow.cells[cellKey] = targetCell;
+                  sheet.rows[rowKey] = targetRow;
+                });
               });
             }
             return themed;
@@ -501,8 +553,8 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
               const palette = themePalette();
               if (normalized === '#fff' || normalized === '#ffffff') return palette.background;
               if (normalized === '#f4f5f8' || normalized === '#f5f6f7' || normalized === '#f8f8f9') return palette.header;
-              if (normalized === '#e6e6e6' || normalized === '#ddd' || normalized === '#d0d0d0') return palette.border;
-              if (normalized === '#585757' || normalized === '#333333' || normalized === '#0a0a0a') return palette.foreground;
+              if (normalized === '#e6e6e6' || normalized === '#ddd' || normalized === '#d0d0d0' || normalized === '#c6c6c6') return palette.border;
+              if (normalized === '#000' || normalized === '#000000' || normalized === '#010101' || normalized === '#585757' || normalized === '#333333' || normalized === '#0a0a0a') return palette.foreground;
               return value;
             };
             const wrap = (name, properties) => {
@@ -614,10 +666,13 @@ export class SpreadsheetProvider implements vscode.CustomReadonlyEditorProvider 
       const cellData = row.cells[cell.col] ?? { text: '' };
       if (cell.changeType === 'New') {
         cellData.style = 1;
+        cellData.dftDiff = 'added';
       } else if (cell.changeType === 'Deleted') {
         cellData.style = 3;
+        cellData.dftDiff = 'deleted';
       } else if (cell.changeType === 'Change') {
         cellData.style = 2;
+        cellData.dftDiff = 'changed';
       }
       row.cells[cell.col] = cellData;
       sheet.rows[cell.row] = row;
