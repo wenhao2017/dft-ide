@@ -61,8 +61,8 @@ const flows = [
   {
     key: 'Common',
     label: '公共配置',
-    title: '公共基础配置',
-    desc: '管理工作区路径、Design Tree 结构、Git 协同及本地状态。',
+    title: '公共配置与数据协同',
+    desc: '维护四仓路径与 Design Tree，管理公共文件同步、差异确认及 Git 状态。',
     icon: <SettingOutlined />,
     accent: '#2563eb',
     status: 'Ready',
@@ -71,7 +71,7 @@ const flows = [
     key: 'Hibist',
     label: '设计流程 (Hibist)',
     title: 'DFT 设计 (Hibist)',
-    desc: '按模块管理工具版本、集群资源选择、执行参数配置和设计结果。',
+    desc: '按 Design Tree 模块配置环境、工具与 Donau 资源，运行设计任务并查看、提交结果。',
     icon: <RocketOutlined />,
     accent: '#7c3aed',
     status: 'Ready',
@@ -80,7 +80,7 @@ const flows = [
     key: 'Sailor',
     label: '设计流程 (Sailor)',
     title: 'DFT 设计 (Sailor)',
-    desc: '按模块管理工具版本、集群资源选择、执行参数配置和设计结果。',
+    desc: '按 Design Tree 模块配置环境、工具与 Donau 资源，完成任务执行、结果查看和端云协同。',
     icon: <ThunderboltOutlined />,
     accent: '#0ea5e9',
     status: 'Ready',
@@ -89,7 +89,7 @@ const flows = [
     key: 'Verification',
     label: '仿真验证 (Lander)',
     title: '仿真与验证 (Lander)',
-    desc: '按模块管理仿真套件、自动化测试用例运行、日志与覆盖率结果。',
+    desc: '管理 Stage 与 Lander 配置转换，按 Mode/Step 编排仿真参数、工具和 Donau 资源，并追踪执行日志与历史。',
     icon: <CheckCircleOutlined />,
     accent: '#059669',
     status: 'Ready',
@@ -98,7 +98,7 @@ const flows = [
     key: 'Formal',
     label: '形式验证',
     title: '形式验证 (规划中)',
-    desc: '形式化等价性检查工具链配置、任务执行与结果归档。',
+    desc: '规划提供形式化检查的环境配置、任务编排、结果查看与协同归档。',
     icon: <ExperimentOutlined />,
     accent: '#d97706',
     status: 'Planned',
@@ -108,7 +108,7 @@ const flows = [
     key: 'STA',
     label: '静态时序',
     title: '静态时序 (规划中)',
-    desc: '静态时序分析配置、检查执行与报告归档。',
+    desc: '规划提供静态时序分析配置、检查执行、报告查看与协同归档。',
     icon: <LineChartOutlined />,
     accent: '#dc2626',
     status: 'Planned',
@@ -600,8 +600,9 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
               >
                 从项目列表进入本地 DFT 工作区。每个项目对应 GitLab 四个仓库：
                 <Text code>项目名_data</Text>、<Text code>项目名_hibist</Text>、
-                <Text code>项目名_sailor</Text>、<Text code>项目名_verification</Text>，本地目录固定为
-                <Text code>data/hibist/sailor/verification</Text>。
+                <Text code>项目名_sailor</Text>、<Text code>项目名_verification</Text>。四仓在 VS Code
+                工作区中分别显示为 <Text code>data</Text>、<Text code>hibist</Text>、
+                <Text code>sailor</Text> 和 <Text code>verification</Text>。
               </Paragraph>
             </div>
             <div
@@ -891,15 +892,15 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
         </Card>
 
         <Card
-          title="项目准入与工作模式"
+          title="项目准入与本地工作区"
           style={{ height: '100%', borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
         >
           <Space direction="vertical" size={14} style={{ width: '100%' }}>
             {[
-              ['项目平台', '按当前用户展示可参与的 DFT 项目与角色，支持本地托管路径配置及项目一键初始化。'],
-              ['多仓映射', '每个项目对应 GitLab 的 data 公共仓与 hibist/sailor/verification 三个执行仓，在本地呈子目录组织。'],
-              ['工作区结构', '项目初始化时，IDE 将自动拉取四仓并生成多文件夹工作区文件（.code-workspace）以进行统一管理。'],
-              ['状态托管', '本地页面配置与 Design Tree 数据默认托管于工作区下的 .dft-ide/local-state 目录中并自动被 Git 忽略。'],
+              ['项目来源', '展示当前用户有权限参与的 CTMP 项目，并支持创建自定义项目；项目角色分为 DFTM 和 Member。'],
+              ['角色权限', 'DFTM 可初始化远端项目、管理成员及项目领域；项目完成初始化后，成员即可配置本地托管路径并进入项目。'],
+              ['首次进入', '首次进入时，IDE 会克隆 data、hibist、sailor、verification 四个 GitLab 仓库，并生成 dft-ide.code-workspace 统一管理。'],
+              ['本地状态', '页面配置、Design Tree 草稿和执行记录保存在项目下的 .dft-ide/local-state，并自动加入 Git 忽略范围。'],
             ].map(([name, desc]) => (
               <div
                 key={name}

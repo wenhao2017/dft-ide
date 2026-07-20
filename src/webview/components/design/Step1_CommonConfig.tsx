@@ -1,12 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Form, Space, Spin, Modal, Typography, Divider, message } from 'antd';
-import {
-  BranchesOutlined,
-  CaretRightOutlined,
-  HistoryOutlined,
-  RightOutlined,
-  SaveOutlined,
-} from '@ant-design/icons';
+import { Form, Space, Spin, Modal, message } from 'antd';
 import { useVscodePath } from '../../hooks/useVscodePath';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 import PathInput from '../shared/PathInput';
@@ -14,8 +7,7 @@ import { generateDefaultFlowConfigs, getGitInfo, type RepoKey, getModules } from
 import useWizardStore from '../../store/wizardStore';
 import TransformHistory from '../shared/TransformHistory';
 import ModuleSelect from '../shared/TransformModuleSelect';
-
-const { Title } = Typography;
+import TransformConfigPanel from '../shared/TransformConfigPanel';
 
 interface Props {
   onNext?: () => void;
@@ -130,77 +122,38 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
 
   return (
     <Spin spinning={loading} tip="读取配置中...">
-      <Form layout="horizontal" labelCol={{ span: 4 }} wrapperCol={{ span: 20 }}>
-        <div style={{ maxWidth: 860, margin: '0 auto' }}>
-          <div
-            style={{
-              border: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.24))',
-              borderRadius: 8,
-              padding: 18,
-              background: 'var(--vscode-editor-background)',
-            }}
-          >
-            <Space style={{ width: '100%', justifyContent: 'space-between' }} align="start" wrap>
-              <Space direction="vertical" size={6}>
-                <Title level={4} style={{ margin: 0 }}>
-                  归一化表格转config
-                </Title>
-              </Space>
-              <Space>
-                <Button shape="round" icon={<BranchesOutlined />} style={{ cursor: 'default' }}>
-                  {currentBranch || '获取分支中...'}
-                </Button>
-              </Space>
-            </Space>
-
-            <Divider style={{ margin: '16px 0' }} />
-
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <Form.Item label="project.cshrc">
-                <PathInput
-                  state={project}
-                  pathSources={['local']}
-                  localRootPath={repoRoot}
-                  placeholder="请选择 project.cshrc"
-                  showOpen
-                  showSelectFile
-                />
-              </Form.Item>
-              <Form.Item label="选择module">
-                <ModuleSelect
-                  options={moduleOptions}
-                  selectedValues={selectedModules}
-                  onSelectionChange={setSelectedModules}
-                />
-              </Form.Item>
-            </Space>
-
-            <Divider style={{ margin: '18px 0 14px' }} />
-
-            <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
-              <Space>
-                <Button icon={<SaveOutlined />} loading={saving} onClick={onSave}>
-                  保存
-                </Button>
-                <Button
-                  type="primary"
-                  loading={generating}
-                  onClick={onGenerateDefaults}
-                  icon={<CaretRightOutlined />}
-                  style={{ width: 150 }}
-                >
-                  表格转cfg
-                </Button>
-                <Button icon={<HistoryOutlined />} onClick={() => setHistoryOpen(true)}>
-                  转换历史记录
-                </Button>
-              </Space>
-              <Button type="primary" onClick={onNext}>
-                下一页 <RightOutlined />
-              </Button>
-            </Space>
-          </div>
-        </div>
+      <Form layout="vertical">
+        <TransformConfigPanel
+          accent={flowKey === 'sailor' ? '#0ea5e9' : '#7c3aed'}
+          flowLabel={category}
+          branch={currentBranch}
+          description="读取归一化表格中的模块信息，为选中的设计模块生成默认 CFG 配置。"
+          scopeLabel="选择设计模块"
+          saving={saving}
+          generating={generating}
+          onSave={onSave}
+          onGenerate={onGenerateDefaults}
+          onHistory={() => setHistoryOpen(true)}
+          onNext={onNext}
+        >
+          <Form.Item label="项目环境文件" extra="用于加载当前项目的工具与环境变量配置。">
+            <PathInput
+              state={project}
+              pathSources={['local']}
+              localRootPath={repoRoot}
+              placeholder="请选择 project.cshrc"
+              showOpen
+              showSelectFile
+            />
+          </Form.Item>
+          <Form.Item label="转换模块" extra="可同时选择多个 Module 批量生成默认配置。">
+            <ModuleSelect
+              options={moduleOptions}
+              selectedValues={selectedModules}
+              onSelectionChange={setSelectedModules}
+            />
+          </Form.Item>
+        </TransformConfigPanel>
       </Form>
 
       <Modal
