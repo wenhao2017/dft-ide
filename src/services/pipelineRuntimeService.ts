@@ -57,6 +57,7 @@ interface PipelineExecutionSession {
   cwd?: string;
   envConfig?: Record<string, unknown> | null;
   taskConfig?: Record<string, unknown> | null;
+  runParameters?: unknown;
   shellPath?: string;
   currentTaskId?: string;
   buffer: string;
@@ -77,6 +78,8 @@ function getPipelineTerminalTitle(flowLabel: string, moduleKey: string): string 
 }
 
 const PIPELINE_PYTHON_MODULE = 'python/3.10.6';
+const DEFAULT_DONAU_GROUP = 'ug_dft.HIS-HIS-ASIC-HISC-DFT-PLAT-WS';
+const DEFAULT_DONAU_QUEUE = 'normal';
 
 function quoteCshArgument(value: string): string {
   return `"${value.replace(/(["\\$`])/g, '\\$1')}"`;
@@ -111,6 +114,45 @@ function buildStepEndMarker(runId: string, taskId: string): string {
   return `__DFT_IDE_STEP_END__|${runId}|${taskId}|`;
 }
 
+function resolveVerificationRunParameters(
+  runParameters: unknown,
+  taskConfig?: Record<string, unknown> | null,
+): unknown {
+  if (!Array.isArray(runParameters)) {
+    return runParameters;
+  }
+
+  const step2 = taskConfig?.step2 as Record<string, unknown> | undefined;
+  const task = step2?.step2Task as Record<string, unknown> | undefined;
+  const fallbackDonau = {
+    group: String(task?.clusterGroup ?? DEFAULT_DONAU_GROUP).trim() || DEFAULT_DONAU_GROUP,
+    queue: String(task?.clusterQueue ?? DEFAULT_DONAU_QUEUE).trim() || DEFAULT_DONAU_QUEUE,
+    cpu: String(task?.cpu ?? '').trim(),
+    mem: String(task?.memory ?? '').trim(),
+  };
+
+  return runParameters.map((row) => {
+    if (!row || typeof row !== 'object') {
+      return row;
+    }
+    const record = row as Record<string, unknown>;
+    const suppliedDonau = record.donau && typeof record.donau === 'object'
+      ? record.donau as Record<string, unknown>
+      : {};
+    const value = (key: keyof typeof fallbackDonau) => (
+      String(suppliedDonau[key] ?? '').trim() || fallbackDonau[key]
+    );
+    return {
+      ...record,
+      donau: {
+        group: value('group'),
+        queue: value('queue'),
+        ...(value('cpu') ? { cpu: value('cpu') } : {}),
+        ...(value('mem') ? { mem: value('mem') } : {}),
+      },
+    };
+  });
+}
 function buildStepCommands(
   runId: string,
   task: PipelineTask,
@@ -174,9 +216,13 @@ function buildStepCommands(
   }
 
   const stepCommand = task.command.trim();
+  const executionCommand = flowKey === 'verification'
+    ? stepCommand
+    : buildPipelineStepExecutionCommand(projectPath, stepCommand);
   commands.push(`echo "__DFT_IDE_STEP_START__|${runId}|${task.id}"`);
   commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
-  commands.push(buildPipelineStepExecutionCommand(projectPath, stepCommand));
+  commands.push(`echo ${quoteCshArgument(`[DFT IDE] 执行命令: ${executionCommand}`)}`);
+  commands.push(executionCommand);
   commands.push('set dft_ide_step_status = $status');
   commands.push(`echo "${buildStepEndMarker(runId, task.id)}$dft_ide_step_status"`);
 
@@ -476,7 +522,9 @@ function runSequentialSimulation(
         }
         commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
         // d. 步骤命令
-        commands.push(buildPipelineStepExecutionCommand(projectPath, stepCommand));
+        commands.push(flowKey === 'verification'
+          ? stepCommand
+          : buildPipelineStepExecutionCommand(projectPath, stepCommand));
 
         openTerminal(getPipelineTerminalTitle(flowLabel, moduleKey), commands, cwd);
       }
@@ -587,6 +635,8 @@ export class PipelineRuntimeService {
     cwd?: string,
     envConfig?: Record<string, unknown> | null,
     taskConfig?: Record<string, unknown> | null,
+    selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>,
+    runParameters?: unknown,
   ): PipelineRuntimeSnapshot {
     const key = getPipelineRuntimeKey(flowKey, moduleKey);
     const config = pipelineFlowConfigs[flowKey];
@@ -600,7 +650,13 @@ export class PipelineRuntimeService {
 
     clearRuntimeTimers(key);
 
-    const { tasks: parsedTasks, links: parsedLinks } = loadPipelineConfig(flowKey);
+    const loadedPipeline = loadPipelineConfig(flowKey);
+    const parsedTasks = selectedTasks?.length
+      ? selectedTasks.map((task) => makeTask(task.id, task.name, task.command, task.description))
+      : loadedPipeline.tasks;
+    const parsedLinks = selectedTasks?.length
+      ? parsedTasks.slice(1).map((task, index) => ({ source: parsedTasks[index].id, target: task.id }))
+      : loadedPipeline.links;
     const terminalCapabilities = getExecutionTerminalCapabilities();
     if (!terminalCapabilities.data) {
       const failedTasks = parsedTasks.map((task, index) => ({
@@ -680,6 +736,9 @@ export class PipelineRuntimeService {
       cwd,
       envConfig,
       taskConfig,
+      runParameters: flowKey === 'verification'
+        ? resolveVerificationRunParameters(runParameters, taskConfig)
+        : runParameters,
       shellPath: this.options.getPipelineShellPath?.() ?? 'csh',
       buffer: '',
       seenStarts: new Set<string>(),
@@ -726,7 +785,9 @@ export class PipelineRuntimeService {
       const stepCommand = task.command.trim();
       let commands: string[] = [];
       commands.push(`echo "=== [DFT IDE] Rerun Step: ${task.name || task.id} ==="`);
-      commands.push(buildPipelineStepExecutionCommand(resolveProjectPath(flowKey), stepCommand));
+      commands.push(flowKey === 'verification'
+        ? stepCommand
+        : buildPipelineStepExecutionCommand(resolveProjectPath(flowKey), stepCommand));
       this.options.openTerminal(getPipelineTerminalTitle(runtime.flowLabel, moduleKey), commands);
     }
 
@@ -800,6 +861,25 @@ export class PipelineRuntimeService {
       session.envConfig,
       session.taskConfig,
     );
+    const generatedCommand = session.flowKey === 'verification'
+      ? task.command.trim()
+      : buildPipelineStepExecutionCommand(resolveProjectPath(session.flowKey), task.command.trim());
+    const runParameterRows = Array.isArray(session.runParameters)
+      ? session.runParameters.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object')
+      : [];
+    console.group(`[DFT IDE] Pipeline Task: ${session.flowLabel} / ${session.moduleKey} / ${task.name}`);
+    console.log('command:', generatedCommand);
+    console.log('groups:', runParameterRows.map((row) => row.groupNames ?? []));
+    console.log('tcs:', runParameterRows.map((row) => row.tcNames ?? []));
+    console.log('subattrs:', runParameterRows.map((row) => row.subattrNames ?? []));
+    console.log('tools:', runParameterRows.map((row) => row.tools ?? []));
+    console.log('Donau:', runParameterRows.map((row) => row.donau ?? {}));
+    console.log('parameter rows:', runParameterRows);
+    console.groupEnd();
+    this.patchTask(key, task.id, (current) => ({
+      logs: [...current.logs, `[${nowText()}] ${session.logPrefix} 执行命令：${generatedCommand}`],
+    }));
+    this.appendLog(key, session.logPrefix, `${task.name} 执行命令：${generatedCommand}`);
     void Promise.resolve(
       this.options.openTerminal(session.terminalTitle, commands, session.cwd, session.shellPath),
     ).catch((error) => {

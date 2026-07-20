@@ -25,6 +25,7 @@ import ControlledPathInput from '../shared/ControlledPathInput';
 import CollapsibleSection from '../shared/CollapsibleSection';
 import DonauResourcePicker from '../shared/DonauResourcePicker';
 import PipelineExecutionOverview, { PipelineExecutionRef as OverviewRef } from '../shared/PipelineExecutionOverview';
+import type { LanderStep } from './mode/types';
 
 const { Text } = Typography;
 
@@ -35,10 +36,11 @@ interface Props {
   onModuleSelect?: (moduleKey: string) => void;
   moduleKeys: string[];
   moduleWorkDirs?: Record<string, string>;
+  defaultStepsByModule?: Record<string, LanderStep[]>;
 }
 
 export interface PipelineExecutionRef {
-  handleExternalRun: (keys: string[], selectedTaskIds?: string[]) => void;
+  handleExternalRun: (keys: string[], selectedTaskIds?: string[], selectedTasks?: LanderStep[], runParameters?: unknown) => void;
   handleExternalStop: (keys: string[]) => void;
 }
 
@@ -64,12 +66,18 @@ const toolOptions = [
   }
 ]
 
-const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPrev, moduleKey, onModuleSelect, moduleKeys, moduleWorkDirs }, ref) => {
+const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPrev, moduleKey, onModuleSelect, moduleKeys, moduleWorkDirs, defaultStepsByModule }, ref) => {
   const [activeTab, setActiveTab] = useState('task');
   const [taskForm] = Form.useForm();
   const [designForm] = Form.useForm();
   const overviewRef = useRef<OverviewRef>(null);
-  const pendingCommandRef = useRef<{ type: 'run' | 'stop'; keys: string[]; selectedTaskIds?: string[] } | null>(null);
+  const pendingCommandRef = useRef<{
+    type: 'run' | 'stop';
+    keys: string[];
+    selectedTaskIds?: string[];
+    selectedTasks?: LanderStep[];
+    runParameters?: unknown;
+  } | null>(null);
   const selectedAccount = Form.useWatch('clusterGroup', taskForm);
   const selectedQueue = Form.useWatch('clusterQueue', taskForm);
 
@@ -77,15 +85,15 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
   const flowLabel = 'DFTM';
 
   useImperativeHandle(ref, () => ({
-    handleExternalRun(keys: string[], selectedTaskIds?: string[]) {
+    handleExternalRun(keys: string[], selectedTaskIds?: string[], selectedTasks?: LanderStep[], runParameters?: unknown) {
       const cleanKeys = keys.filter(Boolean);
       if (!cleanKeys.length) {
         return;
       }
       if (overviewRef.current) {
-        overviewRef.current.handleExternalRun(cleanKeys, selectedTaskIds);
+        overviewRef.current.handleExternalRun(cleanKeys, selectedTaskIds, selectedTasks, runParameters);
       } else {
-        pendingCommandRef.current = { type: 'run', keys: cleanKeys, selectedTaskIds };
+        pendingCommandRef.current = { type: 'run', keys: cleanKeys, selectedTaskIds, selectedTasks, runParameters };
       }
       setActiveTab('execution');
     },
@@ -110,7 +118,7 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
     const command = pendingCommandRef.current;
     pendingCommandRef.current = null;
     if (command.type === 'run') {
-      overviewRef.current.handleExternalRun(command.keys, command.selectedTaskIds);
+      overviewRef.current.handleExternalRun(command.keys, command.selectedTaskIds, command.selectedTasks, command.runParameters);
     } else {
       overviewRef.current.handleExternalStop(command.keys);
     }
@@ -271,6 +279,7 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
                   flowLabel={flowLabel}
                   moduleKeys={moduleKeys}
                   moduleWorkDirs={moduleWorkDirs}
+                  defaultTasksByModule={defaultStepsByModule}
                   activeModuleKey={moduleKey}
                   onActiveModuleChange={onModuleSelect}
                 />

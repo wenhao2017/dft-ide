@@ -1,6 +1,7 @@
 import { Input, Modal, Space } from 'antd'
 
 import type { DonauConfig } from './types'
+import DonauResourcePicker from '../../shared/DonauResourcePicker'
 
 interface DonauModalProps {
   open: boolean
@@ -43,14 +44,28 @@ export default function DonauModal({
       onOk={onCancel}
     >
       <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <DonauResourcePicker
+          account={value.group}
+          queue={value.queue}
+          onChange={({ account, queue }) => {
+            onChange(cleanDonauValue({
+              ...value,
+              group: account,
+              queue,
+            }))
+          }}
+        />
+
         <Input
-          placeholder="group"
+          addonBefore="Group"
+          placeholder="手动输入 Donau Account / Group"
           value={value.group ?? ''}
           onChange={(event) => update('group', event.target.value)}
         />
 
         <Input
-          placeholder="queue"
+          addonBefore="Queue"
+          placeholder="手动输入 Donau Queue"
           value={value.queue ?? ''}
           onChange={(event) => update('queue', event.target.value)}
         />

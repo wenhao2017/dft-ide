@@ -31,6 +31,7 @@ export default function ModePanel({
   title,
   onSelect,
   onCheckedChange,
+  onDefaultStepsChange,
   onRun,
   onStop,
 }: ModePanelProps) {
@@ -114,6 +115,38 @@ export default function ModePanel({
   const batchCheckedNames = batchCheckedNamesByTab[activeTab]
 
   const searchValue = selection.searchValues[activeTab]
+
+  /**
+   * resources.focusModes may be restored asynchronously from persisted state.
+   * Keep the execution overview in sync even when the user has not changed the
+   * focus selector during the current session.
+   */
+  useEffect(() => {
+    onCheckedChange?.('mode', resources.focusModes)
+  }, [onCheckedChange, resources.focusModes])
+
+  useEffect(() => {
+    if (!onDefaultStepsChange) {
+      return
+    }
+
+    let cancelled = false
+    const focusedNames = new Set(resources.focusModes)
+    const focusedModes = resources.mode.filter((mode) => focusedNames.has(mode.name))
+
+    void Promise.all(focusedModes.map(async (mode) => {
+      const result = await getLanderModePipelines(mode.preMode)
+      return [mode.name, result.success ? result.steps : []] as const
+    })).then((entries) => {
+      if (!cancelled) {
+        onDefaultStepsChange(Object.fromEntries(entries))
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [onDefaultStepsChange, resources.focusModes, resources.mode])
 
   const focusOptions = useMemo(
     () =>

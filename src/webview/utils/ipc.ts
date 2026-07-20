@@ -825,9 +825,9 @@ export async function ensurePipelineRuntime(options: {
   flowKey: 'hibist' | 'sailor' | 'verification'
   moduleKey: string
   flowLabel: string
-}): Promise<{ success: boolean; error?: string }> {
+}): Promise<{ success: boolean; snapshot?: unknown; error?: string }> {
   const res = await ipcRequest('ensurePipelineRuntime', options)
-  return res as { success: boolean; error?: string }
+  return res as { success: boolean; snapshot?: unknown; error?: string }
 }
 
 export async function startPipelineRuntime(options: {
@@ -835,7 +835,14 @@ export async function startPipelineRuntime(options: {
   moduleKey: string
   flowLabel: string
   selectedTaskIds?: string[]
+  selectedTasks?: Array<{
+    id: string
+    name: string
+    command: string
+    description: string
+  }>
   cwd?: string
+  runParameters?: unknown
 }): Promise<{ success: boolean; error?: string }> {
   const res = await ipcRequest('startPipelineRuntime', options)
   return res as { success: boolean; error?: string }

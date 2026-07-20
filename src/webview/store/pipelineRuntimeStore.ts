@@ -36,8 +36,20 @@ export interface PipelineRuntimeSnapshot {
 
 interface PipelineRuntimeStore {
   runtimes: Record<string, PipelineRuntimeSnapshot>;
-  ensureRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string) => void;
-  startRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string, selectedTaskIds?: string[], cwd?: string) => void;
+  ensureRuntime: (
+    flowKey: PipelineFlowKey,
+    moduleKey: string,
+    flowLabel: string,
+  ) => Promise<PipelineRuntimeSnapshot | undefined>;
+  startRuntime: (
+    flowKey: PipelineFlowKey,
+    moduleKey: string,
+    flowLabel: string,
+    selectedTaskIds?: string[],
+    cwd?: string,
+    selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>,
+    runParameters?: unknown,
+  ) => void;
   stopRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string) => void;
   selectTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string) => void;
   stopTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string, flowLabel: string) => void;
@@ -185,21 +197,56 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
         },
       };
     });
-    void ensurePipelineRuntime({ flowKey, moduleKey, flowLabel });
+    return ensurePipelineRuntime({ flowKey, moduleKey, flowLabel }).then((res) => {
+      const snapshot = res.success ? parseRuntimeSnapshot(res.snapshot) : null;
+      if (snapshot) {
+        set((state) => {
+          const key = getPipelineRuntimeKey(flowKey, moduleKey);
+          const current = state.runtimes[key];
+          // Ignore an ensure response that was sent before this run started.
+          if (current?.runState === 'running' && snapshot.runState === 'idle') {
+            return state;
+          }
+          return { runtimes: applySnapshot(state.runtimes, snapshot) };
+        });
+        return snapshot;
+      }
+      return undefined;
+    });
   },
 
-  startRuntime: (flowKey, moduleKey, flowLabel, selectedTaskIds, cwd) => {
+  startRuntime: (flowKey, moduleKey, flowLabel, selectedTaskIds, cwd, selectedTasks, runParameters) => {
+    const normalizedSelectedTaskIds = selectedTaskIds?.length ? selectedTaskIds : undefined;
+    const optimisticTasks: PipelineTask[] = (selectedTasks ?? []).map((task, index) => {
+      const isSelected = !normalizedSelectedTaskIds || normalizedSelectedTaskIds.includes(task.id);
+      const isFirstSelected = isSelected && (
+        normalizedSelectedTaskIds ? task.id === normalizedSelectedTaskIds[0] : index === 0
+      );
+      return {
+        ...task,
+        status: isSelected ? (isFirstSelected ? 'running' : 'pending') : 'skipped',
+        attempts: 1,
+        logs: [],
+      };
+    });
     set((state) => ({
       runtimes: applySnapshot(
         state.runtimes,
         {
           ...makeInitialRuntime(flowKey, moduleKey, flowLabel),
+          tasks: optimisticTasks,
+          links: optimisticTasks.slice(1).map((task, index) => ({
+            source: optimisticTasks[index].id,
+            target: task.id,
+          })),
+          selectedTaskId: optimisticTasks.find((task) => task.status === 'running')?.id
+            ?? optimisticTasks[0]?.id,
           logs: [`${flowLabel} 已提交启动请求，等待 VS Code runtime 同步。`],
           runState: 'running',
         },
       ),
     }));
-    void startPipelineRuntime({ flowKey, moduleKey, flowLabel, selectedTaskIds, cwd });
+    void startPipelineRuntime({ flowKey, moduleKey, flowLabel, selectedTaskIds, selectedTasks, cwd, runParameters });
   },
 
   stopRuntime: (flowKey, moduleKey, flowLabel) => {

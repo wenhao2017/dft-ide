@@ -6,7 +6,6 @@ import {
   List,
   Modal,
   Row,
-  Slider,
   Space,
   Tag,
   Tooltip,
@@ -29,11 +28,19 @@ import usePipelineRuntimeStore, {
 import { PipelineLink, PipelineTask } from './pipelineMockData';
 import { openExecutionTerminal } from '../../utils/ipc';
 import { useShallow } from 'zustand/react/shallow';
+import StepSelector, {
+  VERIFICATION_STEP_PRESETS,
+} from '../verification/mode/StepSelector';
 
 type OverviewRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
 
 export interface PipelineExecutionRef {
-  handleExternalRun: (keys: string[], selectedTaskIds?: string[]) => void;
+  handleExternalRun: (
+    keys: string[],
+    selectedTaskIds?: string[],
+    selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>,
+    runParameters?: unknown,
+  ) => void;
   handleExternalStop: (keys: string[]) => void;
 }
 
@@ -42,6 +49,7 @@ interface PipelineExecutionOverviewProps {
   flowLabel: string;
   moduleKeys: string[];
   moduleWorkDirs?: Record<string, string>;
+  defaultTasksByModule?: Record<string, Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>>;
   activeModuleKey?: string;
   onActiveModuleChange?: (moduleKey: string) => void;
 }
@@ -293,6 +301,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   flowLabel,
   moduleKeys,
   moduleWorkDirs,
+  defaultTasksByModule,
   activeModuleKey: externalActiveModuleKey,
   onActiveModuleChange,
 }, ref) => {
@@ -345,9 +354,25 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   const visibleRuns = useMemo(() => (
     selectedModuleKeys.map((moduleKey) => {
       const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
-      return summarizeRuntime(moduleKey, flowKey, getFlowLabel(moduleKey), runtime);
+      const defaultTasks = defaultTasksByModule?.[moduleKey];
+      const effectiveRuntime = runtime?.runState === 'idle' && defaultTasks?.length
+        ? {
+          ...runtime,
+          tasks: defaultTasks.map((task) => ({
+            ...task,
+            status: 'pending' as const,
+            attempts: 1,
+            logs: [],
+          })),
+          links: defaultTasks.slice(1).map((task, index) => ({
+            source: defaultTasks[index].id,
+            target: task.id,
+          })),
+        }
+        : runtime;
+      return summarizeRuntime(moduleKey, flowKey, getFlowLabel(moduleKey), effectiveRuntime);
     })
-  ), [flowKey, getFlowLabel, runtimes, selectedModuleKeys]);
+  ), [defaultTasksByModule, flowKey, getFlowLabel, runtimes, selectedModuleKeys]);
 
   const activeModuleData = visibleRuns.find((run) => run.moduleKey === activeModuleKey);
   const activeHierarchy = useMemo(() => {
@@ -388,37 +413,53 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     onActiveModuleChange?.(moduleKey);
   }, [onActiveModuleChange]);
 
-  const prepareRun = useCallback((targets: string[]) => {
+  const prepareRun = useCallback(async (targets: string[]) => {
     setRunModalTargets(targets);
     const targetKey = targets[0];
-    const runtime = runtimes[getPipelineRuntimeKey(flowKey, targetKey)] || activeModuleData;
-    const tasks = runtime?.tasks || [];
+    const currentRuntime = runtimes[getPipelineRuntimeKey(flowKey, targetKey)];
+    const defaultTasks = defaultTasksByModule?.[targetKey];
+    const runtime = currentRuntime?.tasks.length
+      ? currentRuntime
+      : await ensureRuntime(flowKey, targetKey, getFlowLabel(targetKey));
+    const tasks = runtime?.runState === 'idle' && defaultTasks?.length
+      ? defaultTasks
+      : runtime?.tasks || [];
     if (tasks.length > 0) {
       setRunModalRange([0, tasks.length - 1]);
     } else {
       setRunModalRange([0, 0]);
     }
     setRunModalOpen(true);
-  }, [activeModuleData, flowKey, runtimes]);
+  }, [defaultTasksByModule, ensureRuntime, flowKey, getFlowLabel, runtimes]);
 
   const confirmRunModal = useCallback(() => {
     const targetKey = runModalTargets[0];
     const runtime = runtimes[getPipelineRuntimeKey(flowKey, targetKey)] || activeModuleData;
-    const tasks = runtime?.tasks || [];
+    const defaultTasks = defaultTasksByModule?.[targetKey];
+    const tasks = runtime?.runState === 'idle' && defaultTasks?.length
+      ? defaultTasks
+      : runtime?.tasks || [];
     const targetTasks = tasks.slice(runModalRange[0], runModalRange[1] + 1);
     const selectedTaskIds = targetTasks.length > 0 ? targetTasks.map((t) => t.id) : undefined;
 
     runModalTargets.forEach((moduleKey) => {
       setPeakMetrics((prev) => ({ ...prev, [moduleKey]: { maxCpu: 0, maxMem: 0 } }));
       ensureRuntimeVisible(moduleKey);
-      startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), selectedTaskIds, moduleWorkDirs?.[moduleKey]);
+      startRuntime(
+        flowKey,
+        moduleKey,
+        getFlowLabel(moduleKey),
+        selectedTaskIds,
+        moduleWorkDirs?.[moduleKey],
+        defaultTasksByModule?.[moduleKey],
+      );
     });
 
     if (runModalTargets.length === 1) {
       activateModule(runModalTargets[0]);
     }
     setRunModalOpen(false);
-  }, [runModalTargets, runModalRange, runtimes, flowKey, activeModuleData, ensureRuntimeVisible, getFlowLabel, startRuntime, activateModule, moduleWorkDirs]);
+  }, [runModalTargets, runModalRange, runtimes, flowKey, activeModuleData, defaultTasksByModule, ensureRuntimeVisible, getFlowLabel, startRuntime, activateModule, moduleWorkDirs]);
 
   const stopRun = useCallback((moduleKey: string) => {
     ensureRuntimeVisible(moduleKey);
@@ -426,20 +467,20 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   }, [ensureRuntimeVisible, flowKey, getFlowLabel, stopRuntime]);
 
   useImperativeHandle(ref, () => ({
-    handleExternalRun(keys: string[], selectedTaskIds?: string[]) {
+    handleExternalRun(keys, selectedTaskIds, selectedTasks, runParameters) {
       const cleanKeys = keys.filter(Boolean);
       if (selectedTaskIds !== undefined) {
         const taskIds = selectedTaskIds.length > 0 ? selectedTaskIds : undefined;
         cleanKeys.forEach((moduleKey) => {
           setPeakMetrics((prev) => ({ ...prev, [moduleKey]: { maxCpu: 0, maxMem: 0 } }));
           ensureRuntimeVisible(moduleKey);
-          startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), taskIds, moduleWorkDirs?.[moduleKey]);
+          startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), taskIds, moduleWorkDirs?.[moduleKey], selectedTasks, runParameters);
         });
         if (cleanKeys.length === 1) {
           activateModule(cleanKeys[0]);
         }
       } else {
-        prepareRun(cleanKeys);
+        void prepareRun(cleanKeys);
       }
     },
     handleExternalStop(keys: string[]) {
@@ -949,15 +990,14 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
       {/* Run Confirmation and Step Range Selection Modal */}
       <Modal
         open={runModalOpen}
+        width={1000}
+        footer={null}
         title={
           <Space>
             <PlayCircleOutlined style={{ color: themeStyles.accent }} />
             <span>启动流水线 (选择步骤范围)</span>
           </Space>
         }
-        okText="运行"
-        cancelText="取消"
-        onOk={confirmRunModal}
         onCancel={() => setRunModalOpen(false)}
       >
         <Space direction="vertical" size={14} style={{ width: '100%' }}>
@@ -987,35 +1027,33 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
                       {tasks[runModalRange[0]]?.name} ➔ {tasks[runModalRange[1]]?.name}
                     </span>
                   </div>
-                  <Slider
-                    range
-                    min={0}
-                    max={tasks.length - 1}
-                    value={runModalRange}
-                    onChange={(val) => setRunModalRange(val as [number, number])}
-                    tooltip={{
-                      formatter: (val) => {
-                        if (val === undefined) return '';
-                        const task = tasks[val];
-                        return task ? `${val + 1}. ${task.name}` : '';
-                      }
-                    }}
-                    styles={{
-                      track: {
-                        background: themeStyles.accent,
-                      },
-                      handle: {
-                        borderColor: themeStyles.accent,
-                        backgroundColor: 'var(--vscode-editor-background)',
-                      }
-                    }}
-                    style={{ margin: '8px 6px 4px' }}
+                  <StepSelector
+                    steps={tasks}
+                    range={runModalRange}
+                    presets={flowKey === 'verification' ? VERIFICATION_STEP_PRESETS : undefined}
+                    onChange={setRunModalRange}
                   />
                 </div>
               );
             }
             return null;
           })()}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: 8,
+            }}
+          >
+            <Button onClick={() => setRunModalOpen(false)}>取消</Button>
+            <Button
+              type="primary"
+              disabled={!runModalTargets.length}
+              onClick={confirmRunModal}
+            >
+              运行
+            </Button>
+          </div>
         </Space>
       </Modal>
       </Row>

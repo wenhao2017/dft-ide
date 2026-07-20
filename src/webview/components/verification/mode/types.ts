@@ -85,6 +85,10 @@ export interface ModeRunPayload {
 
   stepNames: string[]
 
+  stepIds: string[]
+
+  steps: LanderStep[]
+
   rows: RunParamRow[]
 }
 
@@ -138,6 +142,8 @@ export interface ModePanelProps {
   onSelect?: (tab: ModePanelTab, item?: ModePanelItem) => void
 
   onCheckedChange?: (tab: ModePanelTab, names: string[]) => void
+
+  onDefaultStepsChange?: (stepsByMode: Record<string, LanderStep[]>) => void
 
   onRun?: (payload: ModeRunPayload) => void
 

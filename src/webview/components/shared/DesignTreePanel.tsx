@@ -9,7 +9,6 @@ import {
   List,
   Modal,
   Select,
-  Slider,
   Space,
   Tooltip,
   Typography,
@@ -43,6 +42,9 @@ import {
 import { useFlowConfig } from '../../hooks/useFlowConfig';
 import usePipelineRuntimeStore from '../../store/pipelineRuntimeStore';
 import { useShallow } from 'zustand/react/shallow';
+import StepSelector, {
+  VERIFICATION_STEP_PRESETS,
+} from '../verification/mode/StepSelector';
 
 const { Text, Title } = Typography;
 
@@ -713,10 +715,9 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
 
       <Modal
         open={taskModalOpen}
+        width={1000}
+        footer={null}
         title={<Space><PlayCircleOutlined style={{ color: accent }} /><span>选择运行步骤范围</span></Space>}
-        okText="运行"
-        cancelText="取消"
-        onOk={confirmSelectRun}
         onCancel={() => setTaskModalOpen(false)}
       >
         <Space direction="vertical" size={14} style={{ width: '100%' }}>
@@ -741,29 +742,11 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
                   {stepList[modalStepRange[0]]?.name} ➔ {stepList[modalStepRange[1]]?.name}
                 </span>
               </div>
-              <Slider
-                range
-                min={0}
-                max={stepList.length - 1}
-                value={modalStepRange}
-                onChange={(val) => setModalStepRange(val as [number, number])}
-                tooltip={{
-                  formatter: (val) => {
-                    if (val === undefined) return '';
-                    const step = stepList[val];
-                    return step ? `${val + 1}. ${step.name}${step.description ? ` (${step.description})` : ''}` : '';
-                  }
-                }}
-                styles={{
-                  track: {
-                    background: accent,
-                  },
-                  handle: {
-                    borderColor: accent,
-                    backgroundColor: 'var(--vscode-editor-background)',
-                  }
-                }}
-                style={{ margin: '8px 6px 4px' }}
+              <StepSelector
+                steps={stepList}
+                range={modalStepRange}
+                presets={flow === 'verification' ? VERIFICATION_STEP_PRESETS : undefined}
+                onChange={setModalStepRange}
               />
             </div>
           ) : (
@@ -771,6 +754,22 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
               加载流水线步骤中...
             </div>
           )}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: 8,
+            }}
+          >
+            <Button onClick={() => setTaskModalOpen(false)}>取消</Button>
+            <Button
+              type="primary"
+              disabled={!stepList.length || !runTargetKeys.length}
+              onClick={confirmSelectRun}
+            >
+              运行
+            </Button>
+          </div>
         </Space>
       </Modal>
     </div>

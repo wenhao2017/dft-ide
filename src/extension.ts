@@ -598,14 +598,26 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             throw new Error('Invalid pipeline runtime payload');
           }
 
+          let snapshot;
           if (msg.command === 'ensurePipelineRuntime') {
-            pipelineRuntimeService.ensureRuntime(flowKey, moduleKey, flowLabel);
+            snapshot = pipelineRuntimeService.ensureRuntime(flowKey, moduleKey, flowLabel);
           } else if (msg.command === 'startPipelineRuntime') {
             const selectedTaskIds = Array.isArray(msg.selectedTaskIds) && msg.selectedTaskIds.length > 0 ? msg.selectedTaskIds : undefined;
+            const selectedTasks = Array.isArray(msg.selectedTasks)
+              ? msg.selectedTasks.filter((task: unknown): task is { id: string; name: string; command: string; description: string } => {
+                if (!task || typeof task !== 'object') return false;
+                const value = task as Record<string, unknown>;
+                return typeof value.id === 'string'
+                  && typeof value.name === 'string'
+                  && typeof value.command === 'string'
+                  && typeof value.description === 'string';
+              })
+              : undefined;
             const cwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
             const envConfig = await readConfig(flowKey);
             const taskConfig = await readConfig(`${flowKey}/${moduleKey}/config`);
-            pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel, selectedTaskIds, cwd, envConfig, taskConfig);
+            const runParameters = msg.runParameters;
+            pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel, selectedTaskIds, cwd, envConfig, taskConfig, selectedTasks, runParameters);
           } else if (msg.command === 'stopPipelineRuntime') {
             pipelineRuntimeService.stopRuntime(flowKey, moduleKey, flowLabel);
           } else if (msg.command === 'selectPipelineTask') {
@@ -620,7 +632,8 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             currentPanel?.webview.postMessage({
               command: `${msg.command}Response`,
               requestId,
-              success: true
+              success: true,
+              snapshot
             });
           }
         } catch (err) {

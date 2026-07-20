@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react'
+import React, { useCallback, useRef, useState } from 'react'
 
 import Step1CommonConfig from '../components/verification/Step1_CommonConfig'
 import Step2ToolConfig, {
@@ -21,9 +21,21 @@ const VerificationFlow: React.FC = () => {
   const [selectedModule, setSelectedModule] = useState('')
   const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>([])
   const [moduleWorkDirs] = useState<Record<string, string>>({})
+  const [defaultStepsByMode, setDefaultStepsByMode] = useState<Record<string, ModeRunPayload['steps']>>({})
   const [, setLastRunPayload] = useState<ModeRunPayload>()
 
   const executionRef = useRef<PipelineExecutionRef>(null)
+  const pendingRunRef = useRef<ModeRunPayload | undefined>(undefined)
+
+  const setExecutionRef = useCallback((instance: PipelineExecutionRef | null) => {
+    executionRef.current = instance
+
+    if (instance && pendingRunRef.current) {
+      const payload = pendingRunRef.current
+      pendingRunRef.current = undefined
+      instance.handleExternalRun([payload.mode.name], payload.stepIds, payload.steps, payload.rows)
+    }
+  }, [])
 
   const nextStep = () => {
     setCurrentStep((prev) => Math.min(prev + 1, 3))
@@ -39,18 +51,25 @@ const VerificationFlow: React.FC = () => {
     }
   }
 
-  const handleCheckedChange = (tab: ModePanelTab, keys: string[]) => {
+  const handleCheckedChange = useCallback((tab: ModePanelTab, keys: string[]) => {
     if (tab === 'mode') {
       setExecutionModuleKeys(keys)
     }
-  }
+  }, [])
 
   const handleRun = (payload: ModeRunPayload) => {
     setLastRunPayload(payload)
     setSelectedModule(payload.mode.name)
-    setExecutionModuleKeys([payload.mode.name])
+    setExecutionModuleKeys((current) => (
+      current.includes(payload.mode.name) ? current : [...current, payload.mode.name]
+    ))
 
-    executionRef.current?.handleExternalRun([payload.mode.name])
+    if (executionRef.current) {
+      executionRef.current.handleExternalRun([payload.mode.name], payload.stepIds, payload.steps, payload.rows)
+    } else {
+      pendingRunRef.current = payload
+      setCurrentStep(1)
+    }
   }
 
   const handleStop = (keys: string[]) => {
@@ -68,13 +87,14 @@ const VerificationFlow: React.FC = () => {
       description: '仿真工具链',
       content: (
         <Step2ToolConfig
-          ref={executionRef}
+          ref={setExecutionRef}
           moduleKey={selectedModule}
           onModuleSelect={setSelectedModule}
           onNext={nextStep}
           onPrev={prevStep}
           moduleKeys={executionModuleKeys}
           moduleWorkDirs={moduleWorkDirs}
+          defaultStepsByModule={defaultStepsByMode}
         />
       ),
     },
@@ -107,6 +127,7 @@ const VerificationFlow: React.FC = () => {
             title="模式与参数配置"
             onSelect={handleSelect}
             onCheckedChange={handleCheckedChange}
+            onDefaultStepsChange={setDefaultStepsByMode}
             onRun={handleRun}
             onStop={handleStop}
           />

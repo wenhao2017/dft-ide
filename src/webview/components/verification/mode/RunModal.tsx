@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { Button, Empty, Modal, Space, Spin, message, Typography } from 'antd'
+import { Button, Empty, Input, Modal, Popconfirm, Select, Space, Spin, message, Typography } from 'antd'
 
 import type {
   BaseConfigItem,
@@ -11,8 +11,9 @@ import type {
   RunParamRow,
 } from './types'
 
-import StepSelector from './StepSelector'
+import StepSelector, { VERIFICATION_STEP_PRESETS } from './StepSelector'
 import ParamTable from './ParamTable'
+import { useVerificationStageConfig } from './ModePanel/hooks/useVerificationStageConfig'
 
 interface RunModalProps {
   open: boolean
@@ -52,6 +53,18 @@ const cloneRows = (rows: RunParamRow[]): RunParamRow[] => {
   }))
 }
 
+type SavedParams = Record<string, RunParamRow[]>
+
+const readSavedParams = (value: unknown): SavedParams => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {}
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).filter(([, rows]) => Array.isArray(rows)),
+  ) as SavedParams
+}
+
 export default function RunModal({
   open,
   mode,
@@ -69,6 +82,26 @@ export default function RunModal({
   const [range, setRange] = useState<[number, number]>([0, 0])
 
   const [rows, setRows] = useState<RunParamRow[]>([createRunParamRow()])
+  const [scenarioAlias, setScenarioAlias] = useState('')
+  const [selectedAlias, setSelectedAlias] = useState<string>()
+  const [savedParams, setSavedParams] = useState<SavedParams>({})
+  const [savingParams, setSavingParams] = useState(false)
+  const { stageConfig, loading: stageConfigLoading, handleSave } =
+    useVerificationStageConfig()
+
+  useEffect(() => {
+    if (open && mode) {
+      setRows([createRunParamRow()])
+      setScenarioAlias('')
+      setSelectedAlias(undefined)
+    }
+  }, [open, mode?.name])
+
+  useEffect(() => {
+    if (!stageConfigLoading) {
+      setSavedParams(readSavedParams(stageConfig?.params))
+    }
+  }, [stageConfig, stageConfigLoading])
 
   useEffect(() => {
     if (!open || !mode) {
@@ -104,6 +137,7 @@ export default function RunModal({
         }
 
         setSteps(result.steps)
+        setRange(result.steps.length > 0 ? [0, result.steps.length - 1] : [0, 0])
       } catch (error) {
         if (cancelled) {
           return
@@ -128,9 +162,70 @@ export default function RunModal({
     }
   }, [open, mode?.preMode, getLanderModePipelines])
 
-  const stepNames = useMemo(() => {
-    return steps.slice(range[0], range[1] + 1).map((step) => step.name)
+  const selectedSteps = useMemo(() => {
+    return steps.slice(range[0], range[1] + 1)
   }, [steps, range])
+
+  const stepNames = useMemo(() => {
+    return selectedSteps.map((step) => step.name)
+  }, [selectedSteps])
+
+  const loadSavedParams = (alias: string) => {
+    const savedRows = savedParams[alias]
+
+    if (!savedRows) {
+      return
+    }
+
+    setSelectedAlias(alias)
+    setScenarioAlias(alias)
+    setRows(cloneRows(savedRows))
+  }
+
+  const saveCurrentParams = async () => {
+    const alias = scenarioAlias.trim()
+
+    if (!alias) {
+      message.warning('请输入场景别名')
+      return
+    }
+
+    const nextParams = {
+      ...savedParams,
+      [alias]: cloneRows(rows),
+    }
+
+    setSavingParams(true)
+    try {
+      if (await handleSave({ params: nextParams })) {
+        setSavedParams(nextParams)
+        setSelectedAlias(alias)
+        setScenarioAlias(alias)
+      }
+    } finally {
+      setSavingParams(false)
+    }
+  }
+
+  const deleteSavedParams = async () => {
+    if (!selectedAlias) {
+      return
+    }
+
+    const nextParams = { ...savedParams }
+    delete nextParams[selectedAlias]
+
+    setSavingParams(true)
+    try {
+      if (await handleSave({ params: nextParams })) {
+        setSavedParams(nextParams)
+        setSelectedAlias(undefined)
+        setScenarioAlias('')
+      }
+    } finally {
+      setSavingParams(false)
+    }
+  }
 
   const confirm = () => {
     if (!mode) {
@@ -148,6 +243,8 @@ export default function RunModal({
       preMode: mode.preMode,
       stepRange: range,
       stepNames,
+      stepIds: selectedSteps.map((step) => step.id),
+      steps: selectedSteps.map((step) => ({ ...step })),
       rows: cloneRows(rows),
     })
   }
@@ -183,7 +280,12 @@ export default function RunModal({
             <Typography.Text strong>Step 选择</Typography.Text>
 
             {steps.length ? (
-              <StepSelector steps={steps} range={range} onChange={setRange} />
+              <StepSelector
+                steps={steps}
+                range={range}
+                presets={VERIFICATION_STEP_PRESETS}
+                onChange={setRange}
+              />
             ) : (
               <Empty description="暂无 Step" />
             )}
@@ -191,6 +293,46 @@ export default function RunModal({
 
           <div>
             <Typography.Text strong>运行参数</Typography.Text>
+
+            <Space.Compact block style={{ margin: '10px 0' }}>
+              <Select
+                allowClear
+                showSearch
+                loading={stageConfigLoading}
+                placeholder="选择已保存场景快速填充"
+                value={selectedAlias}
+                options={Object.keys(savedParams).map((alias) => ({
+                  label: alias,
+                  value: alias,
+                }))}
+                style={{ minWidth: 220, flex: 1 }}
+                onClear={() => setSelectedAlias(undefined)}
+                onChange={loadSavedParams}
+              />
+              <Input
+                placeholder="输入场景别名"
+                value={scenarioAlias}
+                style={{ minWidth: 180, flex: 1 }}
+                onChange={(event) => setScenarioAlias(event.target.value)}
+                onPressEnter={() => void saveCurrentParams()}
+              />
+              <Button
+                type="primary"
+                loading={savingParams}
+                onClick={() => void saveCurrentParams()}
+              >
+                保存场景
+              </Button>
+              <Popconfirm
+                title={`删除场景“${selectedAlias ?? ''}”？`}
+                disabled={!selectedAlias}
+                onConfirm={() => void deleteSavedParams()}
+              >
+                <Button danger disabled={!selectedAlias} loading={savingParams}>
+                  删除
+                </Button>
+              </Popconfirm>
+            </Space.Compact>
 
             <ParamTable
               rows={rows}
