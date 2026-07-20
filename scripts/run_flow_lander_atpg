@@ -355,7 +355,9 @@ def source_lines(source_file):
 
 
 def run_eco(work_path, env, source_file, phase):
-    eco_file = work_path / "scripts" / "eco" / ECO_FILE
+    project_name = infer_project_name(work_path, env)
+    project_root = Path(env.get("DFT_IDE_PROJECT_ROOT", work_path.parent)).expanduser().resolve()
+    eco_file = project_root / f"{project_name}_data" / "eco" / ECO_FILE
     if not eco_file.is_file():
         return 0
     eco_env = dict(env)
