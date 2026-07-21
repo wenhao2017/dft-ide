@@ -39,7 +39,6 @@ import usePipelineRuntimeStore, {
   PipelineRuntimeSnapshot,
   makeInitialRuntime,
   getPipelineRuntimeKey,
-  subscribePipelineRuntimeUpdates,
 } from '../../store/pipelineRuntimeStore';
 
 interface PipelineNodeData extends Record<string, unknown> {
@@ -172,10 +171,6 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   onReady,
   onRuntimeChange,
 }) => {
-  useEffect(() => {
-    subscribePipelineRuntimeUpdates();
-  }, []);
-
   const activeFlowKey =
     flowKey ??
     snapshot?.flowKey ??

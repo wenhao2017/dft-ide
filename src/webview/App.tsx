@@ -25,6 +25,7 @@ import vscode from './utils/vscode';
 import { toggleZenMode as ipcToggleZenMode } from './utils/ipc';
 import { useShallow } from 'zustand/react/shallow';
 import { getProjectDomainLabel, type DftProject } from './services/projectService';
+import { subscribePipelineRuntimeUpdates } from './store/pipelineRuntimeStore';
 
 const { Content } = Layout;
 const { Title } = Typography;
@@ -95,6 +96,10 @@ const App: React.FC = () => {
   const [vscTheme, setVscTheme] = useState<'dark' | 'light' | 'hc'>(detectVscodeTheme);
   const isDirty = useWizardStore((s) => s.isDirty);
   const [memberProject, setMemberProject] = useState<DftProject | null>(null);
+
+  useEffect(() => {
+    subscribePipelineRuntimeUpdates();
+  }, []);
 
   useEffect(() => {
     const observer = new MutationObserver(() => {

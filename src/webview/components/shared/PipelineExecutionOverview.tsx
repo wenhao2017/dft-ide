@@ -1,10 +1,9 @@
-import React, { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Col,
   Empty,
   List,
-  Modal,
   Row,
   Space,
   Tag,
@@ -16,33 +15,18 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseCircleOutlined,
-  PlayCircleOutlined,
   SyncOutlined,
 } from '@ant-design/icons';
 import usePipelineRuntimeStore, {
   PipelineFlowKey,
   PipelineRuntimeSnapshot,
   getPipelineRuntimeKey,
-  subscribePipelineRuntimeUpdates,
 } from '../../store/pipelineRuntimeStore';
 import { PipelineLink, PipelineTask } from './pipelineMockData';
 import { openExecutionTerminal } from '../../utils/ipc';
 import { useShallow } from 'zustand/react/shallow';
-import StepSelector, {
-  VERIFICATION_STEP_PRESETS,
-} from '../verification/mode/StepSelector';
 
 type OverviewRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
-
-export interface PipelineExecutionRef {
-  handleExternalRun: (
-    keys: string[],
-    selectedTaskIds?: string[],
-    selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>,
-    runParameters?: unknown,
-  ) => void;
-  handleExternalStop: (keys: string[]) => void;
-}
 
 interface PipelineExecutionOverviewProps {
   flowKey: PipelineFlowKey;
@@ -296,7 +280,7 @@ function getTrackTaskId(run: PipelineRunOverview, parentByChild: Map<string, str
   return parentByChild.get(activeTask.id) ?? activeTask.id;
 }
 
-const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecutionOverviewProps>(({
+const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   flowKey,
   flowLabel,
   moduleKeys,
@@ -304,11 +288,7 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
   defaultTasksByModule,
   activeModuleKey: externalActiveModuleKey,
   onActiveModuleChange,
-}, ref) => {
-  useEffect(() => {
-    subscribePipelineRuntimeUpdates();
-  }, []);
-
+}) => {
   const selectedModuleKeys = useMemo(() => {
     const cleanKeys = moduleKeys.map((key) => key.trim()).filter(Boolean);
     return Array.from(new Set(cleanKeys));
@@ -327,23 +307,14 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     })
   );
   const ensureRuntime = usePipelineRuntimeStore((state) => state.ensureRuntime);
-  const startRuntime = usePipelineRuntimeStore((state) => state.startRuntime);
-  const stopRuntime = usePipelineRuntimeStore((state) => state.stopRuntime);
   const selectRuntimeTask = usePipelineRuntimeStore((state) => state.selectTask);
   const [activeModuleKey, setActiveModuleKey] = useState<string>();
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(() => new Set());
   const [peakMetrics, setPeakMetrics] = useState<Record<string, { maxCpu: number; maxMem: number }>>({});
-  const [runModalOpen, setRunModalOpen] = useState(false);
-  const [runModalTargets, setRunModalTargets] = useState<string[]>([]);
-  const [runModalRange, setRunModalRange] = useState<[number, number]>([0, 0]);
   const taskDetailRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const getFlowLabel = useCallback((moduleKey: string) => `${flowLabel} / ${moduleKey}`, [flowLabel]);
-
-  const ensureRuntimeVisible = useCallback((moduleKey: string) => {
-    ensureRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
-  }, [ensureRuntime, flowKey, getFlowLabel]);
 
   useEffect(() => {
     selectedModuleKeys.forEach((moduleKey) => {
@@ -412,82 +383,6 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
     setActiveModuleKey(moduleKey);
     onActiveModuleChange?.(moduleKey);
   }, [onActiveModuleChange]);
-
-  const prepareRun = useCallback(async (targets: string[]) => {
-    setRunModalTargets(targets);
-    const targetKey = targets[0];
-    const currentRuntime = runtimes[getPipelineRuntimeKey(flowKey, targetKey)];
-    const defaultTasks = defaultTasksByModule?.[targetKey];
-    const runtime = currentRuntime?.tasks.length
-      ? currentRuntime
-      : await ensureRuntime(flowKey, targetKey, getFlowLabel(targetKey));
-    const tasks = runtime?.runState === 'idle' && defaultTasks?.length
-      ? defaultTasks
-      : runtime?.tasks || [];
-    if (tasks.length > 0) {
-      setRunModalRange([0, tasks.length - 1]);
-    } else {
-      setRunModalRange([0, 0]);
-    }
-    setRunModalOpen(true);
-  }, [defaultTasksByModule, ensureRuntime, flowKey, getFlowLabel, runtimes]);
-
-  const confirmRunModal = useCallback(() => {
-    const targetKey = runModalTargets[0];
-    const runtime = runtimes[getPipelineRuntimeKey(flowKey, targetKey)] || activeModuleData;
-    const defaultTasks = defaultTasksByModule?.[targetKey];
-    const tasks = runtime?.runState === 'idle' && defaultTasks?.length
-      ? defaultTasks
-      : runtime?.tasks || [];
-    const targetTasks = tasks.slice(runModalRange[0], runModalRange[1] + 1);
-    const selectedTaskIds = targetTasks.length > 0 ? targetTasks.map((t) => t.id) : undefined;
-
-    runModalTargets.forEach((moduleKey) => {
-      setPeakMetrics((prev) => ({ ...prev, [moduleKey]: { maxCpu: 0, maxMem: 0 } }));
-      ensureRuntimeVisible(moduleKey);
-      startRuntime(
-        flowKey,
-        moduleKey,
-        getFlowLabel(moduleKey),
-        selectedTaskIds,
-        moduleWorkDirs?.[moduleKey],
-        defaultTasksByModule?.[moduleKey],
-      );
-    });
-
-    if (runModalTargets.length === 1) {
-      activateModule(runModalTargets[0]);
-    }
-    setRunModalOpen(false);
-  }, [runModalTargets, runModalRange, runtimes, flowKey, activeModuleData, defaultTasksByModule, ensureRuntimeVisible, getFlowLabel, startRuntime, activateModule, moduleWorkDirs]);
-
-  const stopRun = useCallback((moduleKey: string) => {
-    ensureRuntimeVisible(moduleKey);
-    stopRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
-  }, [ensureRuntimeVisible, flowKey, getFlowLabel, stopRuntime]);
-
-  useImperativeHandle(ref, () => ({
-    handleExternalRun(keys, selectedTaskIds, selectedTasks, runParameters) {
-      const cleanKeys = keys.filter(Boolean);
-      if (selectedTaskIds !== undefined) {
-        const taskIds = selectedTaskIds.length > 0 ? selectedTaskIds : undefined;
-        cleanKeys.forEach((moduleKey) => {
-          setPeakMetrics((prev) => ({ ...prev, [moduleKey]: { maxCpu: 0, maxMem: 0 } }));
-          ensureRuntimeVisible(moduleKey);
-          startRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), taskIds, moduleWorkDirs?.[moduleKey], selectedTasks, runParameters);
-        });
-        if (cleanKeys.length === 1) {
-          activateModule(cleanKeys[0]);
-        }
-      } else {
-        void prepareRun(cleanKeys);
-      }
-    },
-    handleExternalStop(keys: string[]) {
-      keys.filter(Boolean).forEach(stopRun);
-    },
-  }), [startRuntime, ensureRuntimeVisible, stopRun, flowKey, getFlowLabel, activateModule, prepareRun, moduleWorkDirs]);
-
 
   useEffect(() => {
     if (externalActiveModuleKey) {
@@ -987,80 +882,9 @@ const PipelineExecutionOverview = forwardRef<PipelineExecutionRef, PipelineExecu
         )}
       </Col>
 
-      {/* Run Confirmation and Step Range Selection Modal */}
-      <Modal
-        open={runModalOpen}
-        width={1000}
-        footer={null}
-        title={
-          <Space>
-            <PlayCircleOutlined style={{ color: themeStyles.accent }} />
-            <span>启动流水线 (选择步骤范围)</span>
-          </Space>
-        }
-        onCancel={() => setRunModalOpen(false)}
-      >
-        <Space direction="vertical" size={14} style={{ width: '100%' }}>
-          <div>
-            <span style={{ color: themeStyles.textSecondary, fontSize: 12 }}>目标模块：</span>
-            <strong style={{ color: themeStyles.textPrimary, fontSize: 13, fontFamily: 'monospace' }}>
-              {runModalTargets.join(', ')}
-            </strong>
-          </div>
-          {(() => {
-            const targetKey = runModalTargets[0];
-            const runtime = runtimes[getPipelineRuntimeKey(flowKey, targetKey)] || activeModuleData;
-            const tasks = runtime?.tasks || [];
-            if (tasks.length > 1) {
-              return (
-                <div
-                  style={{
-                    padding: '12px 16px',
-                    background: 'var(--vscode-sideBar-background, rgba(0,0,0,0.02))',
-                    border: `1px solid ${themeStyles.border}`,
-                    borderRadius: 6,
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <span style={{ fontSize: 12, color: themeStyles.textSecondary }}>执行步骤范围:</span>
-                    <span style={{ fontSize: 12, color: themeStyles.accentText, fontWeight: 700, fontFamily: 'monospace' }}>
-                      {tasks[runModalRange[0]]?.name} ➔ {tasks[runModalRange[1]]?.name}
-                    </span>
-                  </div>
-                  <StepSelector
-                    steps={tasks}
-                    range={runModalRange}
-                    presets={flowKey === 'verification' ? VERIFICATION_STEP_PRESETS : undefined}
-                    onChange={setRunModalRange}
-                  />
-                </div>
-              );
-            }
-            return null;
-          })()}
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 8,
-            }}
-          >
-            <Button onClick={() => setRunModalOpen(false)}>取消</Button>
-            <Button
-              type="primary"
-              disabled={!runModalTargets.length}
-              onClick={confirmRunModal}
-            >
-              运行
-            </Button>
-          </div>
-        </Space>
-      </Modal>
       </Row>
     </>
   );
-});
-
-PipelineExecutionOverview.displayName = 'PipelineExecutionOverview';
+};
 
 export default memo(PipelineExecutionOverview);

@@ -1,9 +1,7 @@
-import React, { useCallback, useRef, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 
 import Step1CommonConfig from '../components/verification/Step1_CommonConfig'
-import Step2ToolConfig, {
-  PipelineExecutionRef,
-} from '../components/verification/Step2_ToolConfig'
+import Step2ToolConfig from '../components/verification/Step2_ToolConfig'
 import Step3Result from '../components/verification/Step3_Result'
 import Step4Cloud from '../components/verification/Step4_Cloud'
 import FlowShell from '../components/shared/FlowShell'
@@ -15,6 +13,7 @@ import type {
   ModePanelTab,
   ModeRunPayload,
 } from '../components/verification/mode/types'
+import usePipelineRuntimeStore from '../store/pipelineRuntimeStore'
 
 const VerificationFlow: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(0)
@@ -24,18 +23,8 @@ const VerificationFlow: React.FC = () => {
   const [defaultStepsByMode, setDefaultStepsByMode] = useState<Record<string, ModeRunPayload['steps']>>({})
   const [, setLastRunPayload] = useState<ModeRunPayload>()
 
-  const executionRef = useRef<PipelineExecutionRef>(null)
-  const pendingRunRef = useRef<ModeRunPayload | undefined>(undefined)
-
-  const setExecutionRef = useCallback((instance: PipelineExecutionRef | null) => {
-    executionRef.current = instance
-
-    if (instance && pendingRunRef.current) {
-      const payload = pendingRunRef.current
-      pendingRunRef.current = undefined
-      instance.handleExternalRun([payload.mode.name], payload.stepIds, payload.steps, payload.rows)
-    }
-  }, [])
+  const startRuntime = usePipelineRuntimeStore((state) => state.startRuntime)
+  const stopRuntime = usePipelineRuntimeStore((state) => state.stopRuntime)
 
   const nextStep = () => {
     setCurrentStep((prev) => Math.min(prev + 1, 3))
@@ -64,16 +53,21 @@ const VerificationFlow: React.FC = () => {
       current.includes(payload.mode.name) ? current : [...current, payload.mode.name]
     ))
 
-    if (executionRef.current) {
-      executionRef.current.handleExternalRun([payload.mode.name], payload.stepIds, payload.steps, payload.rows)
-    } else {
-      pendingRunRef.current = payload
-      setCurrentStep(1)
-    }
+    startRuntime(
+      'verification',
+      payload.mode.name,
+      `DFTM / ${payload.mode.name}`,
+      payload.stepIds,
+      moduleWorkDirs[payload.mode.name],
+      payload.steps,
+      payload.rows,
+    )
   }
 
   const handleStop = (keys: string[]) => {
-    executionRef.current?.handleExternalStop(keys)
+    keys.filter(Boolean).forEach((moduleKey) => {
+      stopRuntime('verification', moduleKey, `DFTM / ${moduleKey}`)
+    })
   }
 
   const steps = [
@@ -87,7 +81,6 @@ const VerificationFlow: React.FC = () => {
       description: '仿真工具链',
       content: (
         <Step2ToolConfig
-          ref={setExecutionRef}
           moduleKey={selectedModule}
           onModuleSelect={setSelectedModule}
           onNext={nextStep}

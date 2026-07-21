@@ -15,6 +15,7 @@ import {
   TaskStatus,
   pipelineFlowConfigs,
 } from '../components/shared/pipelineMockData';
+import { mergeLatestSnapshot } from './pipelineRuntimeMerge';
 
 export type PipelineFlowKey = 'hibist' | 'sailor' | 'verification';
 export type PipelineRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
@@ -175,10 +176,8 @@ function applySnapshot(
   runtimes: Record<string, PipelineRuntimeSnapshot>,
   snapshot: PipelineRuntimeSnapshot,
 ): Record<string, PipelineRuntimeSnapshot> {
-  return {
-    ...runtimes,
-    [getPipelineRuntimeKey(snapshot.flowKey, snapshot.moduleKey)]: snapshot,
-  };
+  const key = getPipelineRuntimeKey(snapshot.flowKey, snapshot.moduleKey);
+  return mergeLatestSnapshot(runtimes, key, snapshot);
 }
 
 const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({

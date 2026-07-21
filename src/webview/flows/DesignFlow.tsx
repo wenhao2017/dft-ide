@@ -1,10 +1,11 @@
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import Step1CommonConfig from '../components/design/Step1_CommonConfig';
-import Step2ToolConfig, { PipelineExecutionRef } from '../components/design/Step2_ToolConfig';
+import Step2ToolConfig from '../components/design/Step2_ToolConfig';
 import Step4Result from '../components/design/Step4_Result';
 import Step5Cloud from '../components/design/Step5_Cloud';
 import FlowShell from '../components/shared/FlowShell';
 import DesignTreePanel from '../components/shared/DesignTreePanel';
+import usePipelineRuntimeStore from '../store/pipelineRuntimeStore';
 
 interface Props {
   category: string;
@@ -17,16 +18,35 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
   const [selectedModule, setSelectedModule] = useState('');
   const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>([]);
   const [moduleWorkDirs, setModuleWorkDirs] = useState<Record<string, string>>({});
-  const executionRef = useRef<PipelineExecutionRef>(null);
+  const startRuntime = usePipelineRuntimeStore((state) => state.startRuntime);
+  const stopRuntime = usePipelineRuntimeStore((state) => state.stopRuntime);
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
 
   const handleTreeRun = (keys: string[], selectedTaskIds?: string[]) => {
-    executionRef.current?.handleExternalRun(keys, selectedTaskIds);
+    const taskIds = selectedTaskIds?.length ? selectedTaskIds : undefined;
+    keys.filter(Boolean).forEach((moduleKey) => {
+      startRuntime(
+        repo,
+        moduleKey,
+        `${repo === 'sailor' ? 'Sailor' : 'DFTM'} / ${moduleKey}`,
+        taskIds,
+        moduleWorkDirs[moduleKey],
+      );
+    });
+    if (keys.length === 1) {
+      setSelectedModule(keys[0]);
+    }
   };
 
   const handleTreeStop = (keys: string[]) => {
-    executionRef.current?.handleExternalStop(keys);
+    keys.filter(Boolean).forEach((moduleKey) => {
+      stopRuntime(
+        repo,
+        moduleKey,
+        `${repo === 'sailor' ? 'Sailor' : 'DFTM'} / ${moduleKey}`,
+      );
+    });
   };
 
   const steps = [
@@ -40,7 +60,6 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
       description: '版本与资源',
       content: (
         <Step2ToolConfig
-          ref={executionRef}
           moduleKey={selectedModule}
           onModuleSelect={setSelectedModule}
           onNext={nextStep}
