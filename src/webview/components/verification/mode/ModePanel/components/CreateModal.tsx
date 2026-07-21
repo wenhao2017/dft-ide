@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { Button, Input, Modal, Space, Typography, Upload } from 'antd'
+import { Button, Input, Modal, Space, Typography, message } from 'antd'
 
 import {
   FileTextOutlined,
@@ -29,7 +29,7 @@ interface CreateModalProps {
 
   onCancel: () => void
 
-  onParseCfg: (file: File) => Promise<void>
+  onSelectCfg: () => Promise<string | null>
 
   onConfirm: (name: string, cfgResult?: ParsedCfgResult) => void
 }
@@ -48,7 +48,7 @@ export default function CreateModal({
   cfgResult,
   accent = 'var(--vscode-focusBorder, #1677ff)',
   onCancel,
-  onParseCfg,
+  onSelectCfg,
   onConfirm,
 }: CreateModalProps) {
   const [name, setName] = useState('')
@@ -76,16 +76,17 @@ export default function CreateModal({
     onConfirm(normalizedName, cfgResult)
   }
 
-  const handleSelectCfg = async (file: File) => {
-    setSelectedFileName(file.name)
-
+  const handleSelectCfg = async () => {
     try {
-      await onParseCfg(file)
-    } catch {
+      const fileName = await onSelectCfg()
+      if (fileName) {
+        setSelectedFileName(`${fileName}.cfg`)
+        setName(fileName)
+      }
+    } catch (error) {
       setSelectedFileName('')
+      message.error(error instanceof Error ? error.message : '选择配置文件失败')
     }
-
-    return false
   }
 
   return (
@@ -127,7 +128,7 @@ export default function CreateModal({
           width: '100%',
         }}
       >
-        <div>
+        {!isMode && <div>
           <Text
             type="secondary"
             style={{
@@ -150,7 +151,7 @@ export default function CreateModal({
             }}
             onPressEnter={handleConfirm}
           />
-        </div>
+        </div>}
 
         {isMode && (
           <div>
@@ -182,20 +183,14 @@ export default function CreateModal({
                   width: '100%',
                 }}
               >
-                <Upload
-                  maxCount={1}
+                <Button
+                  icon={<UploadOutlined />}
+                  loading={parsing}
                   disabled={parsing}
-                  showUploadList={false}
-                  beforeUpload={handleSelectCfg}
+                  onClick={() => void handleSelectCfg()}
                 >
-                  <Button
-                    icon={<UploadOutlined />}
-                    loading={parsing}
-                    disabled={parsing}
-                  >
-                    {parsing ? '正在解析' : '选择 mode.cfg'}
-                  </Button>
-                </Upload>
+                  {parsing ? '正在解析' : '选择 mode.cfg'}
+                </Button>
 
                 {selectedFileName && (
                   <Space

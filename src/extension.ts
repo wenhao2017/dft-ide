@@ -730,6 +730,90 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
+      case 'selectVerificationModeCfg': {
+        const requestId: string = msg.requestId;
+        try {
+          const stage = normalizeStageName(msg.stage);
+          const repoRoot = await resolveProjectRepoRoot('verification');
+          const cfgRoot = path.join(repoRoot, stage, 'verification', 'cfg');
+          await ensureLocalConfigDirectory(cfgRoot);
+          const picked = await vscode.window.showOpenDialog({
+            canSelectFiles: true,
+            canSelectFolders: false,
+            canSelectMany: false,
+            openLabel: '导入 mode.cfg',
+            defaultUri: vscode.Uri.file(cfgRoot),
+            filters: { 'CFG 配置文件': ['cfg'] },
+          });
+          const selectedPath = picked?.[0]?.fsPath;
+          if (!selectedPath) {
+            currentPanel?.webview.postMessage({
+              command: 'selectVerificationModeCfgResponse', requestId, path: null,
+            });
+            return;
+          }
+          if (path.resolve(path.dirname(selectedPath)).toLowerCase() !== path.resolve(cfgRoot).toLowerCase()) {
+            throw new Error(`导入文件必须位于 ${cfgRoot} 目录中。`);
+          }
+          currentPanel?.webview.postMessage({
+            command: 'selectVerificationModeCfgResponse', requestId,
+            path: selectedPath,
+            fileName: path.basename(selectedPath),
+            modeName: path.basename(selectedPath, path.extname(selectedPath)),
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'selectVerificationModeCfgResponse', requestId,
+            path: null,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
+      case 'renameVerificationModeCfg':
+      case 'duplicateVerificationModeCfg': {
+        const requestId: string = msg.requestId;
+        const command = String(msg.command);
+        try {
+          const stage = normalizeStageName(msg.stage);
+          const normalizeModeName = (value: unknown): string => {
+            if (typeof value !== 'string') throw new Error('Mode 名称不能为空。');
+            const name = value.trim();
+            if (!name || name === '.' || name === '..' || path.basename(name) !== name) {
+              throw new Error(`无效的 Mode 名称：${String(value)}`);
+            }
+            return name;
+          };
+          const sourceMode = normalizeModeName(msg.sourceMode);
+          const targetMode = normalizeModeName(msg.targetMode);
+          const repoRoot = await resolveProjectRepoRoot('verification');
+          const cfgRoot = path.join(repoRoot, stage, 'verification', 'cfg');
+          const source = path.join(cfgRoot, `${sourceMode}.cfg`);
+          const target = path.join(cfgRoot, `${targetMode}.cfg`);
+          try {
+            await vscode.workspace.fs.stat(vscode.Uri.file(target));
+            throw new Error(`配置文件已存在：${targetMode}.cfg`);
+          } catch (error) {
+            if (error instanceof Error && error.message.startsWith('配置文件已存在：')) throw error;
+          }
+          if (command === 'renameVerificationModeCfg') {
+            await vscode.workspace.fs.rename(vscode.Uri.file(source), vscode.Uri.file(target), { overwrite: false });
+          } else {
+            await vscode.workspace.fs.copy(vscode.Uri.file(source), vscode.Uri.file(target), { overwrite: false });
+          }
+          currentPanel?.webview.postMessage({
+            command: `${command}Response`, requestId, success: true,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: `${command}Response`, requestId, success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
       case 'openFile': {
         const filePath: string | undefined = msg.path;
         if (!filePath) { return; }

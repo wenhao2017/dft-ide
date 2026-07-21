@@ -148,6 +148,40 @@ export async function selectPath(
   return typeof res.path === 'string' ? res.path : null
 }
 
+export async function selectVerificationModeCfg(
+  stage: string,
+): Promise<{ path: string; fileName: string; modeName: string } | null> {
+  const res = await ipcRequest('selectVerificationModeCfg', { stage })
+  if (typeof res.error === 'string') throw new Error(res.error)
+  return typeof res.path === 'string' && typeof res.fileName === 'string' && typeof res.modeName === 'string'
+    ? { path: res.path, fileName: res.fileName, modeName: res.modeName }
+    : null
+}
+
+async function mutateVerificationModeCfg(
+  command: 'renameVerificationModeCfg' | 'duplicateVerificationModeCfg',
+  stage: string,
+  sourceMode: string,
+  targetMode: string,
+): Promise<void> {
+  const res = await ipcRequest(command, { stage, sourceMode, targetMode })
+  if (res.success !== true) {
+    throw new Error(typeof res.error === 'string' ? res.error : 'Mode 配置文件操作失败')
+  }
+}
+
+export const renameVerificationModeCfg = (
+  stage: string,
+  sourceMode: string,
+  targetMode: string,
+) => mutateVerificationModeCfg('renameVerificationModeCfg', stage, sourceMode, targetMode)
+
+export const duplicateVerificationModeCfg = (
+  stage: string,
+  sourceMode: string,
+  targetMode: string,
+) => mutateVerificationModeCfg('duplicateVerificationModeCfg', stage, sourceMode, targetMode)
+
 /**
  * 在 VS Code 编辑器中打开指定文件路径。
  * 这是单向通知，不等待响应。

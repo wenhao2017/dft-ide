@@ -117,14 +117,14 @@ export function useModeCrud({
   )
 
   const duplicateItem = useCallback(
-    (item?: ModePanelItem, tab?: ModePanelTab) => {
+    (item?: ModePanelItem, tab?: ModePanelTab, targetName?: string) => {
       if (!item) {
         return false
       }
 
       const targetTab = tab ?? 'mode'
 
-      const duplicatedName = createCopyName(resources[targetTab], item.name)
+      const duplicatedName = targetName ?? createCopyName(resources[targetTab], item.name)
 
       const duplicated: ModePanelItem = {
         ...item,

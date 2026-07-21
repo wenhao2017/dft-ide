@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { message } from 'antd'
 import type {
   ModeConfigItem,
   ModePanelItem,
@@ -21,9 +22,15 @@ import { useModeSelection } from './hooks/useModeSelection'
 import { useModeCrud } from './hooks/useModeCrud'
 import { useModeRun } from './hooks/useModeRun'
 
-import { parseImportedModeCfg } from './utils'
+import { createCopyName, parseImportedModeCfg, sameName } from './utils'
 
-import { getLanderModePipelines } from '../../../../utils/ipc'
+import {
+  duplicateVerificationModeCfg,
+  getLanderModePipelines,
+  renameVerificationModeCfg,
+  selectVerificationModeCfg,
+} from '../../../../utils/ipc'
+import { useVerificationStageConfig } from './hooks/useVerificationStageConfig'
 
 export default function ModePanel({
   accent,
@@ -36,6 +43,7 @@ export default function ModePanel({
   onStop,
 }: ModePanelProps) {
   const accentColor = accent ?? 'var(--vscode-focusBorder, #1677ff)'
+  const { stage } = useVerificationStageConfig()
 
   const [activeTab] = useState<ModePanelTab>(initialTab)
 
@@ -251,14 +259,18 @@ export default function ModePanel({
     setCfgResult(undefined)
   }
 
-  const handleParseCfg = async (file: File) => {
+  const handleSelectCfg = async (): Promise<string | null> => {
+    if (!stage) throw new Error('请先选择 Verification stage。')
+    const selected = await selectVerificationModeCfg(stage)
+    if (!selected) return null
     setParsing(true)
     setCfgResult(undefined)
 
     try {
-      const result = await parseImportedModeCfg(file)
+      const result = await parseImportedModeCfg(selected.path)
 
       setCfgResult(result)
+      return selected.modeName
     } finally {
       setParsing(false)
     }
@@ -285,11 +297,29 @@ export default function ModePanel({
     setRenameItem(undefined)
   }
 
-  const confirmRename = (value: string) => {
+  const confirmRename = async (value: string) => {
     if (!renameItem) {
       return
     }
 
+    if (activeTab === 'mode') {
+      if (!stage) return
+      const nextName = value.trim()
+      if (!nextName) {
+        message.warning('请输入名称')
+        return
+      }
+      if (resources.mode.some((item) => !sameName(item.name, renameItem.name) && sameName(item.name, nextName))) {
+        message.error(`mode 名称 ${nextName} 已存在`)
+        return
+      }
+      try {
+        await renameVerificationModeCfg(stage, renameItem.name, nextName)
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : 'Mode 配置文件重命名失败')
+        return
+      }
+    }
     const success = crud.renameItem(renameItem, activeTab, value)
 
     if (!success) {
@@ -348,11 +378,23 @@ export default function ModePanel({
     selection.selectItem(activeTab, undefined)
   }
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     if (!selectedItem) {
       return
     }
 
+    if (activeTab === 'mode') {
+      if (!stage) return
+      const targetName = createCopyName(resources.mode, selectedItem.name)
+      try {
+        await duplicateVerificationModeCfg(stage, selectedItem.name, targetName)
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : 'Mode 配置文件复制失败')
+        return
+      }
+      crud.duplicateItem(selectedItem, activeTab, targetName)
+      return
+    }
     crud.duplicateItem(selectedItem, activeTab)
   }
 
@@ -539,7 +581,7 @@ export default function ModePanel({
         cfgResult={cfgResult}
         accent={accentColor}
         onCancel={closeCreate}
-        onParseCfg={handleParseCfg}
+        onSelectCfg={handleSelectCfg}
         onConfirm={confirmCreate}
       />
 

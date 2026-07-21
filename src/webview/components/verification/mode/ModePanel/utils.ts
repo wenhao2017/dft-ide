@@ -83,7 +83,7 @@ const pickMockPreMode = (): string => {
 }
 
 export async function parseImportedModeCfg(
-  file: File,
+  file: File | string,
 ): Promise<ParsedCfgResult> {
   // 占位实现：当前不解析 mode.cfg 内容。
   // 保留 file 参数，是为了后续替换成真实解析逻辑时不改调用方。
