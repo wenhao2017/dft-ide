@@ -32,6 +32,7 @@ export interface ObsFileDetailInfo {
   parentPath?: string;
   md5?: string;
   updaterName?: string;
+  version?: string;
   versionId?: string;
   size?: number | string;
   updatedAt?: string;
@@ -44,6 +45,7 @@ export interface ObsChildItem {
   type: 'file' | 'folder';
   size?: string | number;
   updatedAt?: string;
+  version?: string;
   versionId?: string;
   md5?: string;
   etag?: string;
@@ -51,6 +53,7 @@ export interface ObsChildItem {
 
 export interface ObsDownloadFileOptions {
   versionId?: string;
+  knownVersion?: string;
   knownEtag?: string;
   knownUpdatedAt?: string;
 }
@@ -59,6 +62,7 @@ export interface ObsDownloadedFileResult {
   spaceName: string;
   remoteFilePath: string;
   localDestUri: vscode.Uri;
+  version?: string;
   versionId?: string;
   updatedAt?: string;
   etag?: string;
@@ -214,6 +218,7 @@ export class ObsService {
       parentPath: data.parentPath,
       md5,
       updaterName: data.updaterName,
+      version: data.version || undefined,
       versionId: data.versionId || data.version || response.headers.get('x-obs-version-id') || undefined,
       size: data.size,
       updatedAt: data.updatedAt || data.updateTime || response.headers.get('last-modified') || undefined,
@@ -315,6 +320,7 @@ export class ObsService {
           : 'file',
         size: item.size,
         updatedAt: item.updatedAt || item.updateTime,
+        version: item.version || undefined,
         versionId: item.versionId || item.version,
         md5,
         etag: md5 || item.etag,
@@ -377,6 +383,7 @@ export class ObsService {
     const headerUpdatedAt = response.headers.get('last-modified') || options?.knownUpdatedAt || undefined;
 
     let resolvedVersionId = headerVersionId;
+    let resolvedVersion = options?.knownVersion;
     let resolvedEtag = headerEtag;
     let resolvedUpdatedAt = headerUpdatedAt;
     if (!resolvedEtag) {
@@ -385,6 +392,7 @@ export class ObsService {
         if (detail.versionId) {
           resolvedVersionId = detail.versionId;
         }
+        resolvedVersion = resolvedVersion || detail.version;
         resolvedEtag = resolvedEtag || detail.etag || detail.md5;
         resolvedUpdatedAt = resolvedUpdatedAt || detail.updatedAt;
       } catch (e) {
@@ -396,6 +404,7 @@ export class ObsService {
       spaceName,
       remoteFilePath: normalizedPath,
       localDestUri,
+      version: resolvedVersion,
       versionId: resolvedVersionId || options?.versionId || 'latest',
       etag: resolvedEtag,
       updatedAt: resolvedUpdatedAt || new Date().toISOString(),

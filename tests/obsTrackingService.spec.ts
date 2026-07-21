@@ -24,6 +24,7 @@ describe('ObsTrackingService', () => {
   beforeEach(async () => {
     tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'dft-obs-tracking-'));
     service = new ObsTrackingService();
+    vi.spyOn(obsService, 'getFileVersions').mockResolvedValue([]);
 
     vi.mocked(vscode.workspace.fs.createDirectory).mockImplementation(async (uri) => {
       await fs.promises.mkdir(uri.fsPath, { recursive: true });
@@ -61,6 +62,12 @@ describe('ObsTrackingService', () => {
 
   it('writes a hidden per-file metadata sidecar for a tracked download', async () => {
     const destination = vscode.Uri.file(path.join(tempDir, 'gen_cfg.py'));
+    vi.mocked(obsService.getFileVersions).mockResolvedValue([{
+      id: 17,
+      version: 'V17',
+      versionId: 'v17',
+      isLatest: true,
+    }]);
     vi.spyOn(obsService, 'getFileDetailInfo').mockResolvedValue({
       exists: true,
       filepath: '/scripts/hibist/gen_cfg.py',
@@ -86,6 +93,7 @@ describe('ObsTrackingService', () => {
     expect(metadata.source).toMatchObject({
       spaceName: 'DFX_MTC001',
       remotePath: '/scripts/hibist/gen_cfg.py',
+      version: 'V17',
       versionId: 'v17',
       etag: 'etag-17',
     });

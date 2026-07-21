@@ -2,7 +2,13 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { obsService, ObsChildItem, ObsDownloadedFileResult, ObsTrackingOrigin } from './obsService';
+import {
+  obsService,
+  ObsChildItem,
+  ObsDownloadedFileResult,
+  ObsFileVersionRecord,
+  ObsTrackingOrigin,
+} from './obsService';
 import { resolveLocalConfigDirectory } from './workspaceService';
 
 const METADATA_SUFFIX = '.obs.json';
@@ -25,6 +31,7 @@ export interface ObsTrackedMetadata {
     spaceName: string;
     remotePath: string;
     origin?: ObsTrackingOrigin;
+    version?: string;
     versionId?: string;
     etag?: string;
     updatedAt?: string;
@@ -35,6 +42,7 @@ export interface ObsTrackedMetadata {
 
 export interface ObsTrackedDownloadOptions {
   versionId?: string;
+  remoteVersion?: string;
   remoteEtag?: string;
   remoteUpdatedAt?: string;
   policy?: ObsTrackingPolicy;
@@ -54,6 +62,7 @@ export interface ObsPendingUpdate {
   artifactPath: string;
   metadataPath: string;
   metadata: ObsTrackedMetadata;
+  remoteVersion?: string;
   remoteVersionId?: string;
   remoteEtag?: string;
   remoteUpdatedAt?: string;
@@ -212,23 +221,40 @@ export class ObsTrackingService implements vscode.Disposable {
 
     try {
       let targetVersionId = options.versionId;
+      let targetVersion = options.remoteVersion;
       let targetEtag = normalizeOptionalIdentity(options.remoteEtag);
       let targetUpdatedAt = options.remoteUpdatedAt;
+
+      if (!targetVersion) {
+        const versions = await obsService.getFileVersions(spaceName, normalizedRemotePath).catch((error) => {
+          console.warn(`[DFT IDE] Failed to resolve OBS display version: ${normalizedRemotePath}`, error);
+          return [];
+        });
+        const versionRecord = selectVersionRecord(versions, targetVersionId);
+        if (versionRecord) {
+          targetVersion = versionRecord.version;
+          targetVersionId = targetVersionId || versionRecord.versionId;
+          targetUpdatedAt = targetUpdatedAt || versionRecord.updatedAt;
+        }
+      }
       if (!targetVersionId && !targetEtag) {
         const detail = await obsService.getFileDetailInfo(spaceName, normalizedRemotePath);
         if (!detail.exists) {
           throw new Error(`OBS file does not exist or its remote identity cannot be resolved: ${normalizedRemotePath}`);
         }
         targetVersionId = detail.versionId;
+        targetVersion = targetVersion || detail.version;
         targetEtag = detail.etag || detail.md5;
         targetUpdatedAt = detail.updatedAt;
       }
       const result = await obsService.downloadFile(spaceName, normalizedRemotePath, tempUri, {
         versionId: targetVersionId,
+        knownVersion: targetVersion,
         knownEtag: targetEtag,
         knownUpdatedAt: targetUpdatedAt,
       });
       const resolvedVersionId = normalizeOptionalVersion(result.versionId) ?? targetVersionId;
+      const resolvedVersion = result.version || targetVersion;
       const resolvedEtag = normalizeOptionalIdentity(result.etag) ?? normalizeOptionalIdentity(targetEtag);
       if (!resolvedVersionId && !resolvedEtag) {
         throw new Error(`OBS download did not return a version id or MD5: ${normalizedRemotePath}`);
@@ -246,6 +272,7 @@ export class ObsTrackingService implements vscode.Disposable {
           spaceName,
           remotePath: normalizedRemotePath,
           origin: obsService.getTrackingOrigin(),
+          version: resolvedVersion,
           versionId: resolvedVersionId,
           etag: resolvedEtag,
           updatedAt: result.updatedAt,
@@ -295,6 +322,7 @@ export class ObsTrackingService implements vscode.Disposable {
         const result = await this.downloadFile(spaceName, item.path, destination, {
           ...options,
           versionId: options.versionIdMap?.[normalizeRemotePath(item.path)] ?? item.versionId ?? options.versionId,
+          remoteVersion: item.version ?? options.remoteVersion,
           remoteEtag: item.etag || item.md5 || options.remoteEtag,
           remoteUpdatedAt: item.updatedAt || options.remoteUpdatedAt,
         });
@@ -414,6 +442,7 @@ export class ObsTrackingService implements vscode.Disposable {
                 type: 'file',
                 size: detail.size,
                 updatedAt: detail.updatedAt,
+                version: detail.version,
                 versionId: detail.versionId,
                 etag: detail.etag,
               };
@@ -428,6 +457,7 @@ export class ObsTrackingService implements vscode.Disposable {
               artifactPath: entry.artifactPath,
               metadataPath: entry.metadataPath,
               metadata: entry.metadata,
+              remoteVersion: remote?.version,
               remoteVersionId: remote?.versionId,
               remoteEtag: remote?.etag,
               remoteUpdatedAt: remote?.updatedAt,
@@ -539,7 +569,7 @@ export class ObsTrackingService implements vscode.Disposable {
       label: `$(cloud-download) ${path.basename(update.artifactPath)}`,
       description: update.remoteDeleted
         ? '远端文件已删除'
-        : `${displayIdentity(update.metadata.source.etag || update.metadata.source.versionId)} → ${displayIdentity(update.remoteEtag || update.remoteVersionId)}`,
+        : `${displayIdentity(update.metadata.source.version || update.metadata.source.etag || update.metadata.source.versionId)} → ${displayIdentity(update.remoteVersion || update.remoteEtag || update.remoteVersionId)}`,
       detail: `${update.metadata.source.spaceName}:${update.metadata.source.remotePath}\n${update.artifactPath}`,
       picked: true,
       update,
@@ -583,6 +613,7 @@ export class ObsTrackingService implements vscode.Disposable {
               vscode.Uri.file(update.artifactPath),
               {
                 versionId: update.remoteVersionId,
+                remoteVersion: update.remoteVersion,
                 remoteEtag: update.remoteEtag,
                 remoteUpdatedAt: update.remoteUpdatedAt,
                 policy: update.metadata.policy,
@@ -613,6 +644,7 @@ export class ObsTrackingService implements vscode.Disposable {
                   vscode.Uri.file(update.artifactPath),
                   {
                     versionId: update.remoteVersionId,
+                    remoteVersion: update.remoteVersion,
                     remoteEtag: update.remoteEtag,
                     remoteUpdatedAt: update.remoteUpdatedAt,
                     policy: update.metadata.policy,
@@ -684,6 +716,9 @@ export class ObsTrackingService implements vscode.Disposable {
 
   private async hasRemoteUpdate(entry: ObsIndexEntry, remote: ObsChildItem): Promise<boolean> {
     const local = entry.metadata.source;
+    if (remote.version && local.version) {
+      return remote.version !== local.version;
+    }
     const remoteIdentity = normalizeOptionalIdentity(remote.etag || remote.md5);
     const localIdentity = normalizeOptionalIdentity(local.etag);
 
@@ -1011,7 +1046,40 @@ async function hashFile(filePath: string, algorithm: 'sha256' | 'md5'): Promise<
 
 function updateIdentity(update: ObsPendingUpdate): string {
   if (update.remoteDeleted) return 'deleted';
-  return update.remoteEtag ?? update.remoteVersionId ?? update.remoteUpdatedAt ?? `size:${update.remoteSize ?? 'unknown'}`;
+  return update.remoteVersion ?? update.remoteEtag ?? update.remoteVersionId ?? update.remoteUpdatedAt ?? `size:${update.remoteSize ?? 'unknown'}`;
+}
+
+function selectVersionRecord(
+  records: ObsFileVersionRecord[],
+  requestedVersionId?: string
+): ObsFileVersionRecord | undefined {
+  if (requestedVersionId) {
+    const requested = records.find((record) =>
+      record.versionId === requestedVersionId || record.version === requestedVersionId
+    );
+    if (requested) return requested;
+  }
+
+  const latest = records.find((record) => record.isLatest);
+  if (latest) return latest;
+
+  return [...records].sort((left, right) => {
+    const leftVersion = parseDisplayVersion(left.version);
+    const rightVersion = parseDisplayVersion(right.version);
+    if (leftVersion !== rightVersion) return rightVersion - leftVersion;
+
+    const leftTime = Date.parse(left.updatedAt || '');
+    const rightTime = Date.parse(right.updatedAt || '');
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+      return rightTime - leftTime;
+    }
+    return right.id - left.id;
+  })[0];
+}
+
+function parseDisplayVersion(value: string | undefined): number {
+  const match = value?.trim().match(/^v?(\d+)$/i);
+  return match ? Number(match[1]) : -1;
 }
 
 function displayIdentity(value: string | undefined): string {
