@@ -99,7 +99,11 @@ export default function ModeFooter({
               whiteSpace: 'nowrap',
             }}
           >
-            关注 {focusedCount} · 显示 {visibleCount}
+            {tab === 'mode' ? (
+              <>关注 {focusedCount} · 显示 {visibleCount}</>
+            ) : (
+              <>共 {totalCount} · 显示 {visibleCount}</>
+            )}
           </Text>
         </div>
       </Space>

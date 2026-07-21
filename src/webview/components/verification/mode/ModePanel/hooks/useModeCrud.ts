@@ -41,11 +41,14 @@ export function useModeCrud({
   const ensureUniqueName = useCallback(
     (tab: ModePanelTab, name: string, ignoreName?: string) => {
       const duplicated = resources[tab].some((item) => {
-        if (ignoreName && sameName(item.name, ignoreName)) {
+        const namesMatch = (left: string, right: string) =>
+          tab === 'mode' ? sameName(left, right) : left === right
+
+        if (ignoreName && namesMatch(item.name, ignoreName)) {
           return false
         }
 
-        return sameName(item.name, name)
+        return namesMatch(item.name, name)
       })
 
       if (duplicated) {

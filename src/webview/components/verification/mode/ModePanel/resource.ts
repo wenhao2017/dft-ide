@@ -27,7 +27,7 @@ export const normalizeBaseItems = (value: unknown): BaseConfigItem[] => {
     return []
   }
 
-  return value.flatMap((raw) => {
+  const items = value.flatMap((raw) => {
     if (typeof raw === 'string') {
       const name = raw.trim()
 
@@ -59,6 +59,14 @@ export const normalizeBaseItems = (value: unknown): BaseConfigItem[] => {
       },
     ]
   })
+
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    const key = item.name
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 /**
@@ -82,7 +90,7 @@ export const normalizeModeItems = (value: unknown): ModeConfigItem[] => {
     return []
   }
 
-  return value.flatMap((raw) => {
+  const items = value.flatMap((raw) => {
     if (!isRecord(raw)) {
       return []
     }
@@ -101,6 +109,14 @@ export const normalizeModeItems = (value: unknown): ModeConfigItem[] => {
         preMode,
       },
     ]
+  })
+
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    const key = item.name.toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
   })
 }
 
@@ -151,6 +167,17 @@ export const readResources = (
  * ResourceStore -> 配置保存结构
  */
 export const createResourcePatch = (store: ResourceStore) => {
+  const uniqueNames = (items: BaseConfigItem[]) => {
+    const seen = new Set<string>()
+    return items.flatMap((item) => {
+      const name = item.name.trim()
+      const key = name
+      if (!name || seen.has(key)) return []
+      seen.add(key)
+      return [name]
+    })
+  }
+
   return {
     modes: store.mode.map((item) => ({
       name: item.name,
@@ -160,10 +187,10 @@ export const createResourcePatch = (store: ResourceStore) => {
 
     focusModes: store.focusModes,
 
-    groups: store.group.map((item) => item.name),
+    groups: uniqueNames(store.group),
 
-    tcs: store.tc.map((item) => item.name),
+    tcs: uniqueNames(store.tc),
 
-    subattrs: store.subattr.map((item) => item.name),
+    subattrs: uniqueNames(store.subattr),
   }
 }

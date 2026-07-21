@@ -119,6 +119,7 @@ export default function ModeToolbar({
         )}
       </Space.Compact>
 
+      {focusOptions.length > 0 && (
       <Space
         direction="vertical"
         size={6}
@@ -181,6 +182,7 @@ export default function ModeToolbar({
           }}
         />
       </Space>
+      )}
 
       <Space size={6} wrap>
         <Tooltip title={`新增 ${activeTabLabel}`}>

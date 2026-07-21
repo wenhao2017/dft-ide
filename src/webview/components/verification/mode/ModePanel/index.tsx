@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { message } from 'antd'
+import { message, Segmented } from 'antd'
 import type {
   ModeConfigItem,
   ModePanelItem,
@@ -45,7 +45,7 @@ export default function ModePanel({
   const accentColor = accent ?? 'var(--vscode-focusBorder, #1677ff)'
   const { stage } = useVerificationStageConfig()
 
-  const [activeTab] = useState<ModePanelTab>(initialTab)
+  const [activeTab, setActiveTab] = useState<ModePanelTab>(initialTab)
 
   const [collapsed, setCollapsed] = useState(false)
 
@@ -118,7 +118,10 @@ export default function ModePanel({
 
   const allItems = resources[activeTab]
 
-  const focusedNames = selection.activeCheckedNames
+  const focusedNames =
+    activeTab === 'mode'
+      ? selection.activeCheckedNames
+      : allItems.map((item) => item.name)
 
   const batchCheckedNames = batchCheckedNamesByTab[activeTab]
 
@@ -168,7 +171,7 @@ export default function ModePanel({
   /**
    * 当前列表仅显示：
    *
-   * 1. 已关注项目；
+   * 1. Mode 仅显示已关注项目，其他类型显示全部项目；
    * 2. 符合当前搜索条件的项目。
    */
   const visibleItems = useMemo(() => {
@@ -519,6 +522,21 @@ export default function ModePanel({
         onCollapsedChange={setCollapsed}
       />
 
+      <div style={{ padding: '10px 12px 0' }}>
+        <Segmented
+          block
+          size={'small'}
+          value={activeTab}
+          options={[
+            { label: 'Mode', value: 'mode' },
+            { label: 'Group', value: 'group' },
+            { label: 'TC', value: 'tc' },
+            { label: 'SubAttr', value: 'subattr' },
+          ]}
+          onChange={(value) => setActiveTab(value as ModePanelTab)}
+        />
+      </div>
+
       <div
         style={{
           minWidth: 0,
@@ -531,7 +549,7 @@ export default function ModePanel({
           searchValue={searchValue}
           hasSelected={Boolean(selectedItem)}
           checkedCount={batchCheckedNames.length}
-          focusOptions={focusOptions}
+          focusOptions={activeTab === 'mode' ? focusOptions : []}
           focusedNames={focusedNames}
           accent={accentColor}
           onSearchChange={(value) => {

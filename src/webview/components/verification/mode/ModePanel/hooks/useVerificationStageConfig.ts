@@ -12,18 +12,15 @@ export function useVerificationStageConfig() {
   /**
    * 获取当前 stage
    *
-   * 根据你的流程：
-   * step1.stage
+   * verification.json 顶层的 stage
    */
   const stage = useMemo(() => {
     if (!verificationConfig) {
       return undefined
     }
 
-    const step1 = verificationConfig.step1
-
-    if (typeof step1 === 'object' && step1 !== null && 'stage' in step1) {
-      return String((step1 as Record<string, unknown>).stage)
+    if (typeof verificationConfig.stage === 'string') {
+      return verificationConfig.stage
     }
 
     return undefined

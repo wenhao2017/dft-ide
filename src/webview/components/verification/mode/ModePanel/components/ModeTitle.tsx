@@ -177,7 +177,11 @@ export default function ModeTitle({
             fontSize: 12,
           }}
         >
-          已关注 {focusedCount} 个，共 {totalCount} 个
+          {activeTab === 'mode' ? (
+            <>已关注 {focusedCount} 个，共 {totalCount} 个</>
+          ) : (
+            <>共 {totalCount} 个</>
+          )}
         </Text>
       </Space>
 

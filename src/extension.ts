@@ -616,10 +616,8 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             const cwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
             const envConfig = await readConfig(flowKey);
             const verificationStage = flowKey === 'verification'
-              && envConfig?.step1
-              && typeof envConfig.step1 === 'object'
-              && typeof (envConfig.step1 as Record<string, unknown>).stage === 'string'
-                ? (envConfig.step1 as Record<string, unknown>).stage as string
+              && typeof envConfig?.stage === 'string'
+                ? envConfig.stage
                 : undefined;
             const taskConfigKey = verificationStage
               ? `${flowKey}/${verificationStage}/${moduleKey}/config`

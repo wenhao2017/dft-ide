@@ -70,26 +70,26 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
       if (!cleanKeys.length) {
         return;
       }
-      if (overviewRef.current) {
+      if (activeTab === 'execution' && overviewRef.current) {
         overviewRef.current.handleExternalRun(cleanKeys, selectedTaskIds, selectedTasks, runParameters);
       } else {
         pendingCommandRef.current = { type: 'run', keys: cleanKeys, selectedTaskIds, selectedTasks, runParameters };
+        setActiveTab('execution');
       }
-      setActiveTab('execution');
     },
     handleExternalStop(keys: string[]) {
       const cleanKeys = keys.filter(Boolean);
       if (!cleanKeys.length) {
         return;
       }
-      if (overviewRef.current) {
+      if (activeTab === 'execution' && overviewRef.current) {
         overviewRef.current.handleExternalStop(cleanKeys);
       } else {
         pendingCommandRef.current = { type: 'stop', keys: cleanKeys };
+        setActiveTab('execution');
       }
-      setActiveTab('execution');
     },
-  }));
+  }), [activeTab]);
 
   useEffect(() => {
     if (activeTab !== 'execution' || !overviewRef.current || !pendingCommandRef.current) {
@@ -241,6 +241,7 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
             {
               key: 'execution',
               label: '配置执行',
+              forceRender: true,
               children: (
                 <PipelineExecutionOverview
                   ref={overviewRef}
