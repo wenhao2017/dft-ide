@@ -33,30 +33,8 @@ export interface LanderStep {
   enableSubAttr: boolean
 }
 
-export type VersionToolConfig = {
-  id: string
-  type: 'version'
-  name: string
-  version: string
-  path?: string
-}
-
-export type PathToolConfig = {
-  id: string
-  type: 'path'
-  path: string
-  name?: string
-  version?: string
-}
-
-export type ToolConfig = VersionToolConfig | PathToolConfig
-
-export type ToolPatch = {
-  type?: ToolConfig['type']
-  name?: string
-  version?: string
-  path?: string
-}
+export type { ToolConfig, ToolPatch } from '../../shared/toolConfigTypes'
+import type { ToolConfig } from '../../shared/toolConfigTypes'
 
 export interface DonauConfig {
   group?: string

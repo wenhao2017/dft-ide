@@ -10,7 +10,6 @@ import {
   Tabs,
   Badge,
   Spin,
-  Select,
 } from 'antd';
 import {
   PlusOutlined,
@@ -25,6 +24,7 @@ import ControlledPathInput from '../shared/ControlledPathInput';
 import CollapsibleSection from '../shared/CollapsibleSection';
 import DonauResourcePicker from '../shared/DonauResourcePicker';
 import PipelineExecutionOverview, { PipelineExecutionRef as OverviewRef } from '../shared/PipelineExecutionOverview';
+import ToolConfigEditor from '../shared/ToolConfigEditor';
 
 const { Text } = Typography;
 
@@ -42,28 +42,6 @@ export interface PipelineExecutionRef {
   handleExternalRun: (keys: string[], selectedTaskIds?: string[]) => void;
   handleExternalStop: (keys: string[]) => void;
 }
-
-const toolOptions = [
-  {
-    label: 'ELI',
-    value: 'eli'
-  },
-  {
-    label: 'DC',
-    value: 'dc'
-  },
-  {
-    label: 'PT',
-    value: 'pt'
-  },
-  {
-    label: 'VCS',
-    value: 'vcs'
-  },{
-    label: 'fml',
-    value: 'fml'
-  }
-]
 
 const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPrev, moduleKey, onModuleSelect, category, moduleKeys, moduleWorkDirs }, ref) => {
   const flowKey = category.toLowerCase();
@@ -173,22 +151,9 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
         </Radio.Group>
       </Form.Item> */}
 
-      <Row gutter={16}>
-        <Col span={14}>
-          <Form.Item label="常用工具版本" name="toolName">
-            <Select
-              allowClear
-              placeholder="请选择工具"
-              options={toolOptions}
-            />
-          </Form.Item>
-        </Col>
-        <Col span={10}>
-          <Form.Item label="工具版本或路径配置" name="toolVersion">
-            <Input placeholder="输入版本号或绝对路径" />
-          </Form.Item>
-        </Col>
-      </Row>
+      <Form.Item name="tools">
+        <ToolConfigEditor />
+      </Form.Item>
 
       <div style={{ marginBottom: 24, marginTop: -12 }}>
         <Text type="secondary" style={{ fontSize: 12 }}>

@@ -26,6 +26,8 @@ import CollapsibleSection from '../shared/CollapsibleSection';
 import DonauResourcePicker from '../shared/DonauResourcePicker';
 import PipelineExecutionOverview, { PipelineExecutionRef as OverviewRef } from '../shared/PipelineExecutionOverview';
 import type { LanderStep } from './mode/types';
+import ToolConfigEditor from '../shared/ToolConfigEditor';
+import { useVerificationStageConfig } from './mode/ModePanel/hooks/useVerificationStageConfig';
 
 const { Text } = Typography;
 
@@ -43,28 +45,6 @@ export interface PipelineExecutionRef {
   handleExternalRun: (keys: string[], selectedTaskIds?: string[], selectedTasks?: LanderStep[], runParameters?: unknown) => void;
   handleExternalStop: (keys: string[]) => void;
 }
-
-const toolOptions = [
-  {
-    label: 'ELI',
-    value: 'eli'
-  },
-  {
-    label: 'DC',
-    value: 'dc'
-  },
-  {
-    label: 'PT',
-    value: 'pt'
-  },
-  {
-    label: 'VCS',
-    value: 'vcs'
-  },{
-    label: 'fml',
-    value: 'fml'
-  }
-]
 
 const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPrev, moduleKey, onModuleSelect, moduleKeys, moduleWorkDirs, defaultStepsByModule }, ref) => {
   const [activeTab, setActiveTab] = useState('task');
@@ -127,8 +107,9 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
   // ── 配置持久化 Hook ─────────────────────────────────
   // 注意：Step2 与 Step1 同属 design flow，但字段不同，合并到同一个文件中
   // 这里使用独立 key 区分：step2_task / step2_design
+  const { stage } = useVerificationStageConfig();
   const { savedData, loading, saving, hasUnsaved, handleSave } =
-    useFlowConfig(moduleKey ? `verification/${moduleKey}/config` : 'verification');
+    useFlowConfig(`verification/${stage ?? '__unselected__'}/${moduleKey ?? '__unselected__'}/config`);
 
   // 回填：从文件读到 savedData 后填入表单
   useEffect(() => {
@@ -160,6 +141,7 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
   });
 
   const onSave = () => {
+    if (!stage) return;
     const data = collectFormData();
     if (!moduleKey) {
       handleSave(data);
@@ -171,22 +153,9 @@ const Step2ToolConfig = forwardRef<PipelineExecutionRef, Props>(({ onNext, onPre
   // ── 任务配置 Tab ──────────────────────────────────
   const renderTaskConfig = () => (
     <Form form={taskForm} layout="vertical" style={{ padding: '16px 0' }}>
-      <Row gutter={16}>
-        <Col span={14}>
-          <Form.Item label="常用工具版本" name="toolName">
-            <Select
-              allowClear
-              placeholder="请选择工具"
-              options={toolOptions}
-            />
-          </Form.Item>
-        </Col>
-        <Col span={10}>
-          <Form.Item label="工具版本或路径配置" name="toolVersion">
-            <Input placeholder="输入版本号或绝对路径" />
-          </Form.Item>
-        </Col>
-      </Row>
+      <Form.Item name="tools">
+        <ToolConfigEditor />
+      </Form.Item>
 
       <div style={{ marginBottom: 24, marginTop: -12 }}>
         <Text type="secondary" style={{ fontSize: 12 }}>

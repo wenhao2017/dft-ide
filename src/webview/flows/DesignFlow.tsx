@@ -1,7 +1,6 @@
 import React, { useRef, useState } from 'react';
 import Step1CommonConfig from '../components/design/Step1_CommonConfig';
 import Step2ToolConfig, { PipelineExecutionRef } from '../components/design/Step2_ToolConfig';
-import Step3Execution from '../components/design/Step3_Execution';
 import Step4Result from '../components/design/Step4_Result';
 import Step5Cloud from '../components/design/Step5_Cloud';
 import FlowShell from '../components/shared/FlowShell';

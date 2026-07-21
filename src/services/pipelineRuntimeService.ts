@@ -85,6 +85,38 @@ function quoteCshArgument(value: string): string {
   return `"${value.replace(/(["\\$`])/g, '\\$1')}"`;
 }
 
+type RuntimeToolConfig =
+  | { type: 'version'; name: string; version: string }
+  | { type: 'path'; name: string; path: string };
+
+function readToolConfigs(value: unknown): RuntimeToolConfig[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap<RuntimeToolConfig>((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const record = item as Record<string, unknown>;
+    const name = String(record.name ?? '').trim();
+    if (record.type === 'version') {
+      const version = String(record.version ?? '').trim();
+      return name && version ? [{ type: 'version' as const, name, version }] : [];
+    }
+    if (record.type === 'path') {
+      const toolPath = String(record.path ?? '').trim();
+      return name && toolPath ? [{ type: 'path' as const, name, path: toolPath }] : [];
+    }
+    return [];
+  });
+}
+
+function appendToolCommands(commands: string[], value: unknown): void {
+  for (const tool of readToolConfigs(value)) {
+    if (tool.type === 'version') {
+      commands.push(`ma ${tool.name}/${tool.version}`);
+    } else {
+      commands.push(`setenv PATH "\${PATH}:${tool.path.replace(/(["\\`])/g, '\\$1')}"`);
+    }
+  }
+}
+
 function buildPipelineStepExecutionCommand(projectPath: string | undefined, stepCommand: string): string {
   let scriptPath = '';
   const scriptName = stepCommand.split(' ')[0];
@@ -179,16 +211,7 @@ function buildStepCommands(
     const source = taskConfig?.step2 as Record<string, unknown> | undefined;
     const customConfig = source?.step2Task as Record<string, unknown> | undefined;
     if (customConfig) {
-      const toolName = String(customConfig.toolName ?? '').trim();
-      const toolVersion = String(customConfig.toolVersion ?? '').trim();
-      if (toolName && toolVersion) {
-        try {
-          fs.statSync(toolVersion);
-          commands.push(`source ${toolVersion}`);
-        } catch {
-          commands.push(`ma ${toolName}/${toolVersion}`);
-        }
-      }
+      appendToolCommands(commands, customConfig.tools);
 
       const clusterGroup = String(customConfig.clusterGroup ?? '').trim();
       const clusterQueue = String(customConfig.clusterQueue ?? '').trim();
@@ -482,16 +505,7 @@ function runSequentialSimulation(
           const customConfig = source?.step2Task as Record<string, unknown> | undefined;
           if(customConfig){
             // 工具版本
-            const toolName = String(customConfig.toolName ?? "").trim();
-            const toolVersion = String(customConfig.toolVersion ?? "").trim();
-            if (toolName && toolVersion) {
-              try {
-                fs.statSync(toolVersion);
-                commands.push(`source ${toolVersion}`);
-              } catch {
-                commands.push(`ma ${toolName}/${toolVersion}`);
-              }
-            }
+            appendToolCommands(commands, customConfig.tools);
             // 集群
             const clusterGroup = String(customConfig.clusterGroup ?? "").trim();
             const clusterQueue = String(customConfig.clusterQueue ?? "").trim();

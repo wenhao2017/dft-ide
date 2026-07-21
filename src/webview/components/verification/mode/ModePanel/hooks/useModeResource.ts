@@ -119,7 +119,7 @@ export function useModeResource() {
       return
     }
 
-    const latestData = await readConfig(stage)
+    const latestData = await readConfig(`verification/${stage}/${stage}`)
 
     const nextConfig = latestData ?? {}
 

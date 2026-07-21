@@ -615,7 +615,16 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
               : undefined;
             const cwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
             const envConfig = await readConfig(flowKey);
-            const taskConfig = await readConfig(`${flowKey}/${moduleKey}/config`);
+            const verificationStage = flowKey === 'verification'
+              && envConfig?.step1
+              && typeof envConfig.step1 === 'object'
+              && typeof (envConfig.step1 as Record<string, unknown>).stage === 'string'
+                ? (envConfig.step1 as Record<string, unknown>).stage as string
+                : undefined;
+            const taskConfigKey = verificationStage
+              ? `${flowKey}/${verificationStage}/${moduleKey}/config`
+              : `${flowKey}/${moduleKey}/config`;
+            const taskConfig = await readConfig(taskConfigKey);
             const runParameters = msg.runParameters;
             pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel, selectedTaskIds, cwd, envConfig, taskConfig, selectedTasks, runParameters);
           } else if (msg.command === 'stopPipelineRuntime') {
@@ -727,6 +736,42 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           requestId,
           path,
         });
+        return;
+      }
+
+      case 'getMavToolVersions': {
+        const requestId: string = msg.requestId;
+        const toolName = typeof msg.toolName === 'string' ? msg.toolName.trim() : '';
+        if (!toolName || !/^[A-Za-z0-9_.+-]+$/.test(toolName)) {
+          currentPanel?.webview.postMessage({
+            command: 'getMavToolVersionsResponse', requestId, versions: [], error: '请输入有效的工具名称。'
+          });
+          return;
+        }
+        try {
+          const { stdout, stderr } = await execFileAsync('csh', ['-c', 'mav ' + toolName], {
+            timeout: 30_000,
+            maxBuffer: 1024 * 1024,
+          });
+          const output = (stdout + '\n' + stderr).replace(/\u001b\[[0-9;]*m/g, '');
+          const escapedName = toolName.replace(/[.*+?^$()|[\]{}\\]/g, '\\$&');
+          const versions = [...new Set(output.split(/\r?\n/).flatMap((line) => {
+            const trimmed = line.trim();
+            if (!trimmed) return [];
+            const matches = trimmed.matchAll(
+              new RegExp('(?:^|\\s)' + escapedName + '/([^\\s,;]+)', 'ig')
+            );
+            return [...matches].map((match) => match[1]).filter(Boolean);
+          }))];
+          currentPanel?.webview.postMessage({
+            command: 'getMavToolVersionsResponse', requestId, versions,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'getMavToolVersionsResponse', requestId, versions: [],
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
         return;
       }
 

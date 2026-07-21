@@ -32,14 +32,14 @@ export function useVerificationStageConfig() {
   /**
    * stage配置
    *
-   * verification/{stage}.json
+   * verification/{stage}/{stage}.json
    */
   const {
     savedData: stageConfig,
     loading: stageLoading,
     handleSave,
     handleSync,
-  } = useFlowConfig(`verification/${stage}`)
+  } = useFlowConfig(`verification/${stage}/${stage}`)
 
   return {
     stage,

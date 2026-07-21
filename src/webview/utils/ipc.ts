@@ -148,6 +148,14 @@ export async function selectPath(
   return typeof res.path === 'string' ? res.path : null
 }
 
+export async function getMavToolVersions(toolName: string): Promise<string[]> {
+  const res = await ipcRequest('getMavToolVersions', { toolName })
+  if (typeof res.error === 'string') throw new Error(res.error)
+  return Array.isArray(res.versions)
+    ? res.versions.filter((value): value is string => typeof value === 'string')
+    : []
+}
+
 export async function selectVerificationModeCfg(
   stage: string,
 ): Promise<{ path: string; fileName: string; modeName: string } | null> {
