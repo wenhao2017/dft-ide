@@ -1,399 +1,663 @@
 # DFT IDE 全景开发指南与架构文档
 
-本指南旨在帮助开发人员快速熟悉 **DFT IDE** 项目的架构、代码结构和开发模式，并提供详细的上手修改与扩展指南。本项目的底层代码结构主要由 AI 辅助开发，通过本全景文档，你可以清晰地理解其运行机制、数据流向以及如何进行日常的开发和维护。
+本文面向需要阅读、维护或扩展 DFT IDE 的开发人员，描述当前代码库的真实结构、运行边界、主要数据流和常见修改入口。
 
----
+> 文档基线：2026-07-23。若本文与源码不一致，以 `src/`、`scripts/build.mjs` 和 `package.json` 为准。
 
 ## 目录
 
-1. [项目背景与核心功能](#1-项目背景与核心功能)
-2. [系统架构设计 (双运行环境)](#2-系统架构设计-双运行环境)
-3. [IPC 通信桥接机制](#3-ipc-通信桥接机制)
-4. [状态管理与配置持久化](#4-状态管理与配置持久化)
-5. [核心源码目录解析](#5-核心源码目录解析)
-6. [进阶开发指南 (How-To)](#6-进阶开发指南-how-to)
-7. [构建、调试与打包部署](#7-构建调试与打包部署)
+1. [项目定位与当前能力](#1-项目定位与当前能力)
+2. [总体架构与运行边界](#2-总体架构与运行边界)
+3. [启动、导航与工作区模型](#3-启动导航与工作区模型)
+4. [Webview 与扩展宿主 IPC](#4-webview-与扩展宿主-ipc)
+5. [状态管理与本地持久化](#5-状态管理与本地持久化)
+6. [工作流与流水线执行](#6-工作流与流水线执行)
+7. [扩展宿主服务层](#7-扩展宿主服务层)
+8. [核心源码目录](#8-核心源码目录)
+9. [关键数据流](#9-关键数据流)
+10. [常见开发任务](#10-常见开发任务)
+11. [构建、测试、调试与打包](#11-构建测试调试与打包)
+12. [维护约定与已知边界](#12-维护约定与已知边界)
 
----
+## 1. 项目定位与当前能力
 
-## 1. 项目背景与核心功能
+DFT IDE 是一个 VS Code 扩展，把本地 DFT 项目管理、公共数据同步、设计流程、验证流程、终端执行、日志诊断以及 OBS、Git、GitLab、Donau 等能力集中到一个 Webview 工作台中。
 
-**DFT IDE** 是一个为集成电路 **DFT (Design for Test, 可测试性设计)** 工作流打造的 VS Code 扩展。它将 VS Code 编辑器转变为一个本地 DFT 工作台，把传统复杂的 DFT 工具链控制、集群提交、状态监控和同步操作收束到一个图形化的 Webview 面板中。
+项目当前属于可运行的 demo/foundation，而不是完整生产级 IDE。已有的主要能力包括：
 
-其核心功能包括：
-- **项目主页与工作区管理**：快速打开/创建本地 DFT 工作区，解析项目目录。
-- **公共配置 (Common Flow)**：统一配置和管理设计树（Design Tree）、归一化表格（Norm Table），并支持多仓之间的双向同步与 Git 提交。
-- **设计工作流 (Hibist & Sailor)**：通过共享的 `FlowShell` 配合左侧模块设计树，实现 DFT 模块的依赖准备、环境生成、任务编排（集群/本地执行）、结果分析及数据提交。
-- **仿真验证工作流 (Lander)**：流程化管理验证用例的执行、仿真日志监控以及结果报表的收集解析。
-- **OBS 集成**：支持对接 OBS 服务，自动获取 SpaceToken，生成 AES-128-CBC 加密签名，并嵌入只读的文档预览器。
-- **Donau 集成**：支持集群 Donau 资源查询与模拟任务提交、状态轮询。
+- 项目首页、项目创建/初始化、成员和领域管理。
+- `data`、`hibist`、`sailor`、`verification` 四仓工作区管理。
+- Common 公共配置、Design Tree、归一化表格以及跨仓同步。
+- Hibist、Sailor 设计工作流和 Lander 验证工作流。
+- YAML 驱动的流程步骤、终端执行、任务状态、历史记录和日志诊断。
+- Git 状态、分支、提交、拉取、推送及引导式冲突处理。
+- `.xls` / `.xlsx` 自定义编辑器、工作簿差异和单元格级合并。
+- OBS 文件浏览、下载、只读预览、版本跟踪和后台更新检查。
+- Donau 资源查询，以及 mock 任务提交与取消。
+- Formal 和 STA 仅保留导航入口，当前仍禁用。
 
----
+## 2. 总体架构与运行边界
 
-## 2. 系统架构设计 (双运行环境)
-
-DFT IDE 采用典型的 VS Code Webview 架构，分为**扩展宿主 (Extension Host)** 和 **网页端 (Webview)** 两个独立的运行环境：
+当前代码包含三个独立执行单元：
 
 ```mermaid
-graph TD
-    subgraph ExtensionHost["扩展宿主端 Node.js / VS Code API"]
-        E_Entry["src/extension.ts Entry"] --> E_IPC["IPC 消息接收器"]
-        E_IPC --> E_Services["Services 业务层"]
-        E_Services --> E_Git["gitService"]
-        E_Services --> E_OBS["obsService"]
-        E_Services --> E_Workspace["workspaceService"]
-        E_Services --> E_Config["configService"]
-        E_Services --> E_Pipeline["pipelineRuntimeService"]
-        E_Services --> E_Donau["donauService"]
-        E_Services --> E_Term["terminalService"]
+flowchart LR
+    User["用户 / VS Code"] --> Ext
+
+    subgraph Ext["扩展宿主（Node.js + VS Code API）"]
+        Entry["src/extension.ts"]
+        HostServices["src/services/*"]
+        LanderIpc["src/ipc/landerPipelineIpc.ts"]
+        Spreadsheet["src/spreadsheet.ts"]
+        Entry --> HostServices
+        Entry --> LanderIpc
+        Entry --> Spreadsheet
     end
 
-    subgraph WebviewBrowser["网页浏览器端 React 19 / Ant Design 5"]
-        W_Entry["src/webview/main.tsx"] --> W_App["App.tsx Router / Theme"]
-        W_App --> W_Flows["flows / Flows 容器"]
-        W_Flows --> W_Components["components / 页面步骤"]
-        W_Components --> W_IPCClient["utils/ipc.ts"]
-        W_Components --> W_Store["store / Zustand"]
+    subgraph Web["主 Webview（浏览器环境）"]
+        Main["src/webview/main.tsx"]
+        App["App.tsx"]
+        Flows["flows + components"]
+        Stores["Zustand stores"]
+        IpcClient["utils/ipc.ts"]
+        Main --> App --> Flows
+        Flows --> Stores
+        Flows --> IpcClient
     end
 
-    W_IPCClient -- "window.postMessage" --> E_IPC
-    E_IPC -- "webview.postMessage" --> W_IPCClient
+    subgraph Worker["Workbook Worker（Node worker_threads）"]
+        WorkerEntry["commonWorkbookWorker.ts"]
+        WorkbookLogic["commonWorkbookSyncService.ts"]
+        WorkerEntry --> WorkbookLogic
+    end
+
+    Entry <-->|"postMessage + requestId"| IpcClient
+    HostServices <-->|"worker_threads"| WorkerEntry
+    HostServices --> Files["本地文件 / Git / 终端 / OBS / Donau"]
+    Flows --> Backend["DFT IDE 后端 HTTP API"]
 ```
 
-### 2.1 扩展宿主端 (Extension Host)
-- **运行环境**：Node.js。可直接访问系统文件、执行子进程（`child_process`）、调用本地二进制工具以及 VS Code API（终端、窗口、Git 扩展等）。
-- **主要入口**：[src/extension.ts](file:///home/code/dft-ide/src/extension.ts)。
-- **主要职责**：注册命令和树状视图、创建 Webview 窗口、处理 IPC 请求、读写底层本地配置文件、调度 Git / OBS / Donau 服务。
+### 2.1 扩展宿主
 
-### 2.2 网页浏览器端 (Webview)
-- **运行环境**：浏览器沙盒环境。无法直接访问本地 Node.js 模块或 VS Code API。
-- **主要入口**：[src/webview/main.tsx](file:///home/code/dft-ide/src/webview/main.tsx)。
-- **主要职责**：渲染 UI 组件、响应用户表单输入、调用 Zustand 管理运行时状态。当需要文件操作、Git 同步或运行终端时，通过 IPC 向扩展宿主发送消息并等待响应。
+入口是 [`src/extension.ts`](src/extension.ts)。这里可以使用 Node.js、VS Code API、文件系统、子进程、终端和内置 Git 扩展。
 
----
+主要职责：
 
-## 3. IPC 通信桥接机制
+- 注册 Activity Bar、Tree View、命令和自定义编辑器。
+- 创建并复用一个主 Webview Panel。
+- 接收 Webview 消息，并将操作委托给 `src/services/`。
+- 向 Webview 返回请求结果或推送流水线状态。
+- 初始化 OBS 后台跟踪、只读文档 provider 和诊断集合。
 
-由于 Webview 被安全沙盒隔离，所有的本地交互必须通过**消息传递 (Message Passing)** 完成。项目在 [src/webview/utils/ipc.ts](file:///home/code/dft-ide/src/webview/utils/ipc.ts) 中实现了一套具有 **请求/响应关联 (Request-Response Correlation)** 的 IPC 机制。
+### 2.2 主 Webview
 
-### 3.1 关联原理
-当 Webview 发起请求时，系统会生成一个自增的 `requestId`。然后将该 Promise 的 `resolve` 回调与 `${command}Response:${requestId}` 作为 Key 注册到全局 Map 中。扩展宿主端处理完毕后，回复带相同 `requestId` 的消息，触发 Map 中对应的回调，完成异步等待。
+入口是 [`src/webview/main.tsx`](src/webview/main.tsx)，顶层应用是 [`src/webview/App.tsx`](src/webview/App.tsx)。
 
-```typescript
-// Webview 发送端实现 (src/webview/utils/ipc.ts)
-function ipcRequest(command: string, payload: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    const id = String(++_reqId);
-    const responseKey = `${command}Response:${id}`;
-    
-    pendingCallbacks.set(responseKey, (data) => {
-      resolve(data);
-    });
-    
-    vscode.postMessage({ command, requestId: id, ...payload });
-  });
-}
+Webview 负责 React UI、Ant Design 主题、流程路由、表单交互和浏览器端状态。它不能直接导入 `vscode` 或 Node.js 模块；需要本地能力时必须调用 [`src/webview/utils/ipc.ts`](src/webview/utils/ipc.ts)。
+
+Webview 可以直接调用后端 HTTP API。项目、成员、领域和执行上报被集中封装在 [`src/webview/services/projectService.ts`](src/webview/services/projectService.ts)。
+
+### 2.3 Workbook Worker
+
+公共工作簿比较和合并可能是 CPU 密集操作。扩展宿主通过 [`commonWorkbookWorkerClient.ts`](src/services/commonWorkbookWorkerClient.ts) 为每次请求启动 `worker_threads.Worker`，运行编译后的 `out/commonWorkbookWorker.js`。
+
+Worker 只处理可序列化的工作簿任务，不使用 VS Code API。这样可以避免大型 Excel 比较阻塞扩展宿主。
+
+### 2.4 Spreadsheet 自定义编辑器
+
+[`src/spreadsheet.ts`](src/spreadsheet.ts) 实现 `CustomReadonlyEditorProvider`，负责：
+
+- 打开 `.xls` / `.xlsx`。
+- 渲染工作簿内容。
+- 配对 Git 虚拟文档与工作区文件，显示单元格级差异。
+- 对普通文件接收保存消息。
+
+它有独立 Webview，但不属于 `src/webview/main.tsx` 启动的主 React 应用。
+
+## 3. 启动、导航与工作区模型
+
+### 3.1 激活流程
+
+扩展在 `onStartupFinished` 激活。`activate()` 主要执行：
+
+1. 加载环境变量和环境默认值。
+2. 初始化 `PipelineRuntimeService`。
+3. 初始化 OBS Tracking。
+4. 注册 OBS 只读文档 provider。
+5. 注册 Tree View、命令、自定义 Spreadsheet Editor 和诊断资源。
+6. 创建或打开 DFT 工作台。
+
+命令和配置声明位于 [`package.json`](package.json)，实际注册位于 [`src/extension.ts`](src/extension.ts)。
+
+### 3.2 导航层级
+
+Activity Bar 下的 Tree View 由 `FLOW_CONFIGS` 生成。当前入口为：
+
+| 分类 | Webview 内容 | 状态 |
+| --- | --- | --- |
+| HOME | `Welcome` | 可用 |
+| Common | `CommonFlow` | 可用 |
+| Hibist | `DesignFlow category="Hibist"` | 可用 |
+| Sailor | `DesignFlow category="Sailor"` | 可用 |
+| Verification | `VerificationFlow`（Lander） | 可用 |
+| Formal | 预留 | 禁用 |
+| STA | 预留 | 禁用 |
+
+项目成员管理和领域管理不是 Tree View 一级流程，而是从首页进入的内部页面。
+
+扩展宿主只维护一个 `currentPanel`。再次选择流程时会复用 Panel，并发送：
+
+```ts
+{ command: 'showWelcome' }
+// 或
+{ command: 'loadFlow', category: 'Hibist' }
 ```
 
-### 3.2 常用 IPC 指令对照表
+同一份初始指令也会由 [`src/webviewHtml.ts`](src/webviewHtml.ts) 注入 `window.DFT_IDE_INITIAL_VIEW`。后端地址通过 `window.DFT_IDE_API_BASE` 注入。
 
-当你在开发中需要调用后台能力时，可以直接调用 [src/webview/utils/ipc.ts](file:///home/code/dft-ide/src/webview/utils/ipc.ts) 导出的封装函数。以下为核心 IPC 指令的对应关系：
+### 3.3 项目与多仓工作区
 
-| 指令 (command) | 说明 | 宿主处理逻辑及服务调用 |
-| :--- | :--- | :--- |
-| `getCurrentUser` | 获取当前操作系统工号 | 执行 `whoami` 获取系统工号 (有 settings 配置时优先) |
-| `selectPath` | 弹出 VS Code 原生路径/文件选择器 | `vscode.window.showOpenDialog`，支持文件与目录区分 |
-| `validatePath` | 校验用户输入路径是否存在且在仓库内 | `vscode.workspace.fs.stat` 校验，安全性防越界校验 |
-| `openFile` | 在 VS Code 中打开指定路径的文件 | 文件调用文本编辑器打开，目录调系统管理器展示，Excel 调 GrapeCity 预览 |
-| `readConfig` / `saveConfig` | 读取或写入 JSON 配置文件 | 使用 [configService.ts](file:///home/code/dft-ide/src/services/configService.ts)，支持浅合并以防止字段覆盖 |
-| `readDesignTreeState` / `saveDesignTree` | 读写模块设计树与自动骨架生成 | 解析 `design_tree.mock.json` 并生成对应的模块配置文件框架 |
-| `getGitInfo` / `getRepoGitInfo` | 获取选定仓库分支及变更状态 | 封装 VS Code 自带的 Git 扩展 API 获取版本信息 |
-| `runRepoGitAction` | 执行 Git 常用动作 (pull, push, branch) | 调用宿主 [gitService.ts](file:///home/code/dft-ide/src/services/gitService.ts) 操作内置 Git 扩展 |
-| `syncCommonArtifacts` | 复制并同步公共产物 (Design Tree / Norm Table) | 支持跨目录文件拷贝，提交并推送 Git (用于 Common 双向同步) |
-| `getDonauResources` | 查询 Donau 集群的队列及账号资源状态 | 支持 mock/real 两种模式，real 模式下运行本地 shell 命令采集数据 |
-| `submitTask` / `cancelTask` | 提交/取消 Mock Donau 批处理任务 | 开启定时器轮询任务状态 (SUCCESS, FAILED, RUNNING) |
-| `openExecutionTerminal` | 打开 VS Code 终端并运行特定 Shell 命令 | 联动 VS Code `createTerminal`，用于前台执行编译/检查指令 |
-
----
-
-## 4. 状态管理与配置持久化
-
-### 4.1 Zustand 状态管理
-Webview 侧的状态拆分为两大核心 Zustand Store：
-1. **`useWizardStore`** ([src/webview/store/wizardStore.ts](file:///home/code/dft-ide/src/webview/store/wizardStore.ts))：
-   - **`activeProject`**：当前选中的 DFT 项目名称与本地绝对路径。
-   - **`flowContext`**：当前激活的流程种类（Welcome 首页、Common、Hibist、Sailor、Verification 等）。
-   - **`dirtyFlows`**：标记哪些流程有未保存的表单变更。用户尝试切换 Tab 时，若该 Flow 在 `dirtyFlows` 中，系统会弹出 Modal 确认拦截，防止配置丢失。
-   - **`zenMode`**：是否处于 IDE 专注开发模式（开启后会自动收起 VS Code 的活动栏与菜单栏，最大化工作区）。
-2. **`usePipelineRuntimeStore`** ([src/webview/store/pipelineRuntimeStore.ts](file:///home/code/dft-ide/src/webview/store/pipelineRuntimeStore.ts))：
-   - 追踪当前模块在流水线中各 Task 的执行状态（pending、running、success、failed）、日志内容及运行时快照。
-
-### 4.2 本地配置持久化原则
-用户在 Webview 表单填写的配置不会被直接发往远端数据库，而是采用**文件驱动**的持久化方案：
-- **存储路径**：默认存放在 `.dft-ide/local-state/` 目录下。如果在 VS Code 中配置了 `dftIde.localConfigPath`，则会存储到该全局自定义目录下（按 `项目名-路径哈希` 隔离子文件夹）。
-- **同步机制**：`.dft-ide/` 目录通常在保存配置时会被自动追加写入 `.gitignore` 中，确保本地用户级临时状态不会被意外提交至远端代码仓库。
-- **更新策略**：[configService.ts](file:///home/code/dft-ide/src/services/configService.ts) 的 `mergeConfigFile` 方法使用浅合并的方式写入 JSON。即只更新表单提交的键值对，这保证了不同 Tab 页面在写入同一个配置文件时，不会覆盖掉彼此的私有字段。
-
-### 4.3 设计树与模块骨架自动生成
-设计树组件 ([DesignTreePanel.tsx](file:///home/code/dft-ide/src/webview/components/shared/DesignTreePanel.tsx)) 是设计与验证流程的核心入口。
-- 当用户在 Common Tab 选定了有效的设计树路径（指向 `design_tree.mock.json`），系统会加载并展示树状模块。
-- 每次保存设计树时，系统会自动在本地生成对应 Flow（如 Hibist 或 Sailor）下各个选中模块的**配置骨架 JSON**。
-- 这为用户后续点击模块并进入 Tool Step 配置时，预先提供了合法的默认 JSON 结构，从而将全局设计树与模块化微观配置有机地结合在一起。
-
----
-
-## 5. 核心源码目录解析
+一个 DFT 项目通常包含四个仓库：
 
 ```text
-src/
-|-- extension.ts                     # VS Code 扩展宿主入口。包含命令注册、IPC 路由与 Webview 窗口实例化。
-|-- webviewHtml.ts                   # 动态生成包含 React 脚本和 CSS 的 Webview HTML。支持主题类名注入。
-|-- services/                        # 扩展宿主侧服务 (Node 运行环境)
-|   |-- gitService.ts                # VS Code Git 扩展接口封装 (分支、拉取、推送、提交)
-|   |-- obsService.ts                # 签名与 OBS SpaceToken 获取，构建 viewer URL
-|   |-- donauService.ts              # 封装集群 Donau 客户端接口及 mock 任务状态生成
-|   |-- pipelineRuntimeService.ts    # 流水线配置文件加载器与执行管理器。调度本地命令或打开终端。
-|   |-- configService.ts             # 读写 local-state JSON 配置文件，提供安全路径和 merge 机制
-|   |-- workspaceService.ts          # DFT IDE 项目选择、多仓工作区初始化及路径校验
-|   |-- layoutService.ts             # VS Code 专注开发模式界面显示配置
-|   `-- terminalService.ts           # VS Code 终端打开服务及运行历史本地序列化
-`-- webview/                         # 网页前端侧源码 (浏览器运行环境)
-    |-- main.tsx                     # React 19 挂载入口，获取宿主注入的初始状态
-    |-- App.tsx                      # 顶层布局，实现 AntD 样式自适应、流程 Tab 切换与未保存防丢失拦截
-    |-- flows/                       # 流程容器组件
-    |   |-- CommonFlow.tsx           # 公共配置流，负责 Norm Table/Design Tree 数据对比、两仓合并同步
-    |   |-- DesignFlow.tsx           # 整合 Hibist/Sailor 的 FlowShell 容器，挂载左侧设计树
-    |   `-- VerificationFlow.tsx     # 仿真验证工作流容器
-    |-- store/                       # Zustand 全局 Store (wizardStore, pipelineRuntimeStore)
-    |-- hooks/                       # 常用 React 钩子 (useFlowConfig 统一配置读写, useVscodePath 关联选择器)
-    |-- utils/                       # 前端辅助工具 (ipc.ts 封装所有异步请求，vscode.ts 导出 postMessage)
-    `-- components/                  # UI 子组件
-        |-- Welcome.tsx              # 项目首页，支持查找本地工作区、配置全局状态目录
-        |-- ProjectMembers.tsx       # 团队成员工号、角色列表维护
-        `-- shared/                  # 共享 UI 组件
-            |-- DesignTreePanel.tsx  # 模块设计树，支持多选运行、右键重命名/复制、按骨架生成配置
-            |-- ObsViewer.tsx        # OBS 浏览器，包含 SpaceToken 生成与 fs-signature 校验展示
-            |-- PathInput.tsx        # 自定义路径输入框，内置 VS Code 目录选择与存在性校验按钮
-            `-- PipelineRuntimeView.tsx # 流水线 DAG 可视化渲染图 (基于 @xyflow/react)
+<project-root>/
+├── data/
+├── hibist/
+├── sailor/
+├── verification/
+├── .dft-ide/
+│   └── local-state/
+└── dft-ide.code-workspace
 ```
 
----
+`workspaceService` 负责项目根目录识别、仓库查找、工作区文件生成、仓库初始化和路径校验。
 
-## 6. 进阶开发指南 (How-To)
+`resolveProjectRoot()` 的主要规则是：
 
-本章提供详细的场景化指南，教你如何向 DFT IDE 中添加新功能。
+- 如果打开了两个及以上同父目录的标准仓库文件夹，则父目录是项目根。
+- 否则使用第一个工作区文件夹的父目录。
 
-### 6.1 场景一：添加一个全新的 DFT 流程 (例如：形式验证 Formal Flow)
+因此，涉及项目路径的代码应优先调用 `workspaceService`，不要在组件或 IPC case 中自行推断路径。
 
-目前 Formal 和 STA 流程为规划中的置灰 Tab，添加它们的步骤如下：
+## 4. Webview 与扩展宿主 IPC
 
-#### 第一步：在扩展宿主端注册流程命令
-在 [src/extension.ts](file:///home/code/dft-ide/src/extension.ts) 中的 `FLOW_CONFIGS` 或者 `registerCommand('dftIde.openFlow')` 中允许打开 `Formal`：
-```typescript
-// src/extension.ts L158-L165 左右
-vscode.commands.registerCommand('dftIde.openFlow', async (category: string) => {
-  if (category === 'STA') { // 移除 Formal 限制
-    vscode.window.showInformationMessage('该流程仍在开发中，暂不可打开。');
-    return;
-  }
-  await openWebviewFlow(context, category);
+### 4.1 请求/响应协议
+
+[`src/webview/utils/ipc.ts`](src/webview/utils/ipc.ts) 中的 `ipcRequest()` 为每个请求生成 `requestId`：
+
+```ts
+vscode.postMessage({
+  command: 'readConfig',
+  requestId,
+  flow: 'common',
 });
 ```
 
-#### 第二步：在 Webview App 中注册元数据与使能导航
-在 [src/webview/App.tsx](file:///home/code/dft-ide/src/webview/App.tsx) 中：
-1. 移除 `disabledTabs` 中对 `'Formal'` 的限制：
-   ```typescript
-   const disabledTabs = new Set(['STA']); // 移除了 'Formal'
-   ```
-2. 在 `flowMeta` 中定义它的标题、描述和色调：
-   ```typescript
-   Formal: {
-     title: '形式验证工作流配置',
-     subtitle: '围绕 Formality 工具链完成模块等价性检查与分析。',
-     accent: '#d97706', // 琥珀色
-   }
-   ```
+扩展宿主必须使用相同 `requestId`，并将响应命令命名为 `${command}Response`：
 
-#### 第三步：创建流程容器组件
-在 `src/webview/flows/` 下创建 `FormalFlow.tsx`。你可以直接复用已有的 `FlowShell` 骨架：
-```tsx
-import React, { useState } from 'react';
-import FlowShell from '../components/shared/FlowShell';
-import DesignTreePanel from '../components/shared/DesignTreePanel';
-import { useFlowConfig } from '../hooks/useFlowConfig';
+```ts
+currentPanel?.webview.postMessage({
+  command: 'readConfigResponse',
+  requestId,
+  success: true,
+  data,
+});
+```
 
-const FormalFlow: React.FC = () => {
-  const [currentStep, setCurrentStep] = useState(0);
-  const [selectedModule, setSelectedModule] = useState('');
-  const { savedData, handleSave } = useFlowConfig('formal');
+Webview 以 `${responseCommand}:${requestId}` 查找等待中的 Promise。请求默认有超时保护；命令名或 `requestId` 不匹配会导致调用方一直等到超时。
 
-  const steps = [
-    { title: '环境准备', description: '配置基础路径', content: <div>配置表单...</div> },
-    { title: '任务执行', description: '提交 Formality 任务', content: <div>执行面板...</div> },
-    { title: '结果分析', description: '查看报告及 Debug', content: <div>报告...</div> }
-  ];
+`openFile`、`openSourceControl` 等不需要结果的操作使用单向 `vscode.postMessage()`。
 
-  return (
-    <FlowShell
-      accent="#d97706"
-      eyebrow="Formal Flow"
-      title="Formal 形式验证任务编排"
-      description="配置和管理 Formality 形式验证流程"
-      steps={steps}
-      current={currentStep}
-      onStepChange={setCurrentStep}
-      sidebar={
-        <DesignTreePanel
-          accent="#d97706"
-          flow="formal" // 对应配置名
-          flowLabel="Formal"
-          selectedKey={selectedModule}
-          onSelect={setSelectedModule}
-        />
-      }
-    />
+### 4.2 服务端路由位置
+
+大多数 IPC 路由仍集中在 `openWebviewFlow()` 内的 `currentPanel.webview.onDidReceiveMessage`。Lander mode pipeline 查询已经拆到 [`src/ipc/landerPipelineIpc.ts`](src/ipc/landerPipelineIpc.ts)，可作为后续拆分复杂路由的参考。
+
+### 4.3 IPC 能力分组
+
+下表按职责归纳当前主要命令，不穷举每个辅助命令：
+
+| 分组 | 代表命令 | 主要实现 |
+| --- | --- | --- |
+| 用户与设置 | `getCurrentUser`、`getConfiguration`、`updateConfiguration` | `extension.ts`、VS Code Configuration |
+| 项目与路径 | `selectPath`、`validatePath`、`prepareProjectWorkspace`、`enterProjectWorkspace` | `workspaceService.ts` |
+| 配置与设计树 | `readConfig`、`saveConfig`、`readDesignTreeState`、`saveDesignTree` | `configService.ts`、`designTreeService.ts` |
+| Flow 配置文件 | `listFlowConfigFiles`、`create/duplicate/rename/deleteFlowConfigFile` | `configService.ts` |
+| 配置生成 | `generateDefaultFlowConfigs`、`generateLanderConfigs`、`fetchTransformLogs` | `configService.ts`、`workspaceService.ts` |
+| Git 与同步 | `getRepoGitInfo`、`runRepoGitAction`、`startGuidedRepoSync`、`syncCommonArtifacts` | `gitService.ts`、`syncService.ts` |
+| OBS | `listObsChildren`、`downloadObsPath`、`openObsFileReadOnly`、`openObsViewer` | `obsService.ts`、`obsTrackingService.ts`、`obsPreviewService.ts` |
+| 流水线 | `getPipelineRuntimes`、`start/stopPipelineRuntime`、`select/stop/rerunPipelineTask` | `pipelineRuntimeService.ts` |
+| Lander | `append/get/removeLanderStage`、`getLanderModePipelines` | `extension.ts`、`landerPipelineIpc.ts`、`landerPipelineService.ts` |
+| 终端与历史 | `openExecutionTerminal`、`saveExecutionHistory`、`getExecutionHistory` | `terminalService.ts` |
+| Donau | `getDonauResources`、`submitTask`、`cancelTask` | `donauService.ts` |
+| 编辑器与外部入口 | `openFile`、`openFileReadonly`、`openVsCodeDiff`、`openExternalUrl` | VS Code API、系统 shell |
+
+新增 IPC 时必须同时更新 Webview 封装和扩展宿主处理器。跨越文件系统、终端、Git 或 VS Code UI 的实现必须留在扩展宿主侧。
+
+## 5. 状态管理与本地持久化
+
+### 5.1 Webview 运行时状态
+
+Webview 当前有三个 Zustand Store：
+
+| Store | 文件 | 责任 |
+| --- | --- | --- |
+| Wizard Store | [`wizardStore.ts`](src/webview/store/wizardStore.ts) | 当前步骤、活动项目、流程上下文、当前用户、未保存标记、Zen Mode |
+| Module Store | [`moduleStore.ts`](src/webview/store/moduleStore.ts) | 各流程的模块列表 |
+| Pipeline Runtime Store | [`pipelineRuntimeStore.ts`](src/webview/store/pipelineRuntimeStore.ts) | Hibist/Sailor/Verification 的任务图、日志、运行状态和选择状态 |
+
+`pipelineRuntimeStore` 会订阅扩展宿主主动推送的 `pipelineRuntimeUpdated` 消息，并使用 [`pipelineRuntimeMerge.ts`](src/webview/store/pipelineRuntimeMerge.ts) 按 `updatedAt` 合并快照，防止旧消息覆盖新状态。
+
+这些 Store 是 Webview 内存状态。需要跨窗口或跨启动保存的数据应走配置文件或 VS Code Configuration。
+
+### 5.2 本地状态目录
+
+当前项目状态固定解析到：
+
+```text
+<project-root>/.dft-ide/local-state/
+```
+
+`resolveConfigPath(flow)` 会清理每个路径段，并把最后一段转换为 JSON 文件。例如：
+
+```text
+common                       -> .dft-ide/local-state/common.json
+hibist                       -> .dft-ide/local-state/hibist.json
+hibist/<module>/config       -> .dft-ide/local-state/hibist/<module>/config.json
+verification/<mode>/config   -> .dft-ide/local-state/verification/<mode>/config.json
+```
+
+`saveConfig` 使用浅合并语义：只合并顶层字段。嵌套对象如果需要局部保留，调用方应先在 Webview 中完成嵌套合并，或者为它设计独立的保存结构。
+
+`.dft-ide/` 会被加入项目 `.gitignore`，避免本机状态意外进入业务仓库。
+
+### 5.3 Flow `.cfg` 文件
+
+Hibist、Sailor 和 Verification 还维护真实工具配置文件。其目录通过 `getFlowConfigsDirectory()` 解析，支持：
+
+- 列表、创建、复制、重命名和删除 `.cfg`。
+- 从归一化表格读取模块。
+- 下载 OBS 生成脚本并执行转换。
+- 保存和读取转换日志。
+
+这些 `.cfg` 与 `.dft-ide/local-state/*.json` 的作用不同：前者是工具/仓库侧配置，后者是 IDE 页面状态。
+
+### 5.4 Design Tree
+
+读取优先级为：
+
+1. 当前 flow 已同步到目标仓库的 Design Tree。
+2. Common 配置中 `designTree` 指定的文件；如果配置的是目录，则使用 `design_tree.mock.json`。
+3. Common 本地状态中的 `designTreeDraft`。
+
+保存 Design Tree 后，`designTreeService` 会：
+
+- 写入目标文件或 Common Draft。
+- 更新 flow 级 `modules` 和 `activeModuleKey`。
+- 为每个模块更新 `<flow>/<module>/config.json` 骨架。
+
+## 6. 工作流与流水线执行
+
+### 6.1 页面工作流
+
+- [`CommonFlow.tsx`](src/webview/flows/CommonFlow.tsx)：公共路径、仓库状态、工作簿差异、Design Tree 与同步。
+- [`DesignFlow.tsx`](src/webview/flows/DesignFlow.tsx)：复用同一容器呈现 Hibist 和 Sailor。
+- [`VerificationFlow.tsx`](src/webview/flows/VerificationFlow.tsx)：Lander 验证流程、stage、mode、参数和运行入口。
+- [`FlowShell.tsx`](src/webview/components/shared/FlowShell.tsx)：设计/验证类分步页面的公共外壳。
+
+设计流程的通用步骤组件位于 `components/design/`，验证流程位于 `components/verification/`。Verification 的 mode 页面已经进一步拆分为 CRUD、资源、选择、运行等 hooks。
+
+### 6.2 Pipeline 定义
+
+基础任务图定义在：
+
+```text
+pipelines/
+├── hibist.yaml
+├── sailor.yaml
+├── lander.yaml
+└── lander_<preMode>.yaml
+```
+
+Lander mode YAML 由 [`landerPipelineService.ts`](src/services/landerPipelineService.ts) 使用 `yaml` 解析，并用 Zod 校验。每个步骤至少包含：
+
+```yaml
+- id: create_project
+  name: create_project
+  command: run_flow_lander
+  description: 创建运行环境
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+```
+
+`preMode` 只允许字母、数字、下划线和连字符，最终映射到 `pipelines/lander_<preMode>.yaml`。
+
+### 6.3 Pipeline Runtime
+
+[`pipelineRuntimeService.ts`](src/services/pipelineRuntimeService.ts) 在扩展宿主中维护运行会话：
+
+1. 根据 flow/module 创建任务和连线快照。
+2. 读取环境配置、模块配置和运行参数。
+3. 通过 VS Code Terminal 执行步骤。
+4. 监听终端数据，识别步骤开始/结束标记。
+5. 更新任务状态、日志和整体 `runState`。
+6. 向 Webview 推送快照。
+7. 结束后保存执行历史。
+
+终端 shell 默认来自 `dftIde.pipeline.shellPath`，当前默认值为 `csh`。脚本位于 `scripts/`，ECO 脚本位于 `scripts/eco/`，配置转换入口位于 `scripts/transform/`。
+
+## 7. 扩展宿主服务层
+
+`src/services/` 的当前职责如下：
+
+| 文件 | 主要职责 |
+| --- | --- |
+| `constants.ts` | View Type、状态目录、OBS URI Scheme、标准仓库名等常量 |
+| `workspaceService.ts` | 项目根、工作区、仓库、路径、默认状态、配置转换 |
+| `configService.ts` | JSON 状态、`.cfg` 文件、OBS 脚本、转换日志 |
+| `designTreeService.ts` | Design Tree 读取/保存和模块骨架生成 |
+| `gitService.ts` | VS Code 内置 Git API 的底层封装 |
+| `gitlabService.ts` | GitLab Host 配置读取 |
+| `syncService.ts` | 多仓友好状态、引导式冲突、提交到云端、公共产物同步 |
+| `commonSyncArtifacts.ts` | 公共同步产物路径建模 |
+| `commonWorkbookSyncService.ts` | Excel 比较、复制和单元格级合并 |
+| `commonWorkbookWorkerClient.ts` | Workbook Worker 生命周期和请求协议 |
+| `commonWorkbookWorker.ts` | Worker 入口 |
+| `obsService.ts` | OBS Token、签名、目录、详情、上传、下载、版本和 Viewer URL |
+| `obsTrackingService.ts` | OBS 本地元数据、版本策略、后台更新检查和并发下载 |
+| `obsPreviewService.ts` | `dft-obs-readonly:` 临时文档和只读预览 |
+| `donauService.ts` | Donau mock/real/auto 资源查询和 mock 作业状态 |
+| `pipelineRuntimeService.ts` | 流水线会话、终端步骤调度、快照和历史 |
+| `landerPipelineService.ts` | Lander mode YAML 加载与 Zod 校验 |
+| `terminalService.ts` | 终端打开、数据监听、停止和执行历史 |
+| `diagnosticsService.ts` | DFT 日志解析与 VS Code Diagnostics |
+| `layoutService.ts` | DFT 专注布局应用和恢复 |
+| `demoService.ts` | VS Code API 演示动作 |
+| `utils.ts` | 子进程、文件、JSON 和通用解析函数 |
+
+环境相关默认值集中在 [`src/config/environment.ts`](src/config/environment.ts)，构建时通过 `process.env.DFT_IDE_BUILD_ENV` 区分 development 和 production。
+
+## 8. 核心源码目录
+
+以下目录树描述源码职责，不列出每一个叶子组件：
+
+```text
+.
+├── assets/                         # Activity Bar 和扩展图标
+├── deploy/                         # 便携 IDE 打包脚本与说明
+├── docs/
+│   └── OBS_API.zh-CN.md            # OBS API 与跟踪约定
+├── pipelines/                      # Hibist/Sailor/Lander YAML 步骤
+├── scripts/
+│   ├── build.mjs                   # ext/webview/worker 三目标构建
+│   ├── run_flow_*                  # 正常流程脚本
+│   ├── eco/                        # ECO 流程脚本
+│   └── transform/                  # cfg 生成入口
+├── src/
+│   ├── config/
+│   │   └── environment.ts          # 环境默认值
+│   ├── ipc/
+│   │   └── landerPipelineIpc.ts    # 已拆出的 Lander IPC handler
+│   ├── services/                   # 扩展宿主业务层和 Workbook Worker
+│   ├── webview/
+│   │   ├── components/
+│   │   │   ├── design/             # Hibist/Sailor 步骤
+│   │   │   ├── verification/       # Lander 步骤与 mode 页面
+│   │   │   ├── shared/             # FlowShell、Design Tree、Pipeline、OBS、Git 等
+│   │   │   ├── temporary/          # 临时 OBS Browser
+│   │   │   └── wizard/             # 旧版通用向导 fallback
+│   │   ├── flows/                  # Common、Design、Verification 容器
+│   │   ├── hooks/                  # 配置和路径 hooks
+│   │   ├── services/               # Webview 后端 API client
+│   │   ├── store/                  # Zustand stores
+│   │   ├── utils/                  # IPC 与 acquireVsCodeApi 封装
+│   │   ├── App.tsx                 # 路由、主题、顶部导航
+│   │   └── main.tsx                # React 入口
+│   ├── extension.ts                # 扩展激活、命令、主 IPC 路由
+│   ├── spreadsheet.ts              # XLS/XLSX 自定义编辑器
+│   └── webviewHtml.ts              # 主 Webview HTML 与初始全局变量
+├── tests/                          # Vitest 单元测试
+├── package.json                    # 扩展 Manifest、设置、脚本、依赖
+└── tsconfig.json                   # TypeScript strict 配置
+```
+
+`out/` 是 esbuild 生成目录，不应手工修改。
+
+## 9. 关键数据流
+
+### 9.1 项目打开
+
+```text
+Welcome
+  -> projectService 获取后端项目
+  -> prepareProjectWorkspace IPC
+  -> workspaceService 初始化/查找四仓和 workspace 文件
+  -> openProjectWorkspace / enterProjectWorkspace
+  -> VS Code 打开 dft-ide.code-workspace
+```
+
+当 `DFT_IDE_API_BASE` 为空时，`projectService` 返回 mock 项目；配置地址后则调用 `/api/dft-ide/...` 项目、成员、领域和执行接口。
+
+### 9.2 页面配置保存
+
+```text
+React 表单
+  -> useFlowConfig / saveConfig()
+  -> IPC: saveConfig
+  -> resolveConfigPath()
+  -> mergeConfigFile() 顶层浅合并
+  -> 写入 .dft-ide/local-state/*.json
+  -> 清除 dirty flow 标记
+```
+
+### 9.3 流水线执行
+
+```text
+PipelineRuntimeView
+  -> startPipelineRuntime IPC
+  -> PipelineRuntimeService
+  -> terminalService 创建并监听终端
+  -> scripts/run_flow_* 或 scripts/eco/*
+  -> pipelineRuntimeUpdated 推送
+  -> pipelineRuntimeStore 合并最新快照
+  -> UI 更新任务图、日志和运行状态
+```
+
+### 9.4 Common 工作簿同步
+
+```text
+CommonFlow
+  -> prepareCommonArtifactSync
+  -> syncService 构造 artifact
+  -> commonWorkbookWorkerClient
+  -> Worker 执行 Excel diff
+  -> Webview 展示冲突/差异
+  -> applyCommonArtifactSync
+  -> Worker 合并或复制
+  -> Git 提交/推送
+```
+
+### 9.5 OBS 下载与跟踪
+
+```text
+ObsViewer / PathInput
+  -> OBS IPC
+  -> obsService 请求 Token 和文件 API
+  -> obsTrackingService 下载并写跟踪元数据
+  -> 后台定时检查远端版本
+  -> 通知用户更新、覆盖或保留固定版本
+```
+
+详细 OBS 请求和字段见 [`docs/OBS_API.zh-CN.md`](docs/OBS_API.zh-CN.md)。
+
+## 10. 常见开发任务
+
+### 10.1 新增一个 Flow
+
+假设新增 `Formal`：
+
+1. 在 `src/extension.ts` 的 `FLOW_CONFIGS` 中启用或新增 Tree View 项。
+2. 在 `src/webview/App.tsx` 的 `flowMeta` 和 `flowTabs` 中配置标题、说明和图标。
+3. 从 `disabledTabs` 移除该分类。
+4. 在 `src/webview/flows/` 新建容器，优先复用 `FlowShell`。
+5. 在 `renderFlowContent()` 增加渲染分支。
+6. 在 `components/<flow>/` 放置专用页面组件。
+7. 通过 `useFlowConfig()` 和 IPC 持久化，不要让组件直接访问本地文件。
+8. 如果需要流水线，新增 YAML、脚本和扩展宿主运行逻辑。
+9. 添加相应测试，并运行 `npm run check`、`npm test`、`npm run compile`。
+
+仅增加导航分支不会自动获得配置、脚本、流水线或仓库同步能力。
+
+### 10.2 新增一个 IPC 命令
+
+以 `getDiskSpace` 为例：
+
+Webview 侧在 `src/webview/utils/ipc.ts` 增加类型化封装：
+
+```ts
+export function getDiskSpace(targetPath: string) {
+  return ipcRequest<{ success: boolean; freeGb?: number; error?: string }>(
+    'getDiskSpace',
+    { targetPath },
   );
-};
-
-export default FormalFlow;
-```
-
-#### 第四步：在 App.tsx 中渲染该流程
-在 [src/webview/App.tsx](file:///home/code/dft-ide/src/webview/App.tsx) 的 `renderFlowContent` 方法中加入 Formal 的路由分支：
-```tsx
-// 引入组件
-import FormalFlow from './flows/FormalFlow';
-
-// 在 renderFlowContent 内部的 switch (category) 里：
-case 'Formal':
-  return <FormalFlow />;
-```
-
-此时重新编译运行，你就可以在左侧导航栏点击「形式验证」并进入全新的工作流界面了。
-
----
-
-### 6.2 场景二：添加一个新的 IPC 命令 (例如：获取服务器磁盘剩余空间 `getDiskSpace`)
-
-当 Webview 页面需要知道服务器某路径下的剩余磁盘空间时，我们需要在宿主端读取并返回给前端：
-
-#### 第一步：在 Webview IPC 客户端定义请求接口
-在 [src/webview/utils/ipc.ts](file:///home/code/dft-ide/src/webview/utils/ipc.ts) 中增加一个导出函数：
-```typescript
-export async function getDiskSpace(targetPath: string): Promise<{ success: boolean; freeGb?: number; error?: string }> {
-  // 向扩展端发送 getDiskSpace 指令，等待其响应
-  const res = await ipcRequest('getDiskSpace', { targetPath });
-  return res as { success: boolean; freeGb?: number; error?: string };
 }
 ```
 
-#### 第二步：在扩展宿主端添加 IPC 处理器
-在 [src/extension.ts](file:///home/code/dft-ide/src/extension.ts) 中的 `currentPanel.webview.onDidReceiveMessage` 内添加 `switch case`：
-```typescript
-// src/extension.ts 的 message 监听器中
+扩展宿主侧增加 handler，并严格回传命令名和 `requestId`：
+
+```ts
 case 'getDiskSpace': {
-  const requestId: string = msg.requestId;
-  const targetPath = typeof msg.targetPath === 'string' ? msg.targetPath : '';
+  const requestId = String(msg.requestId ?? '');
   try {
-    // 示例代码：使用 node 的 fs.statfs (如果 node 版本支持) 或 shell 命令获取空间
-    // 这里做模拟返回
-    const freeGb = 120; // 模拟 120 GB 可用
+    const freeGb = await diskService.getFreeSpace(String(msg.targetPath ?? ''));
     currentPanel?.webview.postMessage({
-      command: 'getDiskSpaceResponse', // 注意：必须是 ${command}Response 格式
+      command: 'getDiskSpaceResponse',
       requestId,
       success: true,
       freeGb,
     });
-  } catch (err) {
+  } catch (error) {
     currentPanel?.webview.postMessage({
       command: 'getDiskSpaceResponse',
       requestId,
       success: false,
-      error: String(err),
+      error: error instanceof Error ? error.message : String(error),
     });
   }
   return;
 }
 ```
 
-#### 第三步：在 React 组件中调用该 IPC 接口
-```tsx
-import { getDiskSpace } from '../utils/ipc';
+如果逻辑超过简单的 VS Code API 调用，应把实现放进 `src/services/diskService.ts`。复杂或独立领域的 handler 可以参考 `landerPipelineIpc.ts` 拆到 `src/ipc/`。
 
-// 在 React 组件中异步调用：
-const checkSpace = async () => {
-  try {
-    const result = await getDiskSpace('/home/code/dft-ide');
-    if (result.success) {
-      console.log(`可用磁盘空间为: ${result.freeGb} GB`);
-    } else {
-      console.error('检查失败:', result.error);
-    }
-  } catch (err) {
-    console.error('IPC 超时或通信失败', err);
-  }
-};
+### 10.3 新增 Lander Mode
+
+1. 在 `pipelines/` 新建 `lander_<preMode>.yaml`。
+2. 确保 `preMode` 只包含字母、数字、下划线或连字符。
+3. 按 `landerStepSchema` 提供 `id`、`name`、`command` 等字段。
+4. 如果命令需要新入口，在 `scripts/` 或 `scripts/eco/` 增加对应脚本。
+5. 检查 Verification mode UI 是否需要新的 group、TC 或 sub-attribute 输入。
+6. 验证 `getLanderModePipelines` 和实际终端执行。
+
+### 10.4 新增扩展设置
+
+1. 在 `package.json` 的 `contributes.configuration.properties` 声明设置、类型、默认值和说明。
+2. 如果 development/production 默认值不同，在 `src/config/environment.ts` 中维护环境默认值。
+3. 扩展宿主使用 `vscode.workspace.getConfiguration('dftIde')` 或 `getEnvironmentSetting()`。
+4. Webview 使用 `getConfiguration` / `updateConfiguration` IPC，不直接假设宿主配置。
+
+### 10.5 新增后端 API
+
+后端请求统一放在 `src/webview/services/`：
+
+- 从 `window.DFT_IDE_API_BASE` 构造地址。
+- 定义请求和响应 TypeScript 类型。
+- 统一处理非 2xx 响应。
+- 明确未配置 API Base 时是返回 mock、空结果还是报错。
+- 组件只调用 service 函数，不拼接 URL。
+
+## 11. 构建、测试、调试与打包
+
+### 11.1 安装和检查
+
+```bash
+npm install
+npm run check
+npm test
+npm run compile
 ```
 
----
+对于较大修改，至少运行类型检查和完整编译；修改服务逻辑时同时运行测试。
 
-### 6.3 场景三：自定义流水线执行步骤 (Pipeline Customization)
+### 11.2 三个构建目标
 
-设计与验证页面上的流水线执行步骤是动态生成的，其结构由 [src/services/pipelineRuntimeService.ts](file:///home/code/dft-ide/src/services/pipelineRuntimeService.ts) 管理。
-- **默认步骤**：如果你需要修改默认执行的指令或添加全局默认步骤，可以直接修改 `pipelineRuntimeService.ts` 中的 `DEFAULT_PIPELINE_TASKS` 结构体（Hibist / Sailor / Verification 分别有各自的默认指令列表）。
-- **项目级自定义**：流水线支持**项目定制化**。系统会在当前项目的工作区目录下寻找 `pipelines/hibist.yaml`、`pipelines/sailor.yaml` 或 `pipelines/lander.yaml` 文件。
-  - 用户只需编辑这些 YAML 配置文件，添加、删除步骤或更改 `command`，刷新 Webview 后，前端的流水线 DAG 拓扑图和执行按钮就会自动更新。
-  - YAML 的格式非常简单，如下所示：
-    ```yaml
-    - id: my_custom_step
-      name: 自定义前置ECO
-      command: "sh eco_run.sh"
-      description: 执行前置网表检查与ECO修复
-    ```
+[`scripts/build.mjs`](scripts/build.mjs) 使用 esbuild：
 
----
+| Target | Entry | Output | 平台 |
+| --- | --- | --- | --- |
+| `ext` | `src/extension.ts` | `out/extension.js` | Node / CommonJS |
+| `webview` | `src/webview/main.tsx` | `out/webview.js` | Browser / IIFE |
+| `worker` | `src/services/commonWorkbookWorker.ts` | `out/commonWorkbookWorker.js` | Node / CommonJS |
 
-## 7. 构建、调试与打包部署
+`npm run compile` 并行构建三个目标。`npm run watch` 并行监听三个 production 目标；`npm run dev` 使用 development 环境监听全部目标。
 
-### 7.1 开发命令汇总
+单独构建：
 
-项目的构建与打包使用 `esbuild` 完成，相关脚本声明在 `package.json` 中：
+```bash
+npm run build:ext
+npm run build:webview
+npm run build:worker
+```
 
-- **安装依赖**：
-  ```bash
-  npm install
-  ```
-- **一次性全量编译**（会同时打包扩展端代码、Webview 页面和 Workbook 同步服务）：
-  ```bash
-  npm run compile
-  ```
-- **开启增量监听编译**（推荐在日常开发中后台开启，保存文件时会自动热重载产物）：
-  ```bash
-  npm run watch
-  ```
-- **TypeScript 类型检查**（编译阶段为提升速度不进行类型校验，提交代码前请用此命令校验）：
-  ```bash
-  npm run check
-  ```
-- **打包为 VSIX 安装包**：
-  ```bash
-  npx @vscode/vsce package
-  ```
+### 11.3 调试
 
-### 7.2 调试指南
+1. 在 VS Code 打开仓库。
+2. 选择 `Run DFT IDE Extension` 启动配置。
+3. 启动前会执行 `npm: compile`。
+4. 在 Extension Development Host 中打开 DFT IDE Activity Bar。
 
-1. **环境准备**：使用 VS Code 打开项目文件夹。在终端运行 `npm run watch` 保持监听状态。
-2. **启动调试**：按下快捷键 `F5`（或在运行与调试面板选择 `Run DFT IDE Extension` 配置）。
-3. **功能验证**：VS Code 会弹出一个临时的「扩展开发宿主」新窗口。在新窗口的左侧活动栏（Activity Bar）中，点击 DFT 标志（或在控制台运行 `DFT IDE: Open Home` 命令），即可拉起图形化 Webview 窗口。
-4. **日志查看**：
-   - **扩展端日志**：可以直接在父窗口的 VS Code 「调试控制台 (Debug Console)」中查看到所有的 `console.log` 以及错误堆栈。
-   - **Webview 端日志**：在弹出的 Webview 页面上，按下快捷键（Windows: `Ctrl+Shift+I` / Mac: `Cmd+Option+I`）或执行命令 `Developer: Toggle Developer Tools` 调出浏览器的控制台，即可查看前端 DOM、React 状态以及网络请求。
+日志位置：
 
-### 7.3 构建产物说明
-- 打包输出目录为 `out/`。请勿手动修改该目录下的任何文件，它们每次都会被 esbuild 覆写。
-- 打包发布 VSIX 时，`.vscodeignore` 已经排除了所有的源文件 (`src/`)、本地配置文件、类型配置和开发依赖，只保留了运行所需的 `out/` 产物、图标及清单。这可以确保打包生成的插件体积小巧、安装快速。
+- 扩展宿主：启动调试的 VS Code 窗口中的 Debug Console。
+- 主 Webview：Extension Development Host 中执行 `Developer: Toggle Developer Tools`。
+- Pipeline：Webview 的日志面板和对应 VS Code Terminal。
+- Diagnostics：Problems 面板。
 
----
+### 11.4 打包
 
-祝你开发顺利！如在后续上手修改中有任何疑问，可参考 [README.zh-CN.md](file:///home/code/dft-ide/README.zh-CN.md) 了解更通用的配置规则，或阅读 [AGENTS.md](file:///home/code/dft-ide/AGENTS.md) 获取更底层环境信息。
+```bash
+npx @vscode/vsce package
+```
+
+`.vscodeignore` 控制 VSIX 内容。运行时需要的文件必须没有被排除，尤其是：
+
+- `out/extension.js`
+- `out/webview.js`
+- `out/commonWorkbookWorker.js`
+- `pipelines/`
+- `scripts/`
+- `assets/`
+
+便携 IDE 交付见 [`deploy/README.zh-CN.md`](deploy/README.zh-CN.md)。
+
+## 12. 维护约定与已知边界
+
+- 不要手工编辑 `out/`；修改 `src/` 后重新构建。
+- Webview 保持浏览器安全，不得导入 `vscode`、`fs`、`path` 或 `child_process`。
+- VS Code API、文件系统、Git、OBS、本地命令和终端操作放在扩展宿主。
+- 复杂业务逻辑放入 `src/services/`；`extension.ts` 中的 IPC case 应主要负责输入校验、调用服务和回包。
+- 运行时依赖放入 `dependencies`；构建、类型和测试工具放入 `devDependencies`。
+- 修改本地化字符串时保持 UTF-8，避免引入乱码。
+- 路径输入必须使用现有规范化和项目边界校验函数，避免目录穿越或误操作其他项目。
+- `saveConfig` 是顶层浅合并，不应误认为是递归合并。
+- `PipelineRuntimeService` 和 Webview Store 各有一份快照类型；修改字段时要同步两侧。
+- Formal、STA 尚未实现，不能只通过解除禁用就视为功能完成。
+- 后端、Donau 和部分 OBS 能力仍包含 mock、环境默认值或待部署服务依赖，开发时要明确当前运行模式。
+- 当前主 IPC router 仍较大；新增独立领域时优先采用 `src/ipc/` handler + `src/services/` 的结构，逐步降低 `extension.ts` 的耦合。
+
+相关文档：
+
+- [`README.zh-CN.md`](README.zh-CN.md)：用户与开发概览。
+- [`AGENTS.md`](AGENTS.md)：AI Agent 的仓库速查和约束。
+- [`docs/OBS_API.zh-CN.md`](docs/OBS_API.zh-CN.md)：OBS API 和本地跟踪协议。
+- [`deploy/README.zh-CN.md`](deploy/README.zh-CN.md)：便携 IDE 部署。
