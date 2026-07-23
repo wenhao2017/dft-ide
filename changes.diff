@@ -1,0 +1,833 @@
+diff --git a/package.json b/package.json
+index 66e7796..b6bb77d 100644
+--- a/package.json
++++ b/package.json
+@@ -166,22 +166,43 @@
+         },
+         "dftIde.obs.scriptSpace": {
+           "type": "string",
+-          "default": "DFX_MTC001",
++          "default": "DFT_IDE",
+           "description": "OBS space name where conversion scripts are stored (leave empty to configure later)."
+         },
+         "dftIde.obs.scriptPaths": {
+           "type": "object",
+           "default": {
+             "hibist": {
+-              "dir": "scripts/hibist",
++              "dir": "EXCEL2CFG/Network",
+               "files": [
+-                "gen_cfg.py",
+-                "gen_design_tree_xls2flow.py",
+-                "gen_dft_sig_xls2flow.py",
+-                "Pre_check.py",
+-                "XFlow_read_xls.py",
+-                "eco_table.py",
+-                "sailor_cfg_demo.json"
++                {
++                  "fileName": "gen_cfg.py",
++                  "type": 1
++                },
++                {
++                  "fileName": "gen_design_tree_xls2flow.py",
++                  "type": 1
++                },
++                {
++                  "fileName": "gen_dft_sig_xls2flow.py",
++                  "type": 1
++                },
++                {
++                  "fileName": "Pre_check.py",
++                  "type": 1
++                },
++                {
++                  "fileName": "XFlow_read_xls.py",
++                  "type": 1
++                },
++                {
++                  "fileName": "eco_table.py",
++                  "type": 1
++                },
++                {
++                  "fileName": "sailor_cfg_demo.json",
++                  "type": 1
++                }
+               ],
+               "entrance": {
+                 "dir": "scripts/transform",
+@@ -189,15 +210,36 @@
+               }
+             },
+             "sailor": {
+-              "dir": "scripts/sailor",
++              "dir": "EXCEL2CFG/Network",
+               "files": [
+-                "gen_cfg.py",
+-                "gen_design_tree_xls2flow.py",
+-                "gen_dft_sig_xls2flow.py",
+-                "Pre_check.py",
+-                "XFlow_read_xls.py",
+-                "eco_table.py",
+-                "sailor_cfg_demo.json"
++                {
++                  "fileName": "gen_cfg.py",
++                  "type": 1
++                },
++                {
++                  "fileName": "gen_design_tree_xls2flow.py",
++                  "type": 1
++                },
++                {
++                  "fileName": "gen_dft_sig_xls2flow.py",
++                  "type": 1
++                },
++                {
++                  "fileName": "Pre_check.py",
++                  "type": 1
++                },
++                {
++                  "fileName": "XFlow_read_xls.py",
++                  "type": 1
++                },
++                {
++                  "fileName": "eco_table.py",
++                  "type": 1
++                },
++                {
++                  "fileName": "sailor_cfg_demo.json",
++                  "type": 1
++                }
+               ],
+               "entrance": {
+                 "dir": "scripts/transform",
+@@ -205,9 +247,12 @@
+               }
+             },
+             "verification": {
+-              "dir": "scripts/verification",
++              "dir": "EXCEL2CFG/Network",
+               "files": [
+-                "lander_env.tar.gz"
++                {
++                  "fileName": "lander_env",
++                  "type": 2
++                }
+               ],
+               "entrance": {
+                 "dir": "scripts/transform",
+@@ -353,4 +398,4 @@
+     "typescript": "^5.3.3",
+     "vitest": "^1.6.0"
+   }
+-}
++}
+\ No newline at end of file
+diff --git a/scripts/transform/run_gen_cfg b/scripts/transform/run_gen_cfg
+index c04000a..7242dbd 100644
+--- a/scripts/transform/run_gen_cfg
++++ b/scripts/transform/run_gen_cfg
+@@ -1,7 +1,7 @@
+ #!/bin/csh -f
+ 
+-if ($#argv != 3) then
+-    echo "Usage: $0 <design_tree> <normalize_table> <module>"
++if ($#argv < 2 || $#argv > 3) then
++    echo "Usage: $0 <design_tree> <normalize_table> [module]"
+     exit 1
+ endif
+ 
+@@ -11,7 +11,13 @@ set cfg_script = "gen_cfg.py"
+ 
+ set design_tree = "$1"
+ set normalize_table = "$2"
+-set module = "$3"
++
++if ($#argv == 3) then
++    set module = "$3"
++    set cfg_args = "-modules $module"
++else
++    set cfg_args = "-all"
++endif
+ 
+ foreach script ($design_script $dft_script $cfg_script)
+     if (! -e $script) then
+@@ -22,4 +28,4 @@ end
+ 
+ $design_script $design_tree
+ $dft_script $normalize_table
+-$cfg_script $normalize_table
++$cfg_script $normalize_table $cfg_args
+diff --git a/scripts/transform/run_gen_lander_cfg b/scripts/transform/run_gen_lander_cfg
+index 37100d9..adf19b0 100644
+--- a/scripts/transform/run_gen_lander_cfg
++++ b/scripts/transform/run_gen_lander_cfg
+@@ -11,13 +11,10 @@ if (! -f "$lander_assistant") then
+     exit 1
+ endif
+ 
+-tar -zxvf lander_env.tar.gz
+-if ($status != 0) exit $status
+-
+ cp "$lander_assistant" lander_env/LANDER_ASSISTANT.json
+ if ($status != 0) exit $status
+ 
+ cd lander_env
+ python lander_assistant_2_0.py
+ if ($status != 0) exit $status
+-python lander_cfg_mode_2_0.py
++python lander_cfg_mode_2_0.py
+\ No newline at end of file
+diff --git a/src/extension.ts b/src/extension.ts
+index ec2285e..d3ec21c 100644
+--- a/src/extension.ts
++++ b/src/extension.ts
+@@ -1768,6 +1768,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+         const requestId: string = msg.requestId;
+         const flow = normalizeConfigFlow(msg.flow);
+         const module = typeof msg.module === 'string' ? msg.module.trim() : '';
++        const isAllSelected = msg.isAllSelected;
+         const stage = typeof msg.stage === 'string' ? msg.stage.trim() : undefined;
+         try {
+           if (!flow || flow === 'verification') {
+@@ -1797,11 +1798,9 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+             normTable,
+             module,
+             stage,
++            isAllSelected,
+           });
+           const result = await saveTransformLogs(transformLog, stage);
+-          if (!result.success) {
+-            throw new Error(`配置转换日志检测到错误：${result.logFile ?? 'unknown log'}`);
+-          }
+           currentPanel?.webview.postMessage({
+             command: 'generateDefaultFlowConfigsResponse',
+             requestId,
+@@ -1848,9 +1847,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+             landerAssistant,
+           });
+           const result = await saveTransformLogs(transformLog, stage);
+-          if (!result.success) {
+-            throw new Error(`Verification 配置转换日志检测到错误：${result.logFile ?? 'unknown log'}`);
+-          }
+           currentPanel?.webview.postMessage({
+             command: 'generateLanderConfigsResponse',
+             requestId,
+diff --git a/src/services/configService.ts b/src/services/configService.ts
+index fc1eacb..1cc49f2 100644
+--- a/src/services/configService.ts
++++ b/src/services/configService.ts
+@@ -169,7 +169,7 @@ interface ObsScriptPathConfig {
+ export async function downLoadObsScripts(
+   context: vscode.ExtensionContext,
+   flow: 'hibist' | 'sailor' | 'verification',
+-  stage?: string
++  stage?: string,
+ ): Promise<[configPath: string, scriptPath: string] | []> {
+   const configsDir = await getFlowConfigsDirectory(flow, stage);
+   await ensureLocalConfigDirectory(configsDir);
+@@ -180,7 +180,7 @@ export async function downLoadObsScripts(
+   const scriptPaths = obsConfig.get<Record<string, ObsScriptPathConfig>>('scriptPaths', {});
+   const flowConfig = scriptPaths[flow];
+   const remoteScriptPath = flowConfig?.dir?.trim() as string;
+-  const remoteScriptFiles = flowConfig?.files as [];
++  const remoteScriptFiles = flowConfig?.files as [{fileName: string, type: number}];
+   const entrance = flowConfig?.entrance ?? {
+     dir: 'scripts/transform',
+     fileName: flow === 'verification' ? 'run_gen_lander_cfg' : 'run_gen_cfg',
+@@ -202,22 +202,30 @@ export async function downLoadObsScripts(
+         throw new Error(`Transform entrance must stay inside the extension: ${sourceScript}`);
+       }
+       const targetPath = path.join(configsDir, entrance.fileName);
+-      await fs.promises.copyFile(sourceScript, targetPath);
++      await copyFileLF(sourceScript, targetPath);
+       try {
+         await fs.promises.chmod(targetPath, 0o755);
+       } catch (error) {
+         console.warn(`[DFT IDE] Transform entrance copied but chmod failed: ${targetPath}`, error);
+       }
+ 
+-      for (const filename of remoteScriptFiles) {
++      for (const file of remoteScriptFiles) {
++        const filename: string = file.fileName;
++        const type = file.type;
+         if (typeof filename !== 'string' || path.basename(filename) !== filename) {
+           throw new Error(`Invalid OBS script file name: ${String(filename)}`);
+         }
+         const localScriptPath = path.join(configsDir, filename);
+         const remoteFilePath = path.posix.join(remoteScriptPath.replace(/\\/g, '/'), filename);
+-        await obsTrackingService.downloadFile(scriptSpace, remoteFilePath, vscode.Uri.file(localScriptPath), {
+-          overwriteUntracked: true,
+-        });
++        if (type == 1) {
++          await obsTrackingService.downloadFile(scriptSpace, remoteFilePath, vscode.Uri.file(localScriptPath), {
++            overwriteUntracked: true,
++          });
++        } else {
++          await obsTrackingService.downloadDirectory(scriptSpace, remoteFilePath, vscode.Uri.file(localScriptPath), {
++            overwriteUntracked: true,
++          });
++        }
+         try {
+           await fs.promises.chmod(localScriptPath, 0o755);
+         } catch (error) {
+@@ -235,6 +243,13 @@ export async function downLoadObsScripts(
+   }
+ }
+ 
++export async function copyFileLF(sourceScript: string, targetPath: string) {
++  await fs.promises.copyFile(sourceScript, targetPath);
++  let content = await fs.promises.readFile(targetPath, 'utf8');
++  content = content.replace(/\r/g, '');
++  await fs.promises.writeFile(targetPath, content, 'utf8');
++}
++
+ export function resolveCfgPath(configsDir: string, moduleName: string): string {
+   const clean = sanitizeCfgModuleName(moduleName);
+   return path.join(configsDir, clean, `${clean}.sailor.cfg`);
+@@ -371,7 +386,6 @@ export function collectModuleNames(value: unknown, modules: Set<string>): void {
+ export async function saveTransformLogs(transformLog: TransformLog, stage?: string): Promise<TransformLog> {
+   const configsDir = await getFlowConfigsDirectory(transformLog.flow, stage);
+   const timestampKey = transformLog.timemilles ?? Date.now().toString();
+-  const status = transformLog.logFile ? await checkTransformStatus(transformLog.logFile) : false;
+   const savedLog: TransformLog = {
+     ...transformLog,
+     scriptPath: await copyLogFile(transformLog.scriptPath, timestampKey, configsDir),
+@@ -383,8 +397,7 @@ export async function saveTransformLogs(transformLog: TransformLog, stage?: stri
+       : undefined,
+     landerAssistant: transformLog.landerAssistant
+       ? await copyLogFile(transformLog.landerAssistant, timestampKey, configsDir)
+-      : undefined,
+-    success: status,
++      : undefined
+   };
+ 
+   const maxHistoryCounts = Math.max(
+@@ -476,12 +489,12 @@ async function readTransformLogFile(filePath: string): Promise<TransformLog[]> {
+     try {
+       const parsed: unknown = JSON.parse(text);
+       if (isRecord(parsed) && typeof parsed.flow === 'string' && typeof parsed.scriptPath === 'string') {
+-        logs.push(parsed as unknown as TransformLog);
++        logs.push({...parsed, success: parsed.logFile ? await checkTransformStatus(parsed.logFile as string) : false} as unknown as TransformLog);
+       }
+     } catch {
+       const legacy = parseLegacyTransformLog(text);
+       if (legacy) {
+-        logs.push(legacy);
++        logs.push({...legacy, success: legacy.logFile ? await checkTransformStatus(legacy.logFile as string) : false} as unknown as TransformLog);
+       }
+     }
+   }
+diff --git a/src/services/obsService.ts b/src/services/obsService.ts
+index fc13f6e..27d424e 100644
+--- a/src/services/obsService.ts
++++ b/src/services/obsService.ts
+@@ -189,7 +189,6 @@ export class ObsService {
+         ...(versionId ? { 'versionId': versionId } : {}),
+       },
+     });
+-
+     if (!response.ok) {
+       const contentType = response.headers.get('content-type') || '';
+       if (contentType.includes('application/json')) {
+@@ -413,6 +412,50 @@ export class ObsService {
+     return result;
+   }
+ 
++  /**
++ * 递归下载 OBS 目录到本地
++ */
++  async downloadDirectory(
++    spaceName: string,
++    remoteDirPath: string,
++    localDirUri: vscode.Uri
++  ): Promise<void> {
++    // 创建本地目标目录
++    await vscode.workspace.fs.createDirectory(localDirUri);
++
++    // 获取当前 OBS 目录下的所有子项
++    const children = await this.listChildren(spaceName, remoteDirPath);
++
++    for (const child of children) {
++      if (!child.name) {
++        continue;
++      }
++
++      const localUri = vscode.Uri.joinPath(localDirUri, child.name);
++
++      if (child.type === 'folder') {
++        // 递归下载子目录
++        await this.downloadDirectory(
++          spaceName,
++          child.path,
++          localUri
++        );
++      } else {
++        // 下载文件
++        await this.downloadFile(
++          spaceName,
++          child.path,
++          localUri,
++          {
++            knownVersion: child.version,
++            knownEtag: child.etag,
++            knownUpdatedAt: child.updatedAt,
++          }
++        );
++      }
++    }
++  }
++
+   private getConfig(): ObsConfig {
+     const config = vscode.workspace.getConfiguration('dftIde.obs');
+     const page = getEnvironmentSetting('dftIde.obs', 'page', environmentDefaults.obs.page)
+diff --git a/src/services/workspaceService.ts b/src/services/workspaceService.ts
+index 15fa736..505e72e 100644
+--- a/src/services/workspaceService.ts
++++ b/src/services/workspaceService.ts
+@@ -847,6 +847,7 @@ export interface TransformLog {
+   designTree?: string;
+   normTable?: string;
+   module?: string;
++  isAllSelected?: boolean;
+   stage?: string;
+   landerAssistant?: string;
+   timemilles?: string;
+@@ -956,10 +957,10 @@ export async function doConfigTransform(transformLog: TransformLog): Promise<Tra
+           output = `${output}${event.data}`.slice(-20000);
+           const normalized = output.replace(/(\r\n|\r)/g, '\n');
+           const markerIndex = normalized.lastIndexOf(marker);
+-          if (markerIndex < 0) {
++          if (normalized.split((marker)).length - 1 <= 0) {
+             return;
+           }
+-          const exitCodeText = normalized.slice(markerIndex + marker.length).match(/-?\d+/)?.[0];
++          const exitCodeText = normalized.slice(markerIndex + marker.length).match(/-?\d+/);
+           if (exitCodeText === undefined) {
+             return;
+           }
+@@ -1015,11 +1016,20 @@ function getFlowTransformCommand(transformLog: TransformLog, marker: string): st
+       if (!transformLog.designTree || !transformLog.normTable || !transformLog.module) {
+         throw new Error('缺少 design tree、归一化表格或 module。');
+       }
+-      return [
+-        `${quoteCshArg(transformLog.scriptPath)} ${quoteCshArg(transformLog.designTree)} ${quoteCshArg(transformLog.normTable)} ${quoteCshArg(transformLog.module)} | tee ${quoteCshArg(transformLog.logFile!)}`,
+-        'set dft_ide_default_config_status = $status',
+-        `echo "${marker}$dft_ide_default_config_status"`,
+-      ].join('; ');
++      if(transformLog.isAllSelected){
++        return [
++          `${quoteCshArg(transformLog.scriptPath)} ${quoteCshArg(transformLog.designTree)} ${quoteCshArg(transformLog.normTable)} | tee ${quoteCshArg(transformLog.logFile!)}`,
++          'set dft_ide_default_config_status = $status',
++          `echo "${marker}$dft_ide_default_config_status"`,
++        ].join('; ');
++      } else {
++        return [
++          `${quoteCshArg(transformLog.scriptPath)} ${quoteCshArg(transformLog.designTree)} ${quoteCshArg(transformLog.normTable)} ${quoteCshArg(transformLog.module)} | tee ${quoteCshArg(transformLog.logFile!)}`,
++          'set dft_ide_default_config_status = $status',
++          `echo "${marker}$dft_ide_default_config_status"`,
++        ].join('; ');
++      }
++      
+   }
+ }
+ 
+diff --git a/src/webview/components/design/Step1_CommonConfig.tsx b/src/webview/components/design/Step1_CommonConfig.tsx
+index bbfa618..e6d49d1 100644
+--- a/src/webview/components/design/Step1_CommonConfig.tsx
++++ b/src/webview/components/design/Step1_CommonConfig.tsx
+@@ -8,6 +8,7 @@ import useWizardStore from '../../store/wizardStore';
+ import TransformHistory from '../shared/TransformHistory';
+ import ModuleSelect from '../shared/TransformModuleSelect';
+ import TransformConfigPanel from '../shared/TransformConfigPanel';
++import { useFlowModulesStore } from '../../store/moduleStore';
+ 
+ interface Props {
+   onNext?: () => void;
+@@ -31,6 +32,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+   const [generating, setGenerating] = useState(false);
+   const [historyOpen, setHistoryOpen] = useState(false);
+   const updatePayload = useWizardStore((state) => state.updatePayload);
++  const flowModulesStore = useFlowModulesStore();
+ 
+   const { savedData, loading, saving, handleSave } =
+     useFlowConfig(moduleKey ? `${flowKey}/${moduleKey}/config` : flowKey);
+@@ -48,31 +50,39 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+         }
+       })
+       .catch(() => setCurrentBranch('Git Error'));
++  }, [updatePayload, flowKey]);
++
++  useEffect(() => {
++    clearForm();
++    if (!savedData) return;
++    const source = (savedData.step1 as Record<string, unknown> | undefined) ?? savedData;
++    if (source.project) project.setValue(String(source.project));
++    if (Array.isArray(source.selectedModules)) {
++      setSelectedModules(source.selectedModules.filter((item): item is string => typeof item === 'string'));
++    }
++  }, [savedData, moduleKey]);
+ 
++  useEffect(() => {
+     // 获取归一化表格的模块
++    if(flowModulesStore.flowModules[flowKey]){
++      setModuleOptions(flowModulesStore.flowModules[flowKey].map(item => {
++        return { label: item, value: item };
++      }));
++      return;
++    }
+     getModules(flowKey)
+       .then((res) => {
+         if (res.success) {
+           setModuleOptions(res.modules.map(item => {
+             return { label: item, value: item };
+           }));
++          flowModulesStore.setFlowModules(flowKey, res.modules);
+         } else {
+           setModuleOptions([]);
+         }
+       })
+       .catch(() => setModuleOptions([]));
+-
+-  }, [updatePayload, flowKey]);
+-
+-  useEffect(() => {
+-    clearForm();
+-    if (!savedData) return;
+-    const source = (savedData.step1 as Record<string, unknown> | undefined) ?? savedData;
+-    if (source.project) project.setValue(String(source.project));
+-    if (Array.isArray(source.selectedModules)) {
+-      setSelectedModules(source.selectedModules.filter((item): item is string => typeof item === 'string'));
+-    }
+-  }, [savedData, moduleKey]);
++  }, [flowKey]);
+ 
+   const collectFormData = () => {
+     const source = savedData
+@@ -106,13 +116,11 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+     }
+     setGenerating(true);
+     try {
+-      for (const module of selectedModules) {
+-        const result = await generateDefaultFlowConfigs(flowKey, module);
+-        if (!result.success) {
+-          throw new Error(result.error ?? `${module} 转换失败`);
+-        }
++      const isAllSelected = moduleOptions.every(val => selectedModules.includes(val.value));
++      const result = await generateDefaultFlowConfigs(flowKey, selectedModules.join('; '), isAllSelected);
++      if (!result.success) {
++        throw new Error(result.error ?? '转换失败');
+       }
+-      message.success(`已完成 ${selectedModules.length} 个 module 的配置转换。`);
+     } catch (error) {
+       message.error(error instanceof Error ? error.message : String(error));
+     } finally {
+diff --git a/src/webview/components/shared/TransformModuleSelect.tsx b/src/webview/components/shared/TransformModuleSelect.tsx
+index b85698f..4fe4f1c 100644
+--- a/src/webview/components/shared/TransformModuleSelect.tsx
++++ b/src/webview/components/shared/TransformModuleSelect.tsx
+@@ -1,81 +1,165 @@
+-import React, { useMemo, useState } from 'react';
+-import { Button, Divider, Select, Space } from 'antd';
+-import { CheckSquareOutlined } from '@ant-design/icons';
+-
+-export interface TransformModuleOption {
+-  label: string;
+-  value: string;
+-}
++import React, { useState, useMemo } from 'react';
++import { Select, Input, Divider, Button } from 'antd';
++import { SearchOutlined, CheckSquareOutlined } from '@ant-design/icons';
+ 
+ interface ModuleSelectProps {
+-  options: TransformModuleOption[];
++  options: any[];
+   selectedValues: string[];
+   onSelectionChange: (values: string[]) => void;
+   placeholder?: string;
+ }
+ 
+-const TransformModuleSelect: React.FC<ModuleSelectProps> = ({
++const ModuleSelect: React.FC<ModuleSelectProps> = ({
+   options,
+   selectedValues,
+   onSelectionChange,
+-  placeholder = '请选择 module',
++  placeholder = "请选择...",
+ }) => {
+   const [searchTerm, setSearchTerm] = useState('');
++  const [isOpen, setIsOpen] = useState(false);
++
+   const filteredOptions = useMemo(() => {
+-    const keyword = searchTerm.trim().toLowerCase();
+-    if (!keyword) {
+-      return options;
+-    }
+-    return options.filter((option) => option.label.toLowerCase().includes(keyword));
++    if (!searchTerm) return options;
++    return options.filter(opt =>
++      opt.label.toLowerCase().includes(searchTerm.toLowerCase())
++    );
+   }, [options, searchTerm]);
+ 
+-  const filteredValues = filteredOptions.map((option) => option.value);
+-  const allFilteredSelected = filteredValues.length > 0
+-    && filteredValues.every((value) => selectedValues.includes(value));
++  const handleSelect = (value: string) => {
++    if (selectedValues.includes(value)) {
++      onSelectionChange(selectedValues.filter(v => v !== value));
++    } else {
++      onSelectionChange([...selectedValues, value]);
++    }
++  };
++
++  const handleSelectAll = () => {
++    const filteredValues = filteredOptions.map(opt => opt.value);
++    const isAllSelected = filteredValues.every(val => selectedValues.includes(val));
+ 
+-  const toggleFiltered = () => {
+-    if (allFilteredSelected) {
+-      onSelectionChange(selectedValues.filter((value) => !filteredValues.includes(value)));
+-      return;
++    if (isAllSelected) {
++      onSelectionChange(selectedValues.filter(v => !filteredValues.includes(v)));
++    } else {
++      const newValues = [...new Set([...selectedValues, ...filteredValues])];
++      onSelectionChange(newValues);
+     }
+-    onSelectionChange([...new Set([...selectedValues, ...filteredValues])]);
+   };
+ 
++  const isAllFilteredSelected = useMemo(() => {
++    if (filteredOptions.length === 0) return false;
++    return filteredOptions.every(opt => selectedValues.includes(opt.value));
++  }, [filteredOptions, selectedValues]);
++
++  const selectedLabels = options
++    .filter(opt => selectedValues.includes(opt.value))
++    .map(opt => opt.label);
++
+   return (
+     <Select
+-      mode="multiple"
+-      allowClear
+-      showSearch
+-      optionFilterProp="label"
+-      options={filteredOptions}
+-      value={selectedValues}
+-      onChange={onSelectionChange}
+-      onSearch={setSearchTerm}
+-      onOpenChange={(open) => {
+-        if (!open) setSearchTerm('');
+-      }}
+-      placeholder={placeholder}
+-      maxTagCount="responsive"
+       style={{ width: '100%' }}
+-      dropdownRender={(menu) => (
+-        <>
+-          <Space style={{ padding: '4px 8px' }}>
++      placeholder={placeholder}
++      open={isOpen}
++      onOpenChange={(visible) => setIsOpen(visible)}
++      value={selectedValues.length > 0 ? selectedLabels.join(', ') : undefined}
++      popupRender={() => (
++        <div
++          style={{
++            backgroundColor: 'var(--ant-color-bg-container, var(--vscode-dropdown-background))',
++            borderRadius: '4px'
++          }}
++        >
++          <div style={{ padding: '8px', display: 'flex', gap: '8px' }} onMouseDown={(e) => e.preventDefault()}>
++            <Input
++              placeholder="输入关键字查询..."
++              prefix={<SearchOutlined style={{ color: 'var(--vscode-descriptionForeground)' }} />}
++              value={searchTerm}
++              onChange={(e) => setSearchTerm(e.target.value)}
++              style={{ borderRadius: '4px', flex: 1 }}
++            />
+             <Button
+-              type="text"
+-              size="small"
+               icon={<CheckSquareOutlined />}
+-              disabled={filteredValues.length === 0}
+-              onClick={toggleFiltered}
++              onClick={handleSelectAll}
++              style={{ borderRadius: '4px' }}
+             >
+-              {allFilteredSelected ? '取消当前筛选' : '选择当前筛选'}
++              {isAllFilteredSelected ? '取消全选' : '全选'}
+             </Button>
+-          </Space>
+-          <Divider style={{ margin: '4px 0' }} />
+-          {menu}
+-        </>
++          </div>
++
++          <Divider style={{ margin: '0 0 8px 0' }} />
++
++          <div 
++            style={{ 
++              maxHeight: '200px',
++              overflowY: 'auto',
++              display: 'grid',     
++              gridTemplateColumns: 'repeat(3, 1fr)',
++              gap: '4px',                  
++              padding: '0 4px'
++            }}
++          >
++            {filteredOptions.length > 0 ? (
++              filteredOptions.map((option) => {
++                const isSelected = selectedValues.includes(option.value);
++                return (
++                  <div
++                    key={option.value}
++                    onClick={() => handleSelect(option.value)}
++                    onMouseDown={(e) => e.preventDefault()}
++                    style={{
++                      padding: '5px 12px',
++                      cursor: 'pointer',
++                      display: 'flex',
++                      alignItems: 'center',
++                      borderRadius: '4px',
++                      margin: '0 4px',
++                      backgroundColor: isSelected
++                        ? 'var(--ant-color-primary-bg, var(--vscode-list-activeSelectionBackground))'
++                        : 'transparent',
++                      color: isSelected
++                        ? 'var(--ant-color-primary-text, var(--vscode-list-activeSelectionForeground))'
++                        : 'var(--vscode-foreground)'
++                    }}
++                    onMouseEnter={(e) => {
++                      if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--vscode-list-hoverBackground)';
++                    }}
++                    onMouseLeave={(e) => {
++                      if (!isSelected) e.currentTarget.style.backgroundColor = isSelected
++                        ? 'var(--ant-color-primary-bg, var(--vscode-list-activeSelectionBackground))'
++                        : 'transparent';
++                    }}
++                  >
++                    <div
++                      style={{
++                        width: '14px',
++                        height: '14px',
++                        marginRight: '8px',
++                        border: `1px solid ${isSelected ? 'var(--ant-color-primary)' : 'var(--vscode-checkbox-border)'}`,
++                        backgroundColor: isSelected ? 'var(--ant-color-primary)' : 'transparent',
++                        display: 'flex',
++                        alignItems: 'center',
++                        justifyContent: 'center',
++                        borderRadius: '2px',
++                        fontSize: '10px',
++                        color: '#fff',
++                        transition: 'all 0.2s'
++                      }}
++                    >
++                      {isSelected && '✓'}
++                    </div>
++                    <span>{option.label}</span>
++                  </div>
++                );
++              })
++            ) : (
++                <div style={{ padding: '8px', color: 'var(--vscode-descriptionForeground)', textAlign: 'center', fontSize: '12px' }}>
++                  无匹配结果
++                </div>
++              )}
++          </div>
++        </div>
+       )}
+     />
+   );
+ };
+ 
+-export default TransformModuleSelect;
++export default ModuleSelect;
+\ No newline at end of file
+diff --git a/src/webview/components/shared/TransformStageSelect.tsx b/src/webview/components/shared/TransformStageSelect.tsx
+index 98c1725..38382cc 100644
+--- a/src/webview/components/shared/TransformStageSelect.tsx
++++ b/src/webview/components/shared/TransformStageSelect.tsx
+@@ -105,7 +105,7 @@ const TransformStageSelect: React.FC<StageSelectProps> = ({
+           </Popconfirm>
+         </Space>
+       )}
+-      dropdownRender={(menu) => (
++      popupRender={(menu) => (
+         <>
+           {menu}
+           <Divider style={{ margin: '8px 0' }} />
+diff --git a/src/webview/components/verification/Step1_CommonConfig.tsx b/src/webview/components/verification/Step1_CommonConfig.tsx
+index fc72268..73520ec 100644
+--- a/src/webview/components/verification/Step1_CommonConfig.tsx
++++ b/src/webview/components/verification/Step1_CommonConfig.tsx
+@@ -96,7 +96,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey }) => {
+       if (!result.success) {
+         throw new Error(result.error ?? 'Verification 配置转换失败');
+       }
+-      message.success('Verification 配置转换完成。');
+     } catch (error) {
+       message.error(error instanceof Error ? error.message : String(error));
+     } finally {
+diff --git a/src/webview/store/moduleStore.ts b/src/webview/store/moduleStore.ts
+new file mode 100644
+index 0000000..994060e
+--- /dev/null
++++ b/src/webview/store/moduleStore.ts
+@@ -0,0 +1,41 @@
++import { create } from 'zustand';
++
++interface FlowModulesStore {
++  flowModules: Record<string, string[]>;
++  setFlowModules: (flow: string, modules: string[]) => void;
++  appendModule: (flow: string, module: string) => void;
++  removeModule: (flow: string, module: string) => void;
++  clearKey: (flow: string) => void;
++}
++
++export const useFlowModulesStore = create<FlowModulesStore>((set) => ({
++  flowModules: {},
++
++  setFlowModules: (flow: string, modules: string[]) =>
++    set((state) => ({
++      flowModules: { ...state.flowModules, [flow]: modules },
++    })),
++
++  appendModule: (flow: string, module: string) =>
++    set((state) => ({
++      flowModules: {
++        ...state.flowModules,
++        [flow]: [...(state.flowModules[flow] || []), module],
++      },
++    })),
++
++  removeModule: (flow: string, module: string) =>
++    set((state) => ({
++      data: {
++        ...state.flowModules,
++        [flow]: (state.flowModules[flow] || []).filter((v) => v !== module),
++      },
++    })),
++
++  clearKey: (flow: string) =>
++    set((state) => {
++      const newData = { ...state.flowModules };
++      delete newData[flow];
++      return { flowModules: newData };
++    }),
++}));
+\ No newline at end of file
+diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
+index 99fe02a..d74d99a 100644
+--- a/src/webview/utils/ipc.ts
++++ b/src/webview/utils/ipc.ts
+@@ -599,9 +599,9 @@ export async function deleteFlowConfigFile(
+ }
+ 
+ export async function generateDefaultFlowConfigs(
+-  flow: 'hibist' | 'sailor', module: string, stage?: string
++  flow: 'hibist' | 'sailor', module: string, isAllSelected?: boolean, stage?: string
+ ): Promise<TransformResponse> {
+-  const res = await ipcRequest('generateDefaultFlowConfigs', { flow, module, stage });
++  const res = await ipcRequest('generateDefaultFlowConfigs', { flow, module, isAllSelected, stage });
+   return res as unknown as TransformResponse;
+ }
+ 
