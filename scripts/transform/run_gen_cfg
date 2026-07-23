@@ -1,7 +1,7 @@
 #!/bin/csh -f
 
-if ($#argv != 3) then
-    echo "Usage: $0 <design_tree> <normalize_table> <module>"
+if ($#argv < 2 || $#argv > 3) then
+    echo "Usage: $0 <design_tree> <normalize_table> [module]"
     exit 1
 endif
 
@@ -11,7 +11,13 @@ set cfg_script = "gen_cfg.py"
 
 set design_tree = "$1"
 set normalize_table = "$2"
-set module = "$3"
+
+if ($#argv == 3) then
+    set module = "$3"
+    set cfg_args = "-modules $module"
+else
+    set cfg_args = "-all"
+endif
 
 foreach script ($design_script $dft_script $cfg_script)
     if (! -e $script) then
@@ -22,4 +28,4 @@ end
 
 $design_script $design_tree
 $dft_script $normalize_table
-$cfg_script $normalize_table
+$cfg_script $normalize_table $cfg_args

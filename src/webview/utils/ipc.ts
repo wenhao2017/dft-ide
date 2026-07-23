@@ -599,9 +599,9 @@ export async function deleteFlowConfigFile(
 }
 
 export async function generateDefaultFlowConfigs(
-  flow: 'hibist' | 'sailor', module: string, stage?: string
+  flow: 'hibist' | 'sailor', module: string, isAllSelected?: boolean, stage?: string
 ): Promise<TransformResponse> {
-  const res = await ipcRequest('generateDefaultFlowConfigs', { flow, module, stage });
+  const res = await ipcRequest('generateDefaultFlowConfigs', { flow, module, isAllSelected, stage });
   return res as unknown as TransformResponse;
 }
 

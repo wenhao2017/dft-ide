@@ -1768,6 +1768,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         const requestId: string = msg.requestId;
         const flow = normalizeConfigFlow(msg.flow);
         const module = typeof msg.module === 'string' ? msg.module.trim() : '';
+        const isAllSelected = msg.isAllSelected;
         const stage = typeof msg.stage === 'string' ? msg.stage.trim() : undefined;
         try {
           if (!flow || flow === 'verification') {
@@ -1797,11 +1798,9 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             normTable,
             module,
             stage,
+            isAllSelected,
           });
           const result = await saveTransformLogs(transformLog, stage);
-          if (!result.success) {
-            throw new Error(`配置转换日志检测到错误：${result.logFile ?? 'unknown log'}`);
-          }
           currentPanel?.webview.postMessage({
             command: 'generateDefaultFlowConfigsResponse',
             requestId,
@@ -1848,9 +1847,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             landerAssistant,
           });
           const result = await saveTransformLogs(transformLog, stage);
-          if (!result.success) {
-            throw new Error(`Verification 配置转换日志检测到错误：${result.logFile ?? 'unknown log'}`);
-          }
           currentPanel?.webview.postMessage({
             command: 'generateLanderConfigsResponse',
             requestId,

@@ -96,7 +96,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey }) => {
       if (!result.success) {
         throw new Error(result.error ?? 'Verification 配置转换失败');
       }
-      message.success('Verification 配置转换完成。');
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
     } finally {

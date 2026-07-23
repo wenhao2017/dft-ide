@@ -189,7 +189,6 @@ export class ObsService {
         ...(versionId ? { 'versionId': versionId } : {}),
       },
     });
-
     if (!response.ok) {
       const contentType = response.headers.get('content-type') || '';
       if (contentType.includes('application/json')) {
@@ -411,6 +410,50 @@ export class ObsService {
     };
 
     return result;
+  }
+
+  /**
+ * 递归下载 OBS 目录到本地
+ */
+  async downloadDirectory(
+    spaceName: string,
+    remoteDirPath: string,
+    localDirUri: vscode.Uri
+  ): Promise<void> {
+    // 创建本地目标目录
+    await vscode.workspace.fs.createDirectory(localDirUri);
+
+    // 获取当前 OBS 目录下的所有子项
+    const children = await this.listChildren(spaceName, remoteDirPath);
+
+    for (const child of children) {
+      if (!child.name) {
+        continue;
+      }
+
+      const localUri = vscode.Uri.joinPath(localDirUri, child.name);
+
+      if (child.type === 'folder') {
+        // 递归下载子目录
+        await this.downloadDirectory(
+          spaceName,
+          child.path,
+          localUri
+        );
+      } else {
+        // 下载文件
+        await this.downloadFile(
+          spaceName,
+          child.path,
+          localUri,
+          {
+            knownVersion: child.version,
+            knownEtag: child.etag,
+            knownUpdatedAt: child.updatedAt,
+          }
+        );
+      }
+    }
   }
 
   private getConfig(): ObsConfig {

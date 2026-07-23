@@ -847,6 +847,7 @@ export interface TransformLog {
   designTree?: string;
   normTable?: string;
   module?: string;
+  isAllSelected?: boolean;
   stage?: string;
   landerAssistant?: string;
   timemilles?: string;
@@ -956,10 +957,10 @@ export async function doConfigTransform(transformLog: TransformLog): Promise<Tra
           output = `${output}${event.data}`.slice(-20000);
           const normalized = output.replace(/(\r\n|\r)/g, '\n');
           const markerIndex = normalized.lastIndexOf(marker);
-          if (markerIndex < 0) {
+          if (normalized.split((marker)).length - 1 <= 0) {
             return;
           }
-          const exitCodeText = normalized.slice(markerIndex + marker.length).match(/-?\d+/)?.[0];
+          const exitCodeText = normalized.slice(markerIndex + marker.length).match(/-?\d+/);
           if (exitCodeText === undefined) {
             return;
           }
@@ -1015,11 +1016,20 @@ function getFlowTransformCommand(transformLog: TransformLog, marker: string): st
       if (!transformLog.designTree || !transformLog.normTable || !transformLog.module) {
         throw new Error('缺少 design tree、归一化表格或 module。');
       }
-      return [
-        `${quoteCshArg(transformLog.scriptPath)} ${quoteCshArg(transformLog.designTree)} ${quoteCshArg(transformLog.normTable)} ${quoteCshArg(transformLog.module)} | tee ${quoteCshArg(transformLog.logFile!)}`,
-        'set dft_ide_default_config_status = $status',
-        `echo "${marker}$dft_ide_default_config_status"`,
-      ].join('; ');
+      if(transformLog.isAllSelected){
+        return [
+          `${quoteCshArg(transformLog.scriptPath)} ${quoteCshArg(transformLog.designTree)} ${quoteCshArg(transformLog.normTable)} | tee ${quoteCshArg(transformLog.logFile!)}`,
+          'set dft_ide_default_config_status = $status',
+          `echo "${marker}$dft_ide_default_config_status"`,
+        ].join('; ');
+      } else {
+        return [
+          `${quoteCshArg(transformLog.scriptPath)} ${quoteCshArg(transformLog.designTree)} ${quoteCshArg(transformLog.normTable)} ${quoteCshArg(transformLog.module)} | tee ${quoteCshArg(transformLog.logFile!)}`,
+          'set dft_ide_default_config_status = $status',
+          `echo "${marker}$dft_ide_default_config_status"`,
+        ].join('; ');
+      }
+      
   }
 }
 

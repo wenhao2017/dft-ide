@@ -8,6 +8,7 @@ import useWizardStore from '../../store/wizardStore';
 import TransformHistory from '../shared/TransformHistory';
 import ModuleSelect from '../shared/TransformModuleSelect';
 import TransformConfigPanel from '../shared/TransformConfigPanel';
+import { useFlowModulesStore } from '../../store/moduleStore';
 
 interface Props {
   onNext?: () => void;
@@ -31,6 +32,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
   const [generating, setGenerating] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const updatePayload = useWizardStore((state) => state.updatePayload);
+  const flowModulesStore = useFlowModulesStore();
 
   const { savedData, loading, saving, handleSave } =
     useFlowConfig(moduleKey ? `${flowKey}/${moduleKey}/config` : flowKey);
@@ -48,20 +50,6 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
         }
       })
       .catch(() => setCurrentBranch('Git Error'));
-
-    // 获取归一化表格的模块
-    getModules(flowKey)
-      .then((res) => {
-        if (res.success) {
-          setModuleOptions(res.modules.map(item => {
-            return { label: item, value: item };
-          }));
-        } else {
-          setModuleOptions([]);
-        }
-      })
-      .catch(() => setModuleOptions([]));
-
   }, [updatePayload, flowKey]);
 
   useEffect(() => {
@@ -73,6 +61,28 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
       setSelectedModules(source.selectedModules.filter((item): item is string => typeof item === 'string'));
     }
   }, [savedData, moduleKey]);
+
+  useEffect(() => {
+    // 获取归一化表格的模块
+    if(flowModulesStore.flowModules[flowKey]){
+      setModuleOptions(flowModulesStore.flowModules[flowKey].map(item => {
+        return { label: item, value: item };
+      }));
+      return;
+    }
+    getModules(flowKey)
+      .then((res) => {
+        if (res.success) {
+          setModuleOptions(res.modules.map(item => {
+            return { label: item, value: item };
+          }));
+          flowModulesStore.setFlowModules(flowKey, res.modules);
+        } else {
+          setModuleOptions([]);
+        }
+      })
+      .catch(() => setModuleOptions([]));
+  }, [flowKey]);
 
   const collectFormData = () => {
     const source = savedData
@@ -106,13 +116,11 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
     }
     setGenerating(true);
     try {
-      for (const module of selectedModules) {
-        const result = await generateDefaultFlowConfigs(flowKey, module);
-        if (!result.success) {
-          throw new Error(result.error ?? `${module} 转换失败`);
-        }
+      const isAllSelected = moduleOptions.every(val => selectedModules.includes(val.value));
+      const result = await generateDefaultFlowConfigs(flowKey, selectedModules.join('; '), isAllSelected);
+      if (!result.success) {
+        throw new Error(result.error ?? '转换失败');
       }
-      message.success(`已完成 ${selectedModules.length} 个 module 的配置转换。`);
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
     } finally {

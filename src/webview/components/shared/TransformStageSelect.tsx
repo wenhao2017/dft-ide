@@ -105,7 +105,7 @@ const TransformStageSelect: React.FC<StageSelectProps> = ({
           </Popconfirm>
         </Space>
       )}
-      dropdownRender={(menu) => (
+      popupRender={(menu) => (
         <>
           {menu}
           <Divider style={{ margin: '8px 0' }} />
