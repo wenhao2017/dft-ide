@@ -27,7 +27,7 @@ ENV_FILE_NAME = ".dft_ide_env.json"
 ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 RESERVED_ENV = {
     "DFT_IDE_FLOW", "DFT_IDE_STEP", "DFT_IDE_ECO_PHASE",
-    "DFT_IDE_STEP_STATUS", "DFT_IDE_WORK_PATH", "DFT_IDE_MODULE",
+    "DFT_IDE_STEP_STATUS", "DFT_IDE_WORK_PATH", "DFT_IDE_MODULE", "DFT_IDE_STAGE",
 }
 
 
@@ -84,6 +84,16 @@ def resolve_project_name(explicit=None):
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", project_name):
         fail(f"非法的项目名称: {project_name}")
     return project_name
+
+
+def resolve_stage(explicit=None):
+    stage = explicit or os.environ.get("DFT_IDE_STAGE") or os.environ.get("stage")
+    if not stage:
+        fail("未设置 DFT_IDE_STAGE，也未提供 --stage")
+    stage = stage.strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", stage):
+        fail(f"非法的 Stage 名称: {stage}")
+    return stage
 
 
 def infer_project_name(work_path, env):
@@ -354,9 +364,8 @@ def source_lines(source_file):
 
 
 def run_eco(work_path, env, source_file, phase):
-    project_name = infer_project_name(work_path, env)
-    project_root = Path(env.get("DFT_IDE_PROJECT_ROOT", work_path.parent)).expanduser().resolve()
-    eco_file = project_root / f"{project_name}_data" / "eco" / ECO_FILE
+    stage = resolve_stage(env.get("DFT_IDE_STAGE") or env.get("stage"))
+    eco_file = work_path / stage / "eco" / ECO_FILE
     if not eco_file.is_file():
         return 0
     eco_env = dict(env)
@@ -366,7 +375,7 @@ def run_eco(work_path, env, source_file, phase):
     return run_csh(lines, eco_env)
 
 
-def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=None, source=None, no_eco=False):
+def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=None, source=None, stage=None, no_eco=False):
     if step not in STEPS:
         fail(f"未知的 {FLOW_LABEL} Step: {step}")
     work_path = resolve_work_path(work_path)
@@ -379,11 +388,13 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
     module_name = module or runtime_env.get("DFT_IDE_MODULE") or runtime_env.get("module")
     if not module_name:
         fail("必须设置 DFT_IDE_MODULE 或提供 --module")
+    stage_name = resolve_stage(stage or runtime_env.get("DFT_IDE_STAGE") or runtime_env.get("stage"))
     project_name = infer_project_name(work_path, runtime_env)
     runtime_env.update({
         "DFT_IDE_FLOW": FLOW, "DFT_IDE_STEP": step,
         "DFT_IDE_PROJECT_NAME": project_name,
         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODULE": module_name,
+        "DFT_IDE_STAGE": stage_name,
         "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
         "DFT_IDE_LANDER_MODE": "ip",
     })
@@ -439,6 +450,7 @@ def print_help():
 运行参数（必须放在 <step> 之前）:
   --work-path PATH  Flow 业务仓根目录
   --module NAME     当前模块名称
+  --stage NAME      当前 Lander Stage（也可设置 DFT_IDE_STAGE）
   --cfg FILE        显式指定 CFG 文件
   --env-file FILE   环境变量 JSON 文件
   --source FILE     需要 source 的 Csh 环境文件
@@ -479,6 +491,7 @@ def main(argv):
         parser = ChineseArgumentParser(prog=f"{Path(sys.argv[0]).name} run", description="执行指定 Flow Step。")
         parser.add_argument("--work-path", help="Flow 业务仓根目录")
         parser.add_argument("--module", help="当前模块名称")
+        parser.add_argument("--stage", help="当前 Lander Stage")
         parser.add_argument("--cfg", help="显式指定 CFG 文件")
         parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
         parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
@@ -487,7 +500,7 @@ def main(argv):
         args, step_args = parser.parse_known_args(argv[1:])
         if step_args[:1] == ["--"]:
             step_args = step_args[1:]
-        return run_step(args.step, step_args, args.work_path, args.module, args.cfg, args.env_file, args.source, args.no_eco)
+        return run_step(args.step, step_args, args.work_path, args.module, args.cfg, args.env_file, args.source, args.stage, args.no_eco)
     return run_step(command, argv[1:])
 
 

@@ -1,9 +1,10 @@
 #!/bin/csh -f
 
 # Lander merge 3D 项目级 ECO 调度入口。
-if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE) exit 2
+if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE || ! $?DFT_IDE_STAGE) exit 2
 set step = "$DFT_IDE_STEP"
 set phase = "$DFT_IDE_ECO_PHASE"
+set stage = "$DFT_IDE_STAGE"
 if ("$phase" != "before" && "$phase" != "after") exit 2
 
 switch ("${step}:${phase}")

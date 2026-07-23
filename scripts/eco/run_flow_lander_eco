@@ -4,13 +4,14 @@
 # 设置 DFT_IDE_LANDER_MODE 后，Mode 流程将调用对应的
 # run_flow_lander_<mode>_eco；跨 Mode 的通用规则可放在本文件中。
 
-if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE) then
-    echo "[DFT IDE] 未设置 DFT_IDE_STEP 或 DFT_IDE_ECO_PHASE。"
+if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE || ! $?DFT_IDE_STAGE) then
+    echo "[DFT IDE] 未设置 DFT_IDE_STEP、DFT_IDE_ECO_PHASE 或 DFT_IDE_STAGE。"
     exit 2
 endif
 
 set step = "$DFT_IDE_STEP"
 set phase = "$DFT_IDE_ECO_PHASE"
+set stage = "$DFT_IDE_STAGE"
 if ("$phase" != "before" && "$phase" != "after") then
     echo "[DFT IDE] 不支持的 Lander ECO 阶段: $phase"
     exit 2

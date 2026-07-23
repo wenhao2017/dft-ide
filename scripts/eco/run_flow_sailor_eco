@@ -3,10 +3,10 @@
 # Sailor 项目级 ECO 调度入口。
 # 请在对应的 Step 和执行阶段分支中添加领域或项目 ECO 命令。
 # 调用示例：
-# ECO 入口及其调用的脚本最终存放在 data 仓的 eco 目录中，例如：
-#   tclsh "$DFT_IDE_PROJECT_ROOT/${DFT_IDE_PROJECT_NAME}_data/eco/Kirin/xxx.tcl"
-#   python3 "$DFT_IDE_PROJECT_ROOT/${DFT_IDE_PROJECT_NAME}_data/eco/project_eco/xxx.py"
-#   /bin/csh -f "$DFT_IDE_PROJECT_ROOT/${DFT_IDE_PROJECT_NAME}_data/eco/project_eco/xxx.csh"
+# ECO 入口及其调用的脚本存放在 Sailor 业务仓的 eco 目录中，例如：
+#   tclsh "$DFT_IDE_WORK_PATH/eco/Kirin/xxx.tcl"
+#   python3 "$DFT_IDE_WORK_PATH/eco/project_eco/xxx.py"
+#   /bin/csh -f "$DFT_IDE_WORK_PATH/eco/project_eco/xxx.csh"
 
 if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE) then
     echo "[DFT IDE] 未设置 DFT_IDE_STEP 或 DFT_IDE_ECO_PHASE。"
