@@ -130,7 +130,7 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
 
   useEffect(() => {
     if (!membersError) return;
-    setError(membersError instanceof Error ? membersError.message : '鎴愬憳鍒楄〃鍔犺浇澶辫触');
+    setError(membersError instanceof Error ? membersError.message : '成员列表加载失败');
   }, [membersError]);
 
   useEffect(() => {

@@ -26,7 +26,7 @@ export const useFlowModulesStore = create<FlowModulesStore>((set) => ({
 
   removeModule: (flow: string, module: string) =>
     set((state) => ({
-      data: {
+      flowModules: {
         ...state.flowModules,
         [flow]: (state.flowModules[flow] || []).filter((v) => v !== module),
       },
@@ -38,4 +38,4 @@ export const useFlowModulesStore = create<FlowModulesStore>((set) => ({
       delete newData[flow];
       return { flowModules: newData };
     }),
-}));
+}));
