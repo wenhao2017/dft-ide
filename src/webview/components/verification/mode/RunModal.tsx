@@ -13,7 +13,7 @@ import type {
 
 import StepSelector, { VERIFICATION_STEP_PRESETS } from './StepSelector'
 import ParamTable from './ParamTable'
-import { useVerificationStageConfig } from './ModePanel/hooks/useVerificationStageConfig'
+import { readSavedParams, type SavedParams } from './savedParamUtils'
 
 interface RunModalProps {
   open: boolean
@@ -22,6 +22,10 @@ interface RunModalProps {
   groups: BaseConfigItem[]
   tcs: BaseConfigItem[]
   subattrs: BaseConfigItem[]
+
+  stageConfig: Record<string, unknown> | null
+  stageConfigLoading: boolean
+  handleSave: (data: Record<string, unknown>) => Promise<boolean>
 
   onCancel: () => void
   onRun: (payload: ModeRunPayload) => void
@@ -53,17 +57,7 @@ const cloneRows = (rows: RunParamRow[]): RunParamRow[] => {
   }))
 }
 
-type SavedParams = Record<string, RunParamRow[]>
-
-const readSavedParams = (value: unknown): SavedParams => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return {}
-  }
-
-  return Object.fromEntries(
-    Object.entries(value).filter(([, rows]) => Array.isArray(rows)),
-  ) as SavedParams
-}
+const cloneRow = (row: RunParamRow): RunParamRow => cloneRows([row])[0]
 
 export default function RunModal({
   open,
@@ -71,6 +65,9 @@ export default function RunModal({
   groups,
   tcs,
   subattrs,
+  stageConfig,
+  stageConfigLoading,
+  handleSave,
   onCancel,
   onRun,
   getLanderModePipelines,
@@ -86,8 +83,6 @@ export default function RunModal({
   const [selectedAlias, setSelectedAlias] = useState<string>()
   const [savedParams, setSavedParams] = useState<SavedParams>({})
   const [savingParams, setSavingParams] = useState(false)
-  const { stageConfig, loading: stageConfigLoading, handleSave } =
-    useVerificationStageConfig()
 
   useEffect(() => {
     if (open && mode) {
@@ -171,15 +166,15 @@ export default function RunModal({
   }, [selectedSteps])
 
   const loadSavedParams = (alias: string) => {
-    const savedRows = savedParams[alias]
+    const savedRow = savedParams[alias]
 
-    if (!savedRows) {
+    if (!savedRow) {
       return
     }
 
     setSelectedAlias(alias)
     setScenarioAlias(alias)
-    setRows(cloneRows(savedRows))
+    setRows([cloneRow(savedRow)])
   }
 
   const saveCurrentParams = async () => {
@@ -192,7 +187,7 @@ export default function RunModal({
 
     const nextParams = {
       ...savedParams,
-      [alias]: cloneRows(rows),
+      [alias]: cloneRow(rows[0]),
     }
 
     setSavingParams(true)
@@ -339,7 +334,7 @@ export default function RunModal({
               groups={groups}
               tcs={tcs}
               subattrs={subattrs}
-              onChange={setRows}
+              onChange={(nextRows) => setRows(nextRows.slice(0, 1))}
             />
           </div>
 

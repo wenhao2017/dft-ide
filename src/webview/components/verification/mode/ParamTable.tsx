@@ -67,14 +67,13 @@ export default function ParamTable({
   }
 
   const addRow = () => {
+    if (rows.length >= 1) {
+      return
+    }
     onChange([...rows, createRunParamRow()])
   }
 
   const deleteRow = (rowId: string) => {
-    if (rows.length <= 1) {
-      return
-    }
-
     onChange(rows.filter((row) => row.id !== rowId))
   }
 
@@ -217,9 +216,11 @@ export default function ParamTable({
           columns={columns}
         />
 
-        <Button block icon={<PlusOutlined />} onClick={addRow}>
-          添加参数行
-        </Button>
+        {rows.length === 0 && (
+          <Button block icon={<PlusOutlined />} onClick={addRow}>
+            添加参数
+          </Button>
+        )}
       </Space>
 
       {selector && (

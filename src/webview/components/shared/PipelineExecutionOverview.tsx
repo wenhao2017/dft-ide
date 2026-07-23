@@ -314,7 +314,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   const [peakMetrics, setPeakMetrics] = useState<Record<string, { maxCpu: number; maxMem: number }>>({});
   const taskDetailRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  const getFlowLabel = useCallback((moduleKey: string) => `${flowLabel} / ${moduleKey}`, [flowLabel]);
+  const getFlowLabel = useCallback((_moduleKey: string) => flowLabel, [flowLabel]);
 
   useEffect(() => {
     selectedModuleKeys.forEach((moduleKey) => {
@@ -432,7 +432,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     const task = run.tasks.find((t) => t.id === taskId);
     if (task && task.status !== 'pending' && task.status !== 'skipped') {
       void openExecutionTerminal({
-        title: getStepTerminalTitle(run.flowLabel, run.moduleKey, task),
+        title: getStepTerminalTitle(flowLabel, run.moduleKey, task),
         cwd: moduleWorkDirs?.[run.moduleKey],
       });
     }
@@ -440,7 +440,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     window.requestAnimationFrame(() => {
       taskDetailRefs.current[taskId]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     });
-  }, [activateModule, flowKey, moduleWorkDirs, selectRuntimeTask]);
+  }, [activateModule, flowKey, flowLabel, moduleWorkDirs, selectRuntimeTask]);
 
   const toggleExpanded = useCallback((taskId: string) => {
     setExpandedTaskIds((prev) => {

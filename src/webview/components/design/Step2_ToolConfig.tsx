@@ -47,7 +47,7 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, onModuleS
   const selectedQueue = Form.useWatch('clusterQueue', taskForm);
 
   const repo = category?.toLowerCase() === 'sailor' ? 'sailor' : 'hibist';
-  const flowLabel = repo === 'sailor' ? 'Sailor' : 'DFTM';
+  const flowLabel = repo === 'sailor' ? 'Sailor' : 'Hibist';
 
   // ── 配置持久化 Hook ─────────────────────────────────
   // 注意：Step2 与 Step1 同属 design flow，但字段不同，合并到同一个文件中

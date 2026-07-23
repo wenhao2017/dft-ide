@@ -49,12 +49,12 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, onModuleS
   const selectedQueue = Form.useWatch('clusterQueue', taskForm);
 
   const repo = 'verification';
-  const flowLabel = 'DFTM';
 
   // ── 配置持久化 Hook ─────────────────────────────────
   // 注意：Step2 与 Step1 同属 design flow，但字段不同，合并到同一个文件中
   // 这里使用独立 key 区分：step2_task / step2_design
   const { stage } = useVerificationStageConfig();
+  const flowLabel = stage ? `Lander / ${stage}` : 'Lander';
   const { savedData, loading, saving, hasUnsaved, handleSave } =
     useFlowConfig(`verification/${stage ?? '__unselected__'}/${moduleKey ?? '__unselected__'}/config`);
 

@@ -23,6 +23,7 @@ import { useModeCrud } from './hooks/useModeCrud'
 import { useModeRun } from './hooks/useModeRun'
 
 import { createCopyName, parseImportedModeCfg, sameName } from './utils'
+import { readSavedParams, updateSavedParamReferences } from '../savedParamUtils'
 
 import {
   duplicateVerificationModeCfg,
@@ -43,7 +44,12 @@ export default function ModePanel({
   onStop,
 }: ModePanelProps) {
   const accentColor = accent ?? 'var(--vscode-focusBorder, #1677ff)'
-  const { stage } = useVerificationStageConfig()
+  const {
+    stage,
+    stageConfig,
+    loading: stageConfigLoading,
+    handleSave,
+  } = useVerificationStageConfig()
 
   const [activeTab, setActiveTab] = useState<ModePanelTab>(initialTab)
 
@@ -305,13 +311,14 @@ export default function ModePanel({
       return
     }
 
+    const nextName = value.trim()
+    if (!nextName) {
+      message.warning('请输入名称')
+      return
+    }
+
     if (activeTab === 'mode') {
       if (!stage) return
-      const nextName = value.trim()
-      if (!nextName) {
-        message.warning('请输入名称')
-        return
-      }
       if (resources.mode.some((item) => !sameName(item.name, renameItem.name) && sameName(item.name, nextName))) {
         message.error(`mode 名称 ${nextName} 已存在`)
         return
@@ -322,8 +329,26 @@ export default function ModePanel({
         message.error(error instanceof Error ? error.message : 'Mode 配置文件重命名失败')
         return
       }
+    } else {
+      if (resources[activeTab].some((item) => item.name !== renameItem.name && item.name === nextName)) {
+        message.error(`${activeTab} 名称 "${nextName}" 已存在`)
+        return
+      }
+
+      const result = updateSavedParamReferences(
+        readSavedParams(stageConfig?.params),
+        activeTab,
+        [renameItem.name],
+        nextName,
+      )
+      if (result.affectedAliases.length > 0) {
+        if (!await handleSave({ params: result.params })) return
+        message.warning(
+          `重命名影响了 ${result.affectedAliases.length} 个保存场景，已自动更新参数`,
+        )
+      }
     }
-    const success = crud.renameItem(renameItem, activeTab, value)
+    const success = crud.renameItem(renameItem, activeTab, nextName)
 
     if (!success) {
       return
@@ -331,7 +356,6 @@ export default function ModePanel({
 
     closeRename()
   }
-
   const handleFocusChange = (names: string[]) => {
     const validNames = new Set(allItems.map((item) => item.name))
 
@@ -409,14 +433,27 @@ export default function ModePanel({
     openRename(selectedItem)
   }
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!batchCheckedNames.length) {
       return
     }
 
+    if (activeTab !== 'mode') {
+      const result = updateSavedParamReferences(
+        readSavedParams(stageConfig?.params),
+        activeTab,
+        batchCheckedNames,
+      )
+      if (result.affectedAliases.length > 0) {
+        if (!await handleSave({ params: result.params })) return
+        message.warning(
+          `删除影响了 ${result.affectedAliases.length} 个保存场景，已自动移除相关参数`,
+        )
+      }
+    }
+
     crud.deleteItems(activeTab, batchCheckedNames)
   }
-
   const handleBatchCheckedChange = (name: string, checked: boolean) => {
     setBatchCheckedNamesByTab((current) => {
       const currentNames = current[activeTab]
@@ -618,6 +655,9 @@ export default function ModePanel({
         tcs={resources.tc}
         subattrs={resources.subattr}
         getLanderModePipelines={getLanderModePipelines}
+        stageConfig={stageConfig}
+        stageConfigLoading={stageConfigLoading}
+        handleSave={handleSave}
         onCancel={run.closeRun}
         onRun={run.handleRun}
       />

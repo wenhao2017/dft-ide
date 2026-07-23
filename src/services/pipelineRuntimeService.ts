@@ -53,6 +53,14 @@ interface PipelineExecutionSession {
   logPrefix: string;
   terminalTitle: string;
   tasks: PipelineTask[];
+  executionPlan: Array<{
+    task: PipelineTask;
+    parameters?: Record<string, unknown>;
+    markerTaskId: string;
+    isLastTaskRun: boolean;
+    taskIndex: number;
+    continueOnFailure: boolean;
+  }>;
   nextIndex: number;
   cwd?: string;
   envConfig?: Record<string, unknown> | null;
@@ -60,6 +68,7 @@ interface PipelineExecutionSession {
   runParameters?: unknown;
   shellPath?: string;
   currentTaskId?: string;
+  currentMarkerTaskId?: string;
   buffer: string;
   seenStarts: Set<string>;
   seenEnds: Set<string>;
@@ -112,9 +121,26 @@ function appendToolCommands(commands: string[], value: unknown): void {
     if (tool.type === 'version') {
       commands.push(`ma ${tool.name}/${tool.version}`);
     } else {
+      commands.push(`# Add tool ${tool.name}`);
       commands.push(`setenv PATH "\${PATH}:${tool.path.replace(/(["\\`])/g, '\\$1')}"`);
     }
   }
+}
+
+function firstNonEmptyString(...values: unknown[]): string {
+  for (const value of values) {
+    const text = String(value ?? '').trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function mergeToolConfigs(projectTools: unknown, rowTools: unknown): RuntimeToolConfig[] {
+  const merged = new Map<string, RuntimeToolConfig>();
+  for (const tool of [...readToolConfigs(projectTools), ...readToolConfigs(rowTools)]) {
+    merged.set(tool.name.toLocaleLowerCase(), tool);
+  }
+  return Array.from(merged.values());
 }
 
 function buildPipelineStepExecutionCommand(projectPath: string | undefined, stepCommand: string): string {
@@ -185,6 +211,66 @@ function resolveVerificationRunParameters(
     };
   });
 }
+
+function readRunParameterNames(row: Record<string, unknown>, key: string): string[] {
+  const value = row[key];
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+}
+
+function getApplicableVerificationParameterSets(
+  task: PipelineTask,
+  runParameters: unknown,
+): Array<Record<string, unknown>> {
+  if (!Array.isArray(runParameters)) return [];
+
+  const parameterTask = task as PipelineTask & {
+    enableGroup?: boolean;
+    enableTC?: boolean;
+    enableSubAttr?: boolean;
+  };
+  const enabledFields = [
+    parameterTask.enableGroup ? 'groupNames' : undefined,
+    parameterTask.enableTC ? 'tcNames' : undefined,
+    parameterTask.enableSubAttr ? 'subattrNames' : undefined,
+  ].filter((field): field is string => Boolean(field));
+  if (enabledFields.length === 0) return [];
+
+  return runParameters.filter((row): row is Record<string, unknown> => {
+    if (!row || typeof row !== 'object') return false;
+    const record = row as Record<string, unknown>;
+    return enabledFields.some((field) => readRunParameterNames(record, field).length > 0);
+  });
+}
+
+function buildVerificationExecutionCommands(task: PipelineTask): string[] {
+  return [task.command.trim()];
+}
+
+function appendVerificationParameterCommands(
+  commands: string[],
+  task: PipelineTask,
+  runParameters: unknown,
+): void {
+  const parameterTask = task as PipelineTask & {
+    enableGroup?: boolean;
+    enableTC?: boolean;
+    enableSubAttr?: boolean;
+  };
+  const row = Array.isArray(runParameters) && runParameters[0] && typeof runParameters[0] === 'object'
+    ? runParameters[0] as Record<string, unknown>
+    : undefined;
+  if (!row) return;
+
+  const append = (enabled: boolean | undefined, key: string, envName: string) => {
+    if (!enabled) return;
+    const value = readRunParameterNames(row, key).join(',');
+    commands.push(`setenv ${envName} ${quoteCshArgument(value)}`);
+  };
+  append(parameterTask.enableGroup, 'groupNames', 'DFT_IDE_GROUPS');
+  append(parameterTask.enableTC, 'tcNames', 'DFT_IDE_TCS');
+  append(parameterTask.enableSubAttr, 'subattrNames', 'DFT_IDE_SUBATTRS');
+}
 function buildStepCommands(
   runId: string,
   task: PipelineTask,
@@ -193,6 +279,8 @@ function buildStepCommands(
   moduleKey: string,
   envConfig?: Record<string, unknown> | null,
   taskConfig?: Record<string, unknown> | null,
+  runParameters?: unknown,
+  markerTaskId: string = task.id,
 ): string | string[] {
   const commands: string[] = [];
   const projectPath = resolveProjectPath(flowKey);
@@ -203,21 +291,34 @@ function buildStepCommands(
       commands.push(`source ${projectSource}`);
     }
 
-    commands.push(`setenv module "${moduleKey}"`);
+    const moduleEnvName = flowKey === 'verification' ? 'DFT_IDE_MODE' : 'DFT_IDE_MODULE';
+    commands.push(`setenv ${moduleEnvName} "${moduleKey}"`);
     if (projectPath) {
-      commands.push(`setenv project_path "${projectPath}"`);
+      commands.push(`setenv DFT_IDE_WORK_PATH "${projectPath}"`);
+    }
+    const stage = flowKey === 'verification'
+      ? firstNonEmptyString(envConfig?.stage)
+      : '';
+    if (stage) {
+      commands.push(`setenv DFT_IDE_STAGE ${quoteCshArgument(stage)}`);
     }
 
     const source = taskConfig?.step2 as Record<string, unknown> | undefined;
     const customConfig = source?.step2Task as Record<string, unknown> | undefined;
     if (customConfig) {
-      appendToolCommands(commands, customConfig.tools);
+      const parameterRow = Array.isArray(runParameters) && runParameters[0] && typeof runParameters[0] === 'object'
+        ? runParameters[0] as Record<string, unknown>
+        : undefined;
+      appendToolCommands(commands, mergeToolConfigs(customConfig.tools, parameterRow?.tools));
 
-      const clusterGroup = String(customConfig.clusterGroup ?? '').trim();
-      const clusterQueue = String(customConfig.clusterQueue ?? '').trim();
-      const cpu = String(customConfig.cpu ?? '').trim();
-      const memory = String(customConfig.memory ?? '').trim();
-      const clusterExtra = String(customConfig.clusterExtra ?? '').trim();
+      const parameterDonau = parameterRow?.donau && typeof parameterRow.donau === 'object'
+        ? parameterRow.donau as Record<string, unknown>
+        : undefined;
+      const clusterGroup = firstNonEmptyString(parameterDonau?.group, customConfig.clusterGroup);
+      const clusterQueue = firstNonEmptyString(parameterDonau?.queue, customConfig.clusterQueue);
+      const cpu = firstNonEmptyString(parameterDonau?.cpu, customConfig.cpu);
+      const memory = firstNonEmptyString(parameterDonau?.mem, customConfig.memory);
+      const clusterExtra = firstNonEmptyString(customConfig.clusterExtra);
       if (clusterGroup) {
         commands.push(`setenv DONAU_GROUP "${clusterGroup}"`);
         const queue = clusterQueue ? `-q ${clusterQueue}` : '';
@@ -232,29 +333,55 @@ function buildStepCommands(
           }
           resource = `-R '${resources.join(';')}'`;
         }
-        const dsub = `dsub -I -A ${clusterGroup} ${queue} ${resource} ${clusterExtra}`;
-        commands.push(`alias dsubrun_I "${dsub}"`);
+        const dsubArgs = ['-A', clusterGroup, queue, resource, clusterExtra]
+          .filter(Boolean)
+          .join(' ');
+        commands.push(`alias dsubrun "dsub ${dsubArgs}"`);
+        commands.push(`alias dsubrun_I "dsub -I ${dsubArgs}"`);
       }
     }
   }
 
+  if (flowKey === 'verification') {
+    appendVerificationParameterCommands(commands, task, runParameters);
+  }
+
   const stepCommand = task.command.trim();
-  const executionCommand = flowKey === 'verification'
-    ? stepCommand
-    : buildPipelineStepExecutionCommand(projectPath, stepCommand);
-  commands.push(`echo "__DFT_IDE_STEP_START__|${runId}|${task.id}"`);
+  const executionCommands = flowKey === 'verification'
+    ? buildVerificationExecutionCommands(task)
+    : [buildPipelineStepExecutionCommand(projectPath, stepCommand)];
+  commands.push(`echo "__DFT_IDE_STEP_START__|${runId}|${markerTaskId}"`);
   commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
-  commands.push(`echo ${quoteCshArgument(`[DFT IDE] 执行命令: ${executionCommand}`)}`);
-  commands.push(executionCommand);
-  commands.push('set dft_ide_step_status = $status');
-  commands.push(`echo "${buildStepEndMarker(runId, task.id)}$dft_ide_step_status"`);
+  commands.push('set dft_ide_step_status = 0');
+  for (const executionCommand of executionCommands) {
+    commands.push(`echo ${quoteCshArgument(`[DFT IDE] 执行命令: ${executionCommand}`)}`);
+    commands.push(executionCommand);
+    commands.push('set dft_ide_step_status = $status');
+    commands.push('if ($dft_ide_step_status != 0) goto dft_ide_step_end');
+  }
+  commands.push('dft_ide_step_end:');
+  commands.push(`echo "${buildStepEndMarker(runId, markerTaskId)}$dft_ide_step_status"`);
 
   if (projectPath) {
-    const targetDir = path.join(path.dirname(projectPath), ".dft-ide", "local-state", "run_flow", flowKey, moduleKey);
+    const stage = flowKey === 'verification' && typeof envConfig?.stage === 'string'
+      ? envConfig.stage.trim()
+      : '';
+    const targetDir = path.join(
+      path.dirname(projectPath),
+      ".dft-ide",
+      "local-state",
+      "run_flow",
+      flowKey,
+      ...(stage ? [stage] : []),
+      moduleKey,
+    );
     fs.mkdirSync(targetDir, { recursive: true });
     const targetFile = path.join(targetDir, task.name);
     const scriptContent = commands.map(cmd => cmd.trim()).join('\n');
-    fs.writeFileSync(targetFile, `#!/bin/csh -f\n${scriptContent}\n`);
+    fs.writeFileSync(
+      targetFile,
+      `#!/bin/csh -f\nsource /software/hicad/cshrc/cshrc.modules\n${scriptContent}\n`,
+    );
     fs.chmodSync(targetFile, 0o755);
     return `source ${targetFile}`;
   }
@@ -490,11 +617,12 @@ function runSequentialSimulation(
             commands.push(`source ${envConfig.project}`);
           }
           // b. 设置环境变量
-          // 模块名称
-          commands.push(`setenv module "${moduleKey}"`);
+          // Verification 使用 mode 名称，设计流程使用 module 名称
+          const moduleEnvName = flowKey === 'verification' ? 'DFT_IDE_MODE' : 'DFT_IDE_MODULE';
+          commands.push(`setenv ${moduleEnvName} "${moduleKey}"`);
           // 项目路径
           if (projectPath) {
-            commands.push(`setenv project_path "${projectPath}"`);
+            commands.push(`setenv DFT_IDE_WORK_PATH "${projectPath}"`);
           }
           // setenv STAGE DFT
           // setenv DIE CDIE
@@ -529,8 +657,9 @@ function runSequentialSimulation(
                 }
                 resource = `-R '${arr.join(';')}'`;
               }
-              const dsub = `dsub -I -A ${clusterGroup} ${queue} ${resource} ${clusterExtra}`;
-              commands.push(`alias dsubrun_I "${dsub}"`);
+              const dsubArgs = `-A ${clusterGroup} ${queue} ${resource} ${clusterExtra}`.trim();
+              commands.push(`alias dsubrun "dsub ${dsubArgs}"`);
+              commands.push(`alias dsubrun_I "dsub -I ${dsubArgs}"`);
             }
           }
         }
@@ -666,7 +795,10 @@ export class PipelineRuntimeService {
 
     const loadedPipeline = loadPipelineConfig(flowKey);
     const parsedTasks = selectedTasks?.length
-      ? selectedTasks.map((task) => makeTask(task.id, task.name, task.command, task.description))
+      ? selectedTasks.map((task) => ({
+          ...task,
+          ...makeTask(task.id, task.name, task.command, task.description),
+        }))
       : loadedPipeline.tasks;
     const parsedLinks = selectedTasks?.length
       ? parsedTasks.slice(1).map((task, index) => ({ source: parsedTasks[index].id, target: task.id }))
@@ -737,6 +869,25 @@ export class PipelineRuntimeService {
     this.notify(key);
 
     const selectedTasksToRun = initialTasks.filter((t) => t.status !== 'skipped');
+    const resolvedRunParameters = flowKey === 'verification'
+      ? resolveVerificationRunParameters(runParameters, taskConfig)
+      : runParameters;
+    const executionPlan = selectedTasksToRun.flatMap((task, taskIndex) => {
+      const parameterSets = flowKey === 'verification'
+        ? getApplicableVerificationParameterSets(task, resolvedRunParameters)
+        : [];
+      const taskRuns: Array<Record<string, unknown> | undefined> = parameterSets.length > 0
+        ? parameterSets
+        : [undefined];
+      return taskRuns.map((parameters, parameterIndex) => ({
+        task,
+        parameters,
+        markerTaskId: `${task.id}__params_${parameterIndex + 1}`,
+        isLastTaskRun: parameterIndex === taskRuns.length - 1,
+        taskIndex,
+        continueOnFailure: parameterSets.length > 0,
+      }));
+    });
 
     this.registerExecutionSession(key, {
       runId,
@@ -746,13 +897,12 @@ export class PipelineRuntimeService {
       logPrefix: config.logPrefix,
       terminalTitle: getPipelineTerminalTitle(flowLabel, moduleKey),
       tasks: selectedTasksToRun,
+      executionPlan,
       nextIndex: 0,
       cwd,
       envConfig,
       taskConfig,
-      runParameters: flowKey === 'verification'
-        ? resolveVerificationRunParameters(runParameters, taskConfig)
-        : runParameters,
+      runParameters: resolvedRunParameters,
       shellPath: this.options.getPipelineShellPath?.() ?? 'csh',
       buffer: '',
       seenStarts: new Set<string>(),
@@ -838,19 +988,21 @@ export class PipelineRuntimeService {
       return;
     }
 
-    if (session.nextIndex >= session.tasks.length) {
+    if (session.nextIndex >= session.executionPlan.length) {
       this.completeRuntime(key, session.logPrefix);
       return;
     }
 
     const index = session.nextIndex;
-    const task = session.tasks[index];
+    const execution = session.executionPlan[index];
+    const task = execution.task;
     session.nextIndex += 1;
     session.currentTaskId = task.id;
+    session.currentMarkerTaskId = execution.markerTaskId;
 
     if (!task.command.trim()) {
       this.patchTask(key, task.id, {
-        status: 'success',
+        status: execution.isLastTaskRun ? 'success' : 'running',
         startedAt: nowText(),
         finishedAt: nowText(),
         logs: [`[${nowText()}] ${session.logPrefix} ${task.name} 无执行命令，已跳过。`],
@@ -859,30 +1011,30 @@ export class PipelineRuntimeService {
       return;
     }
 
-    this.patchTask(key, task.id, {
-      status: 'running',
+    this.patchTask(key, task.id, (current) => ({
+      status: current.status === 'failed' ? current.status : 'running',
       startedAt: nowText(),
       finishedAt: undefined,
-    });
+    }));
     this.appendLog(key, session.logPrefix, `${task.name} 运行启动。`);
 
     const commands = buildStepCommands(
       session.runId,
       task,
-      index,
+      execution.taskIndex,
       session.flowKey,
       session.moduleKey,
       session.envConfig,
       session.taskConfig,
+      execution.parameters ? [execution.parameters] : session.runParameters,
+      execution.markerTaskId,
     );
-    const generatedCommand = session.flowKey === 'verification'
-      ? task.command.trim()
-      : buildPipelineStepExecutionCommand(resolveProjectPath(session.flowKey), task.command.trim());
-    const runParameterRows = Array.isArray(session.runParameters)
-      ? session.runParameters.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object')
-      : [];
-    console.group(`[DFT IDE] Pipeline Task: ${session.flowLabel} / ${session.moduleKey} / ${task.name}`);
-    console.log('command:', generatedCommand);
+    const generatedCommands = session.flowKey === 'verification'
+      ? buildVerificationExecutionCommands(task)
+      : [buildPipelineStepExecutionCommand(resolveProjectPath(session.flowKey), task.command.trim())];
+    const runParameterRows = execution.parameters ? [execution.parameters] : [];
+    console.group(`[DFT IDE] Pipeline Task: ${session.flowLabel} / ${session.moduleKey} / ${task.name} / ${execution.markerTaskId}`);
+    console.log('commands:', generatedCommands);
     console.log('groups:', runParameterRows.map((row) => row.groupNames ?? []));
     console.log('tcs:', runParameterRows.map((row) => row.tcNames ?? []));
     console.log('subattrs:', runParameterRows.map((row) => row.subattrNames ?? []));
@@ -891,9 +1043,14 @@ export class PipelineRuntimeService {
     console.log('parameter rows:', runParameterRows);
     console.groupEnd();
     this.patchTask(key, task.id, (current) => ({
-      logs: [...current.logs, `[${nowText()}] ${session.logPrefix} 执行命令：${generatedCommand}`],
+      logs: [
+        ...current.logs,
+        ...generatedCommands.map((command) => `[${nowText()}] ${session.logPrefix} 执行命令：${command}`),
+      ],
     }));
-    this.appendLog(key, session.logPrefix, `${task.name} 执行命令：${generatedCommand}`);
+    generatedCommands.forEach((command) => {
+      this.appendLog(key, session.logPrefix, `${task.name} 执行命令：${command}`);
+    });
     void Promise.resolve(
       this.options.openTerminal(session.terminalTitle, commands, session.cwd, session.shellPath),
     ).catch((error) => {
@@ -922,8 +1079,10 @@ export class PipelineRuntimeService {
         continue;
       }
       session.seenStarts.add(taskId);
-      this.patchTask(key, taskId, (task) => ({
-        status: task.status === 'success' ? task.status : 'running',
+      const execution = session.executionPlan.find((item) => item.markerTaskId === taskId);
+      const runtimeTaskId = execution?.task.id ?? taskId;
+      this.patchTask(key, runtimeTaskId, (task) => ({
+        status: task.status === 'success' || task.status === 'failed' ? task.status : 'running',
         startedAt: task.startedAt ?? nowText(),
       }));
     }
@@ -956,14 +1115,18 @@ export class PipelineRuntimeService {
       return;
     }
 
-    const task = session.tasks.find((item) => item.id === taskId);
+    const execution = session.executionPlan.find((item) => item.markerTaskId === taskId);
+    const task = execution?.task ?? session.tasks.find((item) => item.id === taskId);
+    const runtimeTaskId = task?.id ?? taskId;
     if (exitCode === 0) {
-      this.patchTask(key, taskId, (current) => ({
-        status: current.status === 'stopped' ? current.status : 'success',
-        finishedAt: nowText(),
-        logs: [...current.logs, `[${nowText()}] ${session.logPrefix} ${current.name} 执行完成。`],
+      this.patchTask(key, runtimeTaskId, (current) => ({
+        status: current.status === 'stopped' || current.status === 'failed'
+          ? current.status
+          : execution?.isLastTaskRun ? 'success' : 'running',
+        finishedAt: execution?.isLastTaskRun || current.status === 'failed' ? nowText() : undefined,
+        logs: [...current.logs, `[${nowText()}] ${session.logPrefix} ${current.name} 当前参数组合执行完成。`],
       }));
-      this.appendLog(key, session.logPrefix, `${task?.name ?? taskId} 执行成功。`);
+      this.appendLog(key, session.logPrefix, `${task?.name ?? runtimeTaskId} 当前参数组合执行成功。`);
       this.startNextSessionTask(key);
       return;
     }
@@ -973,7 +1136,22 @@ export class PipelineRuntimeService {
       return;
     }
 
-    this.finishRuntimeWithFailure(key, session.logPrefix, taskId, exitCode);
+    if (execution?.continueOnFailure) {
+      this.patchTask(key, runtimeTaskId, (current) => ({
+        status: 'failed',
+        finishedAt: execution.isLastTaskRun ? nowText() : undefined,
+        logs: [...current.logs, `[${nowText()}] ${session.logPrefix} 当前参数组合执行失败，退出码 ${exitCode}；继续执行后续任务。`],
+      }));
+      this.appendLog(
+        key,
+        session.logPrefix,
+        `${task?.name ?? runtimeTaskId} 当前参数组合执行失败，退出码 ${exitCode}；该 Step 判定失败，流水线继续推进。`,
+      );
+      this.startNextSessionTask(key);
+      return;
+    }
+
+    this.finishRuntimeWithFailure(key, session.logPrefix, runtimeTaskId, exitCode);
   }
 
   private finishRuntimeWithFailure(
@@ -1018,12 +1196,18 @@ export class PipelineRuntimeService {
   private completeRuntime(key: string, logPrefix: string): void {
     clearRuntimeTimers(key);
     this.disposeExecutionSession(key);
-    this.updateRuntime(key, (runtime) => ({
-      ...runtime,
-      runState: 'completed',
-      finishedAt: nowStamp(),
-      logs: [...runtime.logs, `[${nowText()}] ${logPrefix} 流水线执行成功。`],
-    }));
+    this.updateRuntime(key, (runtime) => {
+      const hasFailedTask = runtime.tasks.some((task) => task.status === 'failed');
+      return {
+        ...runtime,
+        runState: hasFailedTask ? 'failed' : 'completed',
+        finishedAt: nowStamp(),
+        logs: [
+          ...runtime.logs,
+          `[${nowText()}] ${logPrefix} ${hasFailedTask ? '流水线已执行完毕，但存在失败 Step。' : '流水线执行成功。'}`,
+        ],
+      };
+    });
   }
 
   private markRuntimeStopped(key: string, logPrefix: string, reason: string, sendInterrupt: boolean): void {

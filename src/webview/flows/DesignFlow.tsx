@@ -20,6 +20,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
   const [moduleWorkDirs, setModuleWorkDirs] = useState<Record<string, string>>({});
   const startRuntime = usePipelineRuntimeStore((state) => state.startRuntime);
   const stopRuntime = usePipelineRuntimeStore((state) => state.stopRuntime);
+  const runtimeLabel = repo === 'sailor' ? 'Sailor' : 'Hibist';
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
 
@@ -29,7 +30,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
       startRuntime(
         repo,
         moduleKey,
-        `${repo === 'sailor' ? 'Sailor' : 'DFTM'} / ${moduleKey}`,
+        runtimeLabel,
         taskIds,
         moduleWorkDirs[moduleKey],
       );
@@ -44,7 +45,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
       stopRuntime(
         repo,
         moduleKey,
-        `${repo === 'sailor' ? 'Sailor' : 'DFTM'} / ${moduleKey}`,
+        runtimeLabel,
       );
     });
   };

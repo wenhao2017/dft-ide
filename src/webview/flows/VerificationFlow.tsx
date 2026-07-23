@@ -13,6 +13,7 @@ import type {
   ModePanelTab,
   ModeRunPayload,
 } from '../components/verification/mode/types'
+import { useVerificationStageConfig } from '../components/verification/mode/ModePanel/hooks/useVerificationStageConfig'
 import usePipelineRuntimeStore from '../store/pipelineRuntimeStore'
 
 const VerificationFlow: React.FC = () => {
@@ -25,6 +26,8 @@ const VerificationFlow: React.FC = () => {
 
   const startRuntime = usePipelineRuntimeStore((state) => state.startRuntime)
   const stopRuntime = usePipelineRuntimeStore((state) => state.stopRuntime)
+  const { stage } = useVerificationStageConfig()
+  const runtimeLabel = stage ? `Lander / ${stage}` : 'Lander'
 
   const nextStep = () => {
     setCurrentStep((prev) => Math.min(prev + 1, 3))
@@ -56,7 +59,7 @@ const VerificationFlow: React.FC = () => {
     startRuntime(
       'verification',
       payload.mode.name,
-      `DFTM / ${payload.mode.name}`,
+      runtimeLabel,
       payload.stepIds,
       moduleWorkDirs[payload.mode.name],
       payload.steps,
@@ -66,7 +69,7 @@ const VerificationFlow: React.FC = () => {
 
   const handleStop = (keys: string[]) => {
     keys.filter(Boolean).forEach((moduleKey) => {
-      stopRuntime('verification', moduleKey, `DFTM / ${moduleKey}`)
+      stopRuntime('verification', moduleKey, runtimeLabel)
     })
   }
 

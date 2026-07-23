@@ -69,9 +69,7 @@ export function useModeSelection({
    */
   const activeItems = useMemo(() => {
     if (activeTab !== 'mode') {
-      const checkedSet = new Set(activeCheckedNames)
-
-      return resources[activeTab].filter((item) => checkedSet.has(item.name))
+      return resources[activeTab]
     }
 
     const focusSet = new Set(resources.focusModes)

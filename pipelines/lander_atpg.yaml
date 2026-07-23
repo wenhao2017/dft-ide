@@ -75,6 +75,9 @@
   name: sed_3d_tb
   command: "run_flow_lander_atpg sed_3d_tb"
   description: 对module_name进行_3D module替换（仅在麒麟3D模式下使用）
+  enableGroup: true
+  enableTC: true
+  enableSubAttr: true
 
 - id: gen_sim_env
   name: gen_sim_env
