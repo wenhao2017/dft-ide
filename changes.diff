@@ -1,0 +1,963 @@
+diff --git a/pipelines/lander_atpg.yaml b/pipelines/lander_atpg.yaml
+index 5e745d1..198d843 100644
+--- a/pipelines/lander_atpg.yaml
++++ b/pipelines/lander_atpg.yaml
+@@ -75,6 +75,9 @@
+   name: sed_3d_tb
+   command: "run_flow_lander_atpg sed_3d_tb"
+   description: 对module_name进行_3D module替换（仅在麒麟3D模式下使用）
++  enableGroup: true
++  enableTC: true
++  enableSubAttr: true
+ 
+ - id: gen_sim_env
+   name: gen_sim_env
+diff --git a/src/services/pipelineRuntimeService.ts b/src/services/pipelineRuntimeService.ts
+index fb18d08..aa7c9ed 100644
+--- a/src/services/pipelineRuntimeService.ts
++++ b/src/services/pipelineRuntimeService.ts
+@@ -53,6 +53,14 @@ interface PipelineExecutionSession {
+   logPrefix: string;
+   terminalTitle: string;
+   tasks: PipelineTask[];
++  executionPlan: Array<{
++    task: PipelineTask;
++    parameters?: Record<string, unknown>;
++    markerTaskId: string;
++    isLastTaskRun: boolean;
++    taskIndex: number;
++    continueOnFailure: boolean;
++  }>;
+   nextIndex: number;
+   cwd?: string;
+   envConfig?: Record<string, unknown> | null;
+@@ -60,6 +68,7 @@ interface PipelineExecutionSession {
+   runParameters?: unknown;
+   shellPath?: string;
+   currentTaskId?: string;
++  currentMarkerTaskId?: string;
+   buffer: string;
+   seenStarts: Set<string>;
+   seenEnds: Set<string>;
+@@ -112,11 +121,28 @@ function appendToolCommands(commands: string[], value: unknown): void {
+     if (tool.type === 'version') {
+       commands.push(`ma ${tool.name}/${tool.version}`);
+     } else {
++      commands.push(`# Add tool ${tool.name}`);
+       commands.push(`setenv PATH "\${PATH}:${tool.path.replace(/(["\\`])/g, '\\$1')}"`);
+     }
+   }
+ }
+ 
++function firstNonEmptyString(...values: unknown[]): string {
++  for (const value of values) {
++    const text = String(value ?? '').trim();
++    if (text) return text;
++  }
++  return '';
++}
++
++function mergeToolConfigs(projectTools: unknown, rowTools: unknown): RuntimeToolConfig[] {
++  const merged = new Map<string, RuntimeToolConfig>();
++  for (const tool of [...readToolConfigs(projectTools), ...readToolConfigs(rowTools)]) {
++    merged.set(tool.name.toLocaleLowerCase(), tool);
++  }
++  return Array.from(merged.values());
++}
++
+ function buildPipelineStepExecutionCommand(projectPath: string | undefined, stepCommand: string): string {
+   let scriptPath = '';
+   const scriptName = stepCommand.split(' ')[0];
+@@ -185,6 +211,66 @@ function resolveVerificationRunParameters(
+     };
+   });
+ }
++
++function readRunParameterNames(row: Record<string, unknown>, key: string): string[] {
++  const value = row[key];
++  if (!Array.isArray(value)) return [];
++  return value.map((item) => String(item ?? '').trim()).filter(Boolean);
++}
++
++function getApplicableVerificationParameterSets(
++  task: PipelineTask,
++  runParameters: unknown,
++): Array<Record<string, unknown>> {
++  if (!Array.isArray(runParameters)) return [];
++
++  const parameterTask = task as PipelineTask & {
++    enableGroup?: boolean;
++    enableTC?: boolean;
++    enableSubAttr?: boolean;
++  };
++  const enabledFields = [
++    parameterTask.enableGroup ? 'groupNames' : undefined,
++    parameterTask.enableTC ? 'tcNames' : undefined,
++    parameterTask.enableSubAttr ? 'subattrNames' : undefined,
++  ].filter((field): field is string => Boolean(field));
++  if (enabledFields.length === 0) return [];
++
++  return runParameters.filter((row): row is Record<string, unknown> => {
++    if (!row || typeof row !== 'object') return false;
++    const record = row as Record<string, unknown>;
++    return enabledFields.some((field) => readRunParameterNames(record, field).length > 0);
++  });
++}
++
++function buildVerificationExecutionCommands(task: PipelineTask): string[] {
++  return [task.command.trim()];
++}
++
++function appendVerificationParameterCommands(
++  commands: string[],
++  task: PipelineTask,
++  runParameters: unknown,
++): void {
++  const parameterTask = task as PipelineTask & {
++    enableGroup?: boolean;
++    enableTC?: boolean;
++    enableSubAttr?: boolean;
++  };
++  const row = Array.isArray(runParameters) && runParameters[0] && typeof runParameters[0] === 'object'
++    ? runParameters[0] as Record<string, unknown>
++    : undefined;
++  if (!row) return;
++
++  const append = (enabled: boolean | undefined, key: string, envName: string) => {
++    if (!enabled) return;
++    const value = readRunParameterNames(row, key).join(',');
++    commands.push(`setenv ${envName} ${quoteCshArgument(value)}`);
++  };
++  append(parameterTask.enableGroup, 'groupNames', 'DFT_IDE_GROUPS');
++  append(parameterTask.enableTC, 'tcNames', 'DFT_IDE_TCS');
++  append(parameterTask.enableSubAttr, 'subattrNames', 'DFT_IDE_SUBATTRS');
++}
+ function buildStepCommands(
+   runId: string,
+   task: PipelineTask,
+@@ -193,6 +279,8 @@ function buildStepCommands(
+   moduleKey: string,
+   envConfig?: Record<string, unknown> | null,
+   taskConfig?: Record<string, unknown> | null,
++  runParameters?: unknown,
++  markerTaskId: string = task.id,
+ ): string | string[] {
+   const commands: string[] = [];
+   const projectPath = resolveProjectPath(flowKey);
+@@ -203,21 +291,34 @@ function buildStepCommands(
+       commands.push(`source ${projectSource}`);
+     }
+ 
+-    commands.push(`setenv module "${moduleKey}"`);
++    const moduleEnvName = flowKey === 'verification' ? 'DFT_IDE_MODE' : 'DFT_IDE_MODULE';
++    commands.push(`setenv ${moduleEnvName} "${moduleKey}"`);
+     if (projectPath) {
+-      commands.push(`setenv project_path "${projectPath}"`);
++      commands.push(`setenv DFT_IDE_WORK_PATH "${projectPath}"`);
++    }
++    const stage = flowKey === 'verification'
++      ? firstNonEmptyString(envConfig?.stage)
++      : '';
++    if (stage) {
++      commands.push(`setenv DFT_IDE_STAGE ${quoteCshArgument(stage)}`);
+     }
+ 
+     const source = taskConfig?.step2 as Record<string, unknown> | undefined;
+     const customConfig = source?.step2Task as Record<string, unknown> | undefined;
+     if (customConfig) {
+-      appendToolCommands(commands, customConfig.tools);
+-
+-      const clusterGroup = String(customConfig.clusterGroup ?? '').trim();
+-      const clusterQueue = String(customConfig.clusterQueue ?? '').trim();
+-      const cpu = String(customConfig.cpu ?? '').trim();
+-      const memory = String(customConfig.memory ?? '').trim();
+-      const clusterExtra = String(customConfig.clusterExtra ?? '').trim();
++      const parameterRow = Array.isArray(runParameters) && runParameters[0] && typeof runParameters[0] === 'object'
++        ? runParameters[0] as Record<string, unknown>
++        : undefined;
++      appendToolCommands(commands, mergeToolConfigs(customConfig.tools, parameterRow?.tools));
++
++      const parameterDonau = parameterRow?.donau && typeof parameterRow.donau === 'object'
++        ? parameterRow.donau as Record<string, unknown>
++        : undefined;
++      const clusterGroup = firstNonEmptyString(parameterDonau?.group, customConfig.clusterGroup);
++      const clusterQueue = firstNonEmptyString(parameterDonau?.queue, customConfig.clusterQueue);
++      const cpu = firstNonEmptyString(parameterDonau?.cpu, customConfig.cpu);
++      const memory = firstNonEmptyString(parameterDonau?.mem, customConfig.memory);
++      const clusterExtra = firstNonEmptyString(customConfig.clusterExtra);
+       if (clusterGroup) {
+         commands.push(`setenv DONAU_GROUP "${clusterGroup}"`);
+         const queue = clusterQueue ? `-q ${clusterQueue}` : '';
+@@ -232,29 +333,55 @@ function buildStepCommands(
+           }
+           resource = `-R '${resources.join(';')}'`;
+         }
+-        const dsub = `dsub -I -A ${clusterGroup} ${queue} ${resource} ${clusterExtra}`;
+-        commands.push(`alias dsubrun_I "${dsub}"`);
++        const dsubArgs = ['-A', clusterGroup, queue, resource, clusterExtra]
++          .filter(Boolean)
++          .join(' ');
++        commands.push(`alias dsubrun "dsub ${dsubArgs}"`);
++        commands.push(`alias dsubrun_I "dsub -I ${dsubArgs}"`);
+       }
+     }
+   }
+ 
++  if (flowKey === 'verification') {
++    appendVerificationParameterCommands(commands, task, runParameters);
++  }
++
+   const stepCommand = task.command.trim();
+-  const executionCommand = flowKey === 'verification'
+-    ? stepCommand
+-    : buildPipelineStepExecutionCommand(projectPath, stepCommand);
+-  commands.push(`echo "__DFT_IDE_STEP_START__|${runId}|${task.id}"`);
++  const executionCommands = flowKey === 'verification'
++    ? buildVerificationExecutionCommands(task)
++    : [buildPipelineStepExecutionCommand(projectPath, stepCommand)];
++  commands.push(`echo "__DFT_IDE_STEP_START__|${runId}|${markerTaskId}"`);
+   commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
+-  commands.push(`echo ${quoteCshArgument(`[DFT IDE] 执行命令: ${executionCommand}`)}`);
+-  commands.push(executionCommand);
+-  commands.push('set dft_ide_step_status = $status');
+-  commands.push(`echo "${buildStepEndMarker(runId, task.id)}$dft_ide_step_status"`);
++  commands.push('set dft_ide_step_status = 0');
++  for (const executionCommand of executionCommands) {
++    commands.push(`echo ${quoteCshArgument(`[DFT IDE] 执行命令: ${executionCommand}`)}`);
++    commands.push(executionCommand);
++    commands.push('set dft_ide_step_status = $status');
++    commands.push('if ($dft_ide_step_status != 0) goto dft_ide_step_end');
++  }
++  commands.push('dft_ide_step_end:');
++  commands.push(`echo "${buildStepEndMarker(runId, markerTaskId)}$dft_ide_step_status"`);
+ 
+   if (projectPath) {
+-    const targetDir = path.join(path.dirname(projectPath), ".dft-ide", "local-state", "run_flow", flowKey, moduleKey);
++    const stage = flowKey === 'verification' && typeof envConfig?.stage === 'string'
++      ? envConfig.stage.trim()
++      : '';
++    const targetDir = path.join(
++      path.dirname(projectPath),
++      ".dft-ide",
++      "local-state",
++      "run_flow",
++      flowKey,
++      ...(stage ? [stage] : []),
++      moduleKey,
++    );
+     fs.mkdirSync(targetDir, { recursive: true });
+     const targetFile = path.join(targetDir, task.name);
+     const scriptContent = commands.map(cmd => cmd.trim()).join('\n');
+-    fs.writeFileSync(targetFile, `#!/bin/csh -f\n${scriptContent}\n`);
++    fs.writeFileSync(
++      targetFile,
++      `#!/bin/csh -f\nsource /software/hicad/cshrc/cshrc.modules\n${scriptContent}\n`,
++    );
+     fs.chmodSync(targetFile, 0o755);
+     return `source ${targetFile}`;
+   }
+@@ -490,11 +617,12 @@ function runSequentialSimulation(
+             commands.push(`source ${envConfig.project}`);
+           }
+           // b. 设置环境变量
+-          // 模块名称
+-          commands.push(`setenv module "${moduleKey}"`);
++          // Verification 使用 mode 名称，设计流程使用 module 名称
++          const moduleEnvName = flowKey === 'verification' ? 'DFT_IDE_MODE' : 'DFT_IDE_MODULE';
++          commands.push(`setenv ${moduleEnvName} "${moduleKey}"`);
+           // 项目路径
+           if (projectPath) {
+-            commands.push(`setenv project_path "${projectPath}"`);
++            commands.push(`setenv DFT_IDE_WORK_PATH "${projectPath}"`);
+           }
+           // setenv STAGE DFT
+           // setenv DIE CDIE
+@@ -529,8 +657,9 @@ function runSequentialSimulation(
+                 }
+                 resource = `-R '${arr.join(';')}'`;
+               }
+-              const dsub = `dsub -I -A ${clusterGroup} ${queue} ${resource} ${clusterExtra}`;
+-              commands.push(`alias dsubrun_I "${dsub}"`);
++              const dsubArgs = `-A ${clusterGroup} ${queue} ${resource} ${clusterExtra}`.trim();
++              commands.push(`alias dsubrun "dsub ${dsubArgs}"`);
++              commands.push(`alias dsubrun_I "dsub -I ${dsubArgs}"`);
+             }
+           }
+         }
+@@ -666,7 +795,10 @@ export class PipelineRuntimeService {
+ 
+     const loadedPipeline = loadPipelineConfig(flowKey);
+     const parsedTasks = selectedTasks?.length
+-      ? selectedTasks.map((task) => makeTask(task.id, task.name, task.command, task.description))
++      ? selectedTasks.map((task) => ({
++          ...task,
++          ...makeTask(task.id, task.name, task.command, task.description),
++        }))
+       : loadedPipeline.tasks;
+     const parsedLinks = selectedTasks?.length
+       ? parsedTasks.slice(1).map((task, index) => ({ source: parsedTasks[index].id, target: task.id }))
+@@ -737,6 +869,25 @@ export class PipelineRuntimeService {
+     this.notify(key);
+ 
+     const selectedTasksToRun = initialTasks.filter((t) => t.status !== 'skipped');
++    const resolvedRunParameters = flowKey === 'verification'
++      ? resolveVerificationRunParameters(runParameters, taskConfig)
++      : runParameters;
++    const executionPlan = selectedTasksToRun.flatMap((task, taskIndex) => {
++      const parameterSets = flowKey === 'verification'
++        ? getApplicableVerificationParameterSets(task, resolvedRunParameters)
++        : [];
++      const taskRuns: Array<Record<string, unknown> | undefined> = parameterSets.length > 0
++        ? parameterSets
++        : [undefined];
++      return taskRuns.map((parameters, parameterIndex) => ({
++        task,
++        parameters,
++        markerTaskId: `${task.id}__params_${parameterIndex + 1}`,
++        isLastTaskRun: parameterIndex === taskRuns.length - 1,
++        taskIndex,
++        continueOnFailure: parameterSets.length > 0,
++      }));
++    });
+ 
+     this.registerExecutionSession(key, {
+       runId,
+@@ -746,13 +897,12 @@ export class PipelineRuntimeService {
+       logPrefix: config.logPrefix,
+       terminalTitle: getPipelineTerminalTitle(flowLabel, moduleKey),
+       tasks: selectedTasksToRun,
++      executionPlan,
+       nextIndex: 0,
+       cwd,
+       envConfig,
+       taskConfig,
+-      runParameters: flowKey === 'verification'
+-        ? resolveVerificationRunParameters(runParameters, taskConfig)
+-        : runParameters,
++      runParameters: resolvedRunParameters,
+       shellPath: this.options.getPipelineShellPath?.() ?? 'csh',
+       buffer: '',
+       seenStarts: new Set<string>(),
+@@ -838,19 +988,21 @@ export class PipelineRuntimeService {
+       return;
+     }
+ 
+-    if (session.nextIndex >= session.tasks.length) {
++    if (session.nextIndex >= session.executionPlan.length) {
+       this.completeRuntime(key, session.logPrefix);
+       return;
+     }
+ 
+     const index = session.nextIndex;
+-    const task = session.tasks[index];
++    const execution = session.executionPlan[index];
++    const task = execution.task;
+     session.nextIndex += 1;
+     session.currentTaskId = task.id;
++    session.currentMarkerTaskId = execution.markerTaskId;
+ 
+     if (!task.command.trim()) {
+       this.patchTask(key, task.id, {
+-        status: 'success',
++        status: execution.isLastTaskRun ? 'success' : 'running',
+         startedAt: nowText(),
+         finishedAt: nowText(),
+         logs: [`[${nowText()}] ${session.logPrefix} ${task.name} 无执行命令，已跳过。`],
+@@ -859,30 +1011,30 @@ export class PipelineRuntimeService {
+       return;
+     }
+ 
+-    this.patchTask(key, task.id, {
+-      status: 'running',
++    this.patchTask(key, task.id, (current) => ({
++      status: current.status === 'failed' ? current.status : 'running',
+       startedAt: nowText(),
+       finishedAt: undefined,
+-    });
++    }));
+     this.appendLog(key, session.logPrefix, `${task.name} 运行启动。`);
+ 
+     const commands = buildStepCommands(
+       session.runId,
+       task,
+-      index,
++      execution.taskIndex,
+       session.flowKey,
+       session.moduleKey,
+       session.envConfig,
+       session.taskConfig,
++      execution.parameters ? [execution.parameters] : session.runParameters,
++      execution.markerTaskId,
+     );
+-    const generatedCommand = session.flowKey === 'verification'
+-      ? task.command.trim()
+-      : buildPipelineStepExecutionCommand(resolveProjectPath(session.flowKey), task.command.trim());
+-    const runParameterRows = Array.isArray(session.runParameters)
+-      ? session.runParameters.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object')
+-      : [];
+-    console.group(`[DFT IDE] Pipeline Task: ${session.flowLabel} / ${session.moduleKey} / ${task.name}`);
+-    console.log('command:', generatedCommand);
++    const generatedCommands = session.flowKey === 'verification'
++      ? buildVerificationExecutionCommands(task)
++      : [buildPipelineStepExecutionCommand(resolveProjectPath(session.flowKey), task.command.trim())];
++    const runParameterRows = execution.parameters ? [execution.parameters] : [];
++    console.group(`[DFT IDE] Pipeline Task: ${session.flowLabel} / ${session.moduleKey} / ${task.name} / ${execution.markerTaskId}`);
++    console.log('commands:', generatedCommands);
+     console.log('groups:', runParameterRows.map((row) => row.groupNames ?? []));
+     console.log('tcs:', runParameterRows.map((row) => row.tcNames ?? []));
+     console.log('subattrs:', runParameterRows.map((row) => row.subattrNames ?? []));
+@@ -891,9 +1043,11 @@ export class PipelineRuntimeService {
+     console.log('parameter rows:', runParameterRows);
+     console.groupEnd();
+     this.patchTask(key, task.id, (current) => ({
+-      logs: [...current.logs, `[${nowText()}] ${session.logPrefix} 执行命令：${generatedCommand}`],
++      logs: [...current.logs, ...generatedCommands.map((command) => `[${nowText()}] ${session.logPrefix} 执行命令：${command}`)],
+     }));
+-    this.appendLog(key, session.logPrefix, `${task.name} 执行命令：${generatedCommand}`);
++    generatedCommands.forEach((command) => {
++      this.appendLog(key, session.logPrefix, `${task.name} 执行命令：${command}`);
++    });
+     void Promise.resolve(
+       this.options.openTerminal(session.terminalTitle, commands, session.cwd, session.shellPath),
+     ).catch((error) => {
+@@ -922,8 +1076,10 @@ export class PipelineRuntimeService {
+         continue;
+       }
+       session.seenStarts.add(taskId);
+-      this.patchTask(key, taskId, (task) => ({
+-        status: task.status === 'success' ? task.status : 'running',
++      const execution = session.executionPlan.find((item) => item.markerTaskId === taskId);
++      const runtimeTaskId = execution?.task.id ?? taskId;
++      this.patchTask(key, runtimeTaskId, (task) => ({
++        status: task.status === 'success' || task.status === 'failed' ? task.status : 'running',
+         startedAt: task.startedAt ?? nowText(),
+       }));
+     }
+@@ -956,14 +1112,18 @@ export class PipelineRuntimeService {
+       return;
+     }
+ 
+-    const task = session.tasks.find((item) => item.id === taskId);
++    const execution = session.executionPlan.find((item) => item.markerTaskId === taskId);
++    const task = execution?.task ?? session.tasks.find((item) => item.id === taskId);
++    const runtimeTaskId = task?.id ?? taskId;
+     if (exitCode === 0) {
+-      this.patchTask(key, taskId, (current) => ({
+-        status: current.status === 'stopped' ? current.status : 'success',
+-        finishedAt: nowText(),
+-        logs: [...current.logs, `[${nowText()}] ${session.logPrefix} ${current.name} 执行完成。`],
++      this.patchTask(key, runtimeTaskId, (current) => ({
++        status: current.status === 'stopped' || current.status === 'failed'
++          ? current.status
++          : execution?.isLastTaskRun ? 'success' : 'running',
++        finishedAt: execution?.isLastTaskRun || current.status === 'failed' ? nowText() : undefined,
++        logs: [...current.logs, `[${nowText()}] ${session.logPrefix} ${current.name} 当前参数组合执行完成。`],
+       }));
+-      this.appendLog(key, session.logPrefix, `${task?.name ?? taskId} 执行成功。`);
++      this.appendLog(key, session.logPrefix, `${task?.name ?? runtimeTaskId} 当前参数组合执行成功。`);
+       this.startNextSessionTask(key);
+       return;
+     }
+@@ -973,7 +1133,22 @@ export class PipelineRuntimeService {
+       return;
+     }
+ 
+-    this.finishRuntimeWithFailure(key, session.logPrefix, taskId, exitCode);
++    if (execution?.continueOnFailure) {
++      this.patchTask(key, runtimeTaskId, (current) => ({
++        status: 'failed',
++        finishedAt: execution.isLastTaskRun ? nowText() : undefined,
++        logs: [...current.logs, `[${nowText()}] ${session.logPrefix} 当前参数组合执行失败，退出码 ${exitCode}；继续执行后续任务。`],
++      }));
++      this.appendLog(
++        key,
++        session.logPrefix,
++        `${task?.name ?? runtimeTaskId} 当前参数组合执行失败，退出码 ${exitCode}；该 Step 判定失败，流水线继续推进。`,
++      );
++      this.startNextSessionTask(key);
++      return;
++    }
++
++    this.finishRuntimeWithFailure(key, session.logPrefix, runtimeTaskId, exitCode);
+   }
+ 
+   private finishRuntimeWithFailure(
+@@ -1018,12 +1193,18 @@ export class PipelineRuntimeService {
+   private completeRuntime(key: string, logPrefix: string): void {
+     clearRuntimeTimers(key);
+     this.disposeExecutionSession(key);
+-    this.updateRuntime(key, (runtime) => ({
+-      ...runtime,
+-      runState: 'completed',
+-      finishedAt: nowStamp(),
+-      logs: [...runtime.logs, `[${nowText()}] ${logPrefix} 流水线执行成功。`],
+-    }));
++    this.updateRuntime(key, (runtime) => {
++      const hasFailedTask = runtime.tasks.some((task) => task.status === 'failed');
++      return {
++        ...runtime,
++        runState: hasFailedTask ? 'failed' : 'completed',
++        finishedAt: nowStamp(),
++        logs: [
++          ...runtime.logs,
++          `[${nowText()}] ${logPrefix} ${hasFailedTask ? '流水线已执行完毕，但存在失败 Step。' : '流水线执行成功。'}`,
++        ],
++      };
++    });
+   }
+ 
+   private markRuntimeStopped(key: string, logPrefix: string, reason: string, sendInterrupt: boolean): void {
+diff --git a/src/webview/components/design/Step2_ToolConfig.tsx b/src/webview/components/design/Step2_ToolConfig.tsx
+index e5baaee..0709b0b 100644
+--- a/src/webview/components/design/Step2_ToolConfig.tsx
++++ b/src/webview/components/design/Step2_ToolConfig.tsx
+@@ -47,7 +47,7 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, onModuleS
+   const selectedQueue = Form.useWatch('clusterQueue', taskForm);
+ 
+   const repo = category?.toLowerCase() === 'sailor' ? 'sailor' : 'hibist';
+-  const flowLabel = repo === 'sailor' ? 'Sailor' : 'DFTM';
++  const flowLabel = repo === 'sailor' ? 'Sailor' : 'Hibist';
+ 
+   // ── 配置持久化 Hook ─────────────────────────────────
+   // 注意：Step2 与 Step1 同属 design flow，但字段不同，合并到同一个文件中
+diff --git a/src/webview/components/shared/PipelineExecutionOverview.tsx b/src/webview/components/shared/PipelineExecutionOverview.tsx
+index 0d4ba22..458bfab 100644
+--- a/src/webview/components/shared/PipelineExecutionOverview.tsx
++++ b/src/webview/components/shared/PipelineExecutionOverview.tsx
+@@ -314,7 +314,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+   const [peakMetrics, setPeakMetrics] = useState<Record<string, { maxCpu: number; maxMem: number }>>({});
+   const taskDetailRefs = useRef<Record<string, HTMLDivElement | null>>({});
+ 
+-  const getFlowLabel = useCallback((moduleKey: string) => `${flowLabel} / ${moduleKey}`, [flowLabel]);
++  const getFlowLabel = useCallback((_moduleKey: string) => flowLabel, [flowLabel]);
+ 
+   useEffect(() => {
+     selectedModuleKeys.forEach((moduleKey) => {
+@@ -432,7 +432,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+     const task = run.tasks.find((t) => t.id === taskId);
+     if (task && task.status !== 'pending' && task.status !== 'skipped') {
+       void openExecutionTerminal({
+-        title: getStepTerminalTitle(run.flowLabel, run.moduleKey, task),
++        title: getStepTerminalTitle(flowLabel, run.moduleKey, task),
+         cwd: moduleWorkDirs?.[run.moduleKey],
+       });
+     }
+@@ -440,7 +440,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+     window.requestAnimationFrame(() => {
+       taskDetailRefs.current[taskId]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+     });
+-  }, [activateModule, flowKey, moduleWorkDirs, selectRuntimeTask]);
++  }, [activateModule, flowKey, flowLabel, moduleWorkDirs, selectRuntimeTask]);
+ 
+   const toggleExpanded = useCallback((taskId: string) => {
+     setExpandedTaskIds((prev) => {
+diff --git a/src/webview/components/verification/Step2_ToolConfig.tsx b/src/webview/components/verification/Step2_ToolConfig.tsx
+index 748f5f0..286c91b 100644
+--- a/src/webview/components/verification/Step2_ToolConfig.tsx
++++ b/src/webview/components/verification/Step2_ToolConfig.tsx
+@@ -49,12 +49,12 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, onModuleS
+   const selectedQueue = Form.useWatch('clusterQueue', taskForm);
+ 
+   const repo = 'verification';
+-  const flowLabel = 'DFTM';
+ 
+   // ── 配置持久化 Hook ─────────────────────────────────
+   // 注意：Step2 与 Step1 同属 design flow，但字段不同，合并到同一个文件中
+   // 这里使用独立 key 区分：step2_task / step2_design
+   const { stage } = useVerificationStageConfig();
++  const flowLabel = stage ? `Lander / ${stage}` : 'Lander';
+   const { savedData, loading, saving, hasUnsaved, handleSave } =
+     useFlowConfig(`verification/${stage ?? '__unselected__'}/${moduleKey ?? '__unselected__'}/config`);
+ 
+diff --git a/src/webview/components/verification/mode/ModePanel/hooks/useModeSelection.ts b/src/webview/components/verification/mode/ModePanel/hooks/useModeSelection.ts
+index b82636f..32293a8 100644
+--- a/src/webview/components/verification/mode/ModePanel/hooks/useModeSelection.ts
++++ b/src/webview/components/verification/mode/ModePanel/hooks/useModeSelection.ts
+@@ -69,9 +69,7 @@ export function useModeSelection({
+    */
+   const activeItems = useMemo(() => {
+     if (activeTab !== 'mode') {
+-      const checkedSet = new Set(activeCheckedNames)
+-
+-      return resources[activeTab].filter((item) => checkedSet.has(item.name))
++      return resources[activeTab]
+     }
+ 
+     const focusSet = new Set(resources.focusModes)
+diff --git a/src/webview/components/verification/mode/ModePanel/index.tsx b/src/webview/components/verification/mode/ModePanel/index.tsx
+index 92dd8d9..77c9c0e 100644
+--- a/src/webview/components/verification/mode/ModePanel/index.tsx
++++ b/src/webview/components/verification/mode/ModePanel/index.tsx
+@@ -23,6 +23,7 @@ import { useModeCrud } from './hooks/useModeCrud'
+ import { useModeRun } from './hooks/useModeRun'
+ 
+ import { createCopyName, parseImportedModeCfg, sameName } from './utils'
++import { readSavedParams, updateSavedParamReferences } from '../savedParamUtils'
+ 
+ import {
+   duplicateVerificationModeCfg,
+@@ -43,7 +44,12 @@ export default function ModePanel({
+   onStop,
+ }: ModePanelProps) {
+   const accentColor = accent ?? 'var(--vscode-focusBorder, #1677ff)'
+-  const { stage } = useVerificationStageConfig()
++  const {
++    stage,
++    stageConfig,
++    loading: stageConfigLoading,
++    handleSave,
++  } = useVerificationStageConfig()
+ 
+   const [activeTab, setActiveTab] = useState<ModePanelTab>(initialTab)
+ 
+@@ -305,13 +311,14 @@ export default function ModePanel({
+       return
+     }
+ 
++    const nextName = value.trim()
++    if (!nextName) {
++      message.warning('请输入名称')
++      return
++    }
++
+     if (activeTab === 'mode') {
+       if (!stage) return
+-      const nextName = value.trim()
+-      if (!nextName) {
+-        message.warning('请输入名称')
+-        return
+-      }
+       if (resources.mode.some((item) => !sameName(item.name, renameItem.name) && sameName(item.name, nextName))) {
+         message.error(`mode 名称 ${nextName} 已存在`)
+         return
+@@ -322,8 +329,26 @@ export default function ModePanel({
+         message.error(error instanceof Error ? error.message : 'Mode 配置文件重命名失败')
+         return
+       }
++    } else {
++      if (resources[activeTab].some((item) => item.name !== renameItem.name && item.name === nextName)) {
++        message.error(`${activeTab} 名称 "${nextName}" 已存在`)
++        return
++      }
++
++      const result = updateSavedParamReferences(
++        readSavedParams(stageConfig?.params),
++        activeTab,
++        [renameItem.name],
++        nextName,
++      )
++      if (result.affectedAliases.length > 0) {
++        if (!await handleSave({ params: result.params })) return
++        message.warning(
++          `重命名影响了 ${result.affectedAliases.length} 个保存场景，已自动更新参数`,
++        )
++      }
+     }
+-    const success = crud.renameItem(renameItem, activeTab, value)
++    const success = crud.renameItem(renameItem, activeTab, nextName)
+ 
+     if (!success) {
+       return
+@@ -331,7 +356,6 @@ export default function ModePanel({
+ 
+     closeRename()
+   }
+-
+   const handleFocusChange = (names: string[]) => {
+     const validNames = new Set(allItems.map((item) => item.name))
+ 
+@@ -409,14 +433,27 @@ export default function ModePanel({
+     openRename(selectedItem)
+   }
+ 
+-  const handleDelete = () => {
++  const handleDelete = async () => {
+     if (!batchCheckedNames.length) {
+       return
+     }
+ 
++    if (activeTab !== 'mode') {
++      const result = updateSavedParamReferences(
++        readSavedParams(stageConfig?.params),
++        activeTab,
++        batchCheckedNames,
++      )
++      if (result.affectedAliases.length > 0) {
++        if (!await handleSave({ params: result.params })) return
++        message.warning(
++          `删除影响了 ${result.affectedAliases.length} 个保存场景，已自动移除相关参数`,
++        )
++      }
++    }
++
+     crud.deleteItems(activeTab, batchCheckedNames)
+   }
+-
+   const handleBatchCheckedChange = (name: string, checked: boolean) => {
+     setBatchCheckedNamesByTab((current) => {
+       const currentNames = current[activeTab]
+@@ -618,6 +655,9 @@ export default function ModePanel({
+         tcs={resources.tc}
+         subattrs={resources.subattr}
+         getLanderModePipelines={getLanderModePipelines}
++        stageConfig={stageConfig}
++        stageConfigLoading={stageConfigLoading}
++        handleSave={handleSave}
+         onCancel={run.closeRun}
+         onRun={run.handleRun}
+       />
+diff --git a/src/webview/components/verification/mode/ParamTable.tsx b/src/webview/components/verification/mode/ParamTable.tsx
+index 9ea4593..c0a8ca2 100644
+--- a/src/webview/components/verification/mode/ParamTable.tsx
++++ b/src/webview/components/verification/mode/ParamTable.tsx
+@@ -67,14 +67,13 @@ export default function ParamTable({
+   }
+ 
+   const addRow = () => {
++    if (rows.length >= 1) {
++      return
++    }
+     onChange([...rows, createRunParamRow()])
+   }
+ 
+   const deleteRow = (rowId: string) => {
+-    if (rows.length <= 1) {
+-      return
+-    }
+-
+     onChange(rows.filter((row) => row.id !== rowId))
+   }
+ 
+@@ -217,9 +216,11 @@ export default function ParamTable({
+           columns={columns}
+         />
+ 
+-        <Button block icon={<PlusOutlined />} onClick={addRow}>
+-          添加参数行
+-        </Button>
++        {rows.length === 0 && (
++          <Button block icon={<PlusOutlined />} onClick={addRow}>
++            添加参数
++          </Button>
++        )}
+       </Space>
+ 
+       {selector && (
+diff --git a/src/webview/components/verification/mode/RunModal.tsx b/src/webview/components/verification/mode/RunModal.tsx
+index ade94b4..4b58989 100644
+--- a/src/webview/components/verification/mode/RunModal.tsx
++++ b/src/webview/components/verification/mode/RunModal.tsx
+@@ -13,7 +13,7 @@ import type {
+ 
+ import StepSelector, { VERIFICATION_STEP_PRESETS } from './StepSelector'
+ import ParamTable from './ParamTable'
+-import { useVerificationStageConfig } from './ModePanel/hooks/useVerificationStageConfig'
++import { readSavedParams, type SavedParams } from './savedParamUtils'
+ 
+ interface RunModalProps {
+   open: boolean
+@@ -23,6 +23,10 @@ interface RunModalProps {
+   tcs: BaseConfigItem[]
+   subattrs: BaseConfigItem[]
+ 
++  stageConfig: Record<string, unknown> | null
++  stageConfigLoading: boolean
++  handleSave: (data: Record<string, unknown>) => Promise<boolean>
++
+   onCancel: () => void
+   onRun: (payload: ModeRunPayload) => void
+ 
+@@ -53,17 +57,7 @@ const cloneRows = (rows: RunParamRow[]): RunParamRow[] => {
+   }))
+ }
+ 
+-type SavedParams = Record<string, RunParamRow[]>
+-
+-const readSavedParams = (value: unknown): SavedParams => {
+-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+-    return {}
+-  }
+-
+-  return Object.fromEntries(
+-    Object.entries(value).filter(([, rows]) => Array.isArray(rows)),
+-  ) as SavedParams
+-}
++const cloneRow = (row: RunParamRow): RunParamRow => cloneRows([row])[0]
+ 
+ export default function RunModal({
+   open,
+@@ -71,6 +65,9 @@ export default function RunModal({
+   groups,
+   tcs,
+   subattrs,
++  stageConfig,
++  stageConfigLoading,
++  handleSave,
+   onCancel,
+   onRun,
+   getLanderModePipelines,
+@@ -86,8 +83,6 @@ export default function RunModal({
+   const [selectedAlias, setSelectedAlias] = useState<string>()
+   const [savedParams, setSavedParams] = useState<SavedParams>({})
+   const [savingParams, setSavingParams] = useState(false)
+-  const { stageConfig, loading: stageConfigLoading, handleSave } =
+-    useVerificationStageConfig()
+ 
+   useEffect(() => {
+     if (open && mode) {
+@@ -171,15 +166,15 @@ export default function RunModal({
+   }, [selectedSteps])
+ 
+   const loadSavedParams = (alias: string) => {
+-    const savedRows = savedParams[alias]
++    const savedRow = savedParams[alias]
+ 
+-    if (!savedRows) {
++    if (!savedRow) {
+       return
+     }
+ 
+     setSelectedAlias(alias)
+     setScenarioAlias(alias)
+-    setRows(cloneRows(savedRows))
++    setRows([cloneRow(savedRow)])
+   }
+ 
+   const saveCurrentParams = async () => {
+@@ -192,7 +187,7 @@ export default function RunModal({
+ 
+     const nextParams = {
+       ...savedParams,
+-      [alias]: cloneRows(rows),
++      [alias]: cloneRow(rows[0]),
+     }
+ 
+     setSavingParams(true)
+@@ -339,7 +334,7 @@ export default function RunModal({
+               groups={groups}
+               tcs={tcs}
+               subattrs={subattrs}
+-              onChange={setRows}
++              onChange={(nextRows) => setRows(nextRows.slice(0, 1))}
+             />
+           </div>
+ 
+diff --git a/src/webview/components/verification/mode/savedParamUtils.ts b/src/webview/components/verification/mode/savedParamUtils.ts
+new file mode 100644
+index 0000000..29d49d8
+--- /dev/null
++++ b/src/webview/components/verification/mode/savedParamUtils.ts
+@@ -0,0 +1,44 @@
++import type { ResourceStore, RunParamRow, SelectorField } from './types'
++
++export type SavedParams = Record<string, RunParamRow>
++
++const RESOURCE_FIELD: Record<Exclude<keyof ResourceStore, 'mode' | 'focusModes'>, SelectorField> = {
++  group: 'groupNames',
++  tc: 'tcNames',
++  subattr: 'subattrNames',
++}
++
++export const readSavedParams = (value: unknown): SavedParams => {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
++
++  return Object.fromEntries(Object.entries(value).flatMap(([alias, savedValue]) => {
++    const row = Array.isArray(savedValue) ? savedValue[0] : savedValue
++    return row && typeof row === 'object' && !Array.isArray(row)
++      ? [[alias, row as RunParamRow]]
++      : []
++  }))
++}
++
++export function updateSavedParamReferences(
++  params: SavedParams,
++  resource: keyof typeof RESOURCE_FIELD,
++  names: string[],
++  replacement?: string,
++): { params: SavedParams; affectedAliases: string[] } {
++  const field = RESOURCE_FIELD[resource]
++  const targets = new Set(names)
++  const affectedAliases: string[] = []
++
++  const next = Object.fromEntries(Object.entries(params).map(([alias, row]) => {
++    const current = Array.isArray(row[field]) ? row[field] : []
++    if (!current.some((name) => targets.has(name))) return [alias, row]
++
++    affectedAliases.push(alias)
++    const values = current.flatMap((name) => (
++      targets.has(name) ? (replacement ? [replacement] : []) : [name]
++    ))
++    return [alias, { ...row, [field]: Array.from(new Set(values)) }]
++  }))
++
++  return { params: next, affectedAliases }
++}
+diff --git a/src/webview/flows/DesignFlow.tsx b/src/webview/flows/DesignFlow.tsx
+index eba2cd2..566e9eb 100644
+--- a/src/webview/flows/DesignFlow.tsx
++++ b/src/webview/flows/DesignFlow.tsx
+@@ -20,6 +20,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
+   const [moduleWorkDirs, setModuleWorkDirs] = useState<Record<string, string>>({});
+   const startRuntime = usePipelineRuntimeStore((state) => state.startRuntime);
+   const stopRuntime = usePipelineRuntimeStore((state) => state.stopRuntime);
++  const runtimeLabel = repo === 'sailor' ? 'Sailor' : 'Hibist';
+   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
+   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
+ 
+@@ -29,7 +30,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
+       startRuntime(
+         repo,
+         moduleKey,
+-        `${repo === 'sailor' ? 'Sailor' : 'DFTM'} / ${moduleKey}`,
++        runtimeLabel,
+         taskIds,
+         moduleWorkDirs[moduleKey],
+       );
+@@ -44,7 +45,7 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
+       stopRuntime(
+         repo,
+         moduleKey,
+-        `${repo === 'sailor' ? 'Sailor' : 'DFTM'} / ${moduleKey}`,
++        runtimeLabel,
+       );
+     });
+   };
+diff --git a/src/webview/flows/VerificationFlow.tsx b/src/webview/flows/VerificationFlow.tsx
+index eae3c51..b7a2462 100644
+--- a/src/webview/flows/VerificationFlow.tsx
++++ b/src/webview/flows/VerificationFlow.tsx
+@@ -13,6 +13,7 @@ import type {
+   ModePanelTab,
+   ModeRunPayload,
+ } from '../components/verification/mode/types'
++import { useVerificationStageConfig } from '../components/verification/mode/ModePanel/hooks/useVerificationStageConfig'
+ import usePipelineRuntimeStore from '../store/pipelineRuntimeStore'
+ 
+ const VerificationFlow: React.FC = () => {
+@@ -25,6 +26,8 @@ const VerificationFlow: React.FC = () => {
+ 
+   const startRuntime = usePipelineRuntimeStore((state) => state.startRuntime)
+   const stopRuntime = usePipelineRuntimeStore((state) => state.stopRuntime)
++  const { stage } = useVerificationStageConfig()
++  const runtimeLabel = stage ? `Lander / ${stage}` : 'Lander'
+ 
+   const nextStep = () => {
+     setCurrentStep((prev) => Math.min(prev + 1, 3))
+@@ -56,7 +59,7 @@ const VerificationFlow: React.FC = () => {
+     startRuntime(
+       'verification',
+       payload.mode.name,
+-      `DFTM / ${payload.mode.name}`,
++      runtimeLabel,
+       payload.stepIds,
+       moduleWorkDirs[payload.mode.name],
+       payload.steps,
+@@ -66,7 +69,7 @@ const VerificationFlow: React.FC = () => {
+ 
+   const handleStop = (keys: string[]) => {
+     keys.filter(Boolean).forEach((moduleKey) => {
+-      stopRuntime('verification', moduleKey, `DFTM / ${moduleKey}`)
++      stopRuntime('verification', moduleKey, runtimeLabel)
+     })
+   }
+ 
