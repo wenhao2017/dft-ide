@@ -310,12 +310,14 @@ export async function getLocalConfigInfo(): Promise<{
   defaultPath: string | null;
   isDefault: boolean;
   lastSelectedProject?: string;
+  filterStarProject?: boolean;
 }> {
   const configuredPath = vscode.workspace.getConfiguration('dftIde').get<string>('localProjectsRoot', '').trim();
   const projectRoot = resolveProjectRoot();
   const defaultPath = projectRoot ? path.join(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR) : null;
   const effectivePath = resolveLocalConfigDirectory() ?? null;
   const lastSelectedProject = vscode.workspace.getConfiguration('dftIde').get<string>('lastSelectedProject', '').trim();
+  const filterStarProject = vscode.workspace.getConfiguration('dftIde').get<boolean>('filterStarProject', false);
 
   if (effectivePath) {
     await ensureLocalConfigDirectory(effectivePath);
@@ -330,6 +332,7 @@ export async function getLocalConfigInfo(): Promise<{
     defaultPath,
     isDefault: !configuredPath,
     lastSelectedProject,
+    filterStarProject,
   };
 }
 
@@ -356,12 +359,6 @@ export async function initProjectWorkspace(project: DftProject): Promise<string>
   if (!projectLocalRoot) {
     throw new Error('Please set the project local root before entering a project.');
   }
-
-  await vscode.workspace.getConfiguration('dftIde').update(
-    'lastSelectedProject',
-    project.id,
-    vscode.ConfigurationTarget.Global
-  );
 
   const projectName = project.name;
   const projectDirName = toSafeProjectDirectoryName(project.name);
@@ -416,6 +413,12 @@ export async function initProjectWorkspace(project: DftProject): Promise<string>
     }
   };
   await writeFileIfMissing(workspaceFile, JSON.stringify(workspaceContent, null, 2));
+
+  await vscode.workspace.getConfiguration('dftIde').update(
+    'lastSelectedProject',
+    project.id,
+    vscode.ConfigurationTarget.Global
+  );
 
   return projectPath;
 }

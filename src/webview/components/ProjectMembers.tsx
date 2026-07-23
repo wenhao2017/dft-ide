@@ -134,8 +134,8 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
   }, [membersError]);
 
   useEffect(() => {
-    setLoading(membersFetching && !membersData);
-  }, [membersData, membersFetching]);
+    setLoading(membersFetching);
+  }, [membersFetching]);
 
   const openAddModal = () => {
     loadUsers();

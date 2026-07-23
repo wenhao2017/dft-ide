@@ -296,6 +296,11 @@
           "type": "number",
           "default": 5,
           "description": "max history log files."
+        },
+        "dftIde.filterStarProject": {
+          "type": "boolean",
+          "default": false,
+          "description": "only show my star projects."
         }
       }
     }

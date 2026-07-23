@@ -83,6 +83,22 @@ export async function getCurrentUser(): Promise<string> {
 }
 
 /**
+ * 获取vscode配置
+ */
+export async function getConfiguration<T>(section: string, defaultValue: T): Promise<T> {
+  const res = await ipcRequest('getConfiguration', { section, defaultValue })
+  return res.value as T;
+}
+
+/**
+ * 更新vscode配置
+ */
+export async function updateConfiguration<T>(section: string, value: T): Promise<boolean> {
+  const res = await ipcRequest('updateConfiguration', { section, value })
+  return res.result as boolean;
+}
+
+/**
  * 获取当前环境的 Git 信息 (分支、修改状态等)
  */
 export interface DonauAccount {
@@ -608,6 +624,7 @@ export interface LocalConfigInfo {
   isDefault: boolean
   error?: string
   lastSelectedProject?: string
+  filterStarProject?: boolean
 }
 
 export interface WorkspaceProjectInfo {
@@ -626,6 +643,7 @@ const localConfigInfoSchema = z.object({
   isDefault: z.boolean().default(true),
   error: z.string().optional(),
   lastSelectedProject: z.string().optional(),
+  filterStarProject: z.boolean().default(false),
 })
 
 const workspaceProjectInfoSchema = z.object({

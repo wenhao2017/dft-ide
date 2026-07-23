@@ -1,22 +1,7 @@
 export type ProjectRepoKey = 'data' | 'hibist' | 'sailor' | 'verification';
 
-export type ProjectDomain = 1 | 2 | 3;
-
-export const PROJECT_DOMAIN_OPTIONS: Array<{ value: ProjectDomain; label: string }> = [
-  { value: 1, label: '联接' },
-  { value: 2, label: '无线终端' },
-  { value: 3, label: '图灵' },
-];
-
-export function normalizeProjectDomain(value: unknown): ProjectDomain | undefined {
-  const numericValue = Number(value);
-  return numericValue === 1 || numericValue === 2 || numericValue === 3
-    ? numericValue
-    : undefined;
-}
-
 export function getProjectDomainLabel(domain?: ProjectDomain): string {
-  return PROJECT_DOMAIN_OPTIONS.find((option) => option.value === domain)?.label ?? '未配置';
+  return domain?.name ?? '未配置';
 }
 
 export interface ProjectRepoStatus {
@@ -42,6 +27,7 @@ export interface DftProject {
   description: string;
   repos: ProjectRepoStatus[];
   local_root?: string;
+  is_star?: boolean;
 }
 
 export interface ProjectDashboard {
@@ -58,7 +44,7 @@ const mockProjects: DftProject[] = [
     owner: 'DFT Platform',
     role: 'DFTM',
     canManageMembers: true,
-    domain: 1,
+    domain: { key: '1', name: '联接' },
     updatedAt: '2026-04-26 09:30',
     stage: '85',
     description: '主芯片 DFT 配置、设计流程与验证数据。',
@@ -75,7 +61,7 @@ const mockProjects: DftProject[] = [
     rootPath: 'D:/Downloads',
     owner: 'Memory Team',
     role: 'Member',
-    domain: 2,
+    domain: { key: '2', name: '无线终端' },
     updatedAt: '2026-04-24 18:10',
     stage: '95',
     description: 'MBIST 环境配置、仿真用例和报告归档。',
@@ -92,7 +78,7 @@ const mockProjects: DftProject[] = [
     rootPath: 'D:/dft/projects',
     owner: 'Verification Team',
     role: 'Member',
-    domain: 3,
+    domain: { key: '3', name: '图灵' },
     updatedAt: '2026-04-20 14:45',
     stage: '75',
     description: '回归任务配置、集群资源和日志入口。',
@@ -147,6 +133,18 @@ const mockProjectMembers: Record<string, ProjectMember[]> = {
   ],
 };
 
+export interface ProjectDomain {
+  key: string;
+  name: string;
+  updatedAt?: string;
+}
+
+const mockDomains: ProjectDomain[] = [
+  { key: 'Kirin', name: '麒麟', updatedAt: '2026-07-20 15:30' },
+  { key: 'Network', name: '网络', updatedAt: '2026-07-20 15:30' },
+  { key: 'Turing', name: '图灵', updatedAt: '2026-07-20 15:30' },
+];
+
 export function canManageProjectMembers(project: DftProject): boolean {
   return project.id !== '0' && (project.canManageMembers ?? project.role?.toUpperCase() === 'DFTM');
 }
@@ -179,7 +177,7 @@ export async function createProject(currentUser: string, project: {
     return false;
   }
 
-  const response = await fetch(`${apiBase}/api/dft-ide/project/create`, {
+  const response = await fetch(`${apiBase}/api/dft-ide/project/create/`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -202,7 +200,7 @@ export async function initProject(currentUser: string, project: DftProject): Pro
     return false;
   }
 
-  const response = await fetch(`${apiBase}/api/dft-ide/project/init`, {
+  const response = await fetch(`${apiBase}/api/dft-ide/project/init/`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -253,9 +251,10 @@ export async function fetchProjectDashboard(currentUser:string): Promise<Project
       name: project.name,
       role: project.role,
       rootPath: project.local_root,
+      is_star: project.is_star,
       owner: project.owner || '',
       canManageMembers: canManageProjectMembers(project),
-      domain: normalizeProjectDomain(project.domain ?? project.domainCfg ?? project.domain_cfg),
+      domain: project.domain,
       updatedAt: project.updatedAt || '',
       stage: project.stage || '',
       description: project.description || '',
@@ -474,4 +473,86 @@ export async function updateProjectRootPath(projectId: string, employeeId: strin
   await responseErrorHandler(response, 'Update project rootPath failed');
 
   return response.json() as Promise<{ success: boolean}>;
+}
+
+// -------------------------------------------- 项目收藏 --------------------------------------------
+export async function updateProjectStar(projectId: string, ctmpId: number | undefined, employeeId: string, isStar: boolean): Promise<{ success: boolean }> {
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    console.log('[Mock] Staring project:', projectId, ctmpId, isStar);
+    return { success: true };
+  }
+
+  const response = await fetch(`${apiBase}/api/dft-ide/project/star/`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      project_id: projectId,
+      ctmp_id: ctmpId,
+      user_id: employeeId,
+      is_star: isStar
+    }),
+  });
+  await responseErrorHandler(response, 'Star project failed');
+
+  return response.json() as Promise<{ success: boolean }>;
+}
+
+// -------------------------------------------- 领域管理 --------------------------------------------
+export async function fetchDomains(): Promise<ProjectDomain[]> {
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    return mockDomains;
+  }
+
+  const response = await fetch(`${apiBase}/api/dft-ide/domains/`);
+  await responseErrorHandler(response, 'Fetch domains failed');
+
+  return response.json() as Promise<ProjectDomain[]>;
+}
+
+export async function addDomain(domain: ProjectDomain): Promise<ProjectDomain> {
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    return domain;
+  }
+
+  const response = await fetch(`${apiBase}/api/dft-ide/domains/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(domain),
+  });
+  await responseErrorHandler(response, 'Add domain failed');
+
+  return response.json() as Promise<ProjectDomain>;
+}
+
+export async function updateDomain(key: string, domain: ProjectDomain): Promise<ProjectDomain> {
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    return domain;
+  }
+
+  const response = await fetch(`${apiBase}/api/dft-ide/domains/${key}/`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(domain),
+  });
+  await responseErrorHandler(response, 'Update domain failed');
+
+  return response.json() as Promise<ProjectDomain>;
+}
+
+export async function deleteDomain(key: string): Promise<{ success: boolean }> {
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    return { success: true };
+  }
+
+  const response = await fetch(`${apiBase}/api/dft-ide/domains/${key}/`, {
+    method: 'DELETE',
+  });
+  await responseErrorHandler(response, 'Delete domain failed');
+
+  return response.json() as Promise<{ success: boolean }>;
 }

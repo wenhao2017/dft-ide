@@ -20,6 +20,7 @@ import VerificationFlow from './flows/VerificationFlow';
 import TaskStepper from './components/wizard/TaskStepper';
 import Welcome from './components/Welcome';
 import ProjectMembers from './components/ProjectMembers';
+import Domains from './components/Domains';
 import useWizardStore from './store/wizardStore';
 import vscode from './utils/vscode';
 import { toggleZenMode as ipcToggleZenMode } from './utils/ipc';
@@ -64,6 +65,11 @@ const flowMeta: Record<string, { title: string; subtitle: string; accent: string
   MemberManagement: {
     title: '项目成员管理',
     subtitle: '维护项目成员工号、角色和 CTMP 标识。',
+    accent: '#0ea5e9',
+  },
+  DomainManagement: {
+    title: '项目领域配置',
+    subtitle: '维护领域编码和名称。',
     accent: '#0ea5e9',
   },
 };
@@ -178,6 +184,11 @@ const App: React.FC = () => {
     reset();
   }, [setFlowContext, reset]);
 
+  const navigateToDomains = useCallback(() => {
+    setFlowContext({ category: 'DomainManagement' });
+    reset();
+  }, [setFlowContext, reset]);
+
   // 优化5：专注模式切换
   const handleZenToggle = useCallback(async () => {
     const nextState = !zenMode;
@@ -205,6 +216,8 @@ const App: React.FC = () => {
         ) : (
           <TaskStepper />
         );
+      case 'DomainManagement':
+        return <Domains />;
       default:
         return <TaskStepper />;
     }
@@ -525,7 +538,7 @@ const App: React.FC = () => {
           }}
         >
           {!flowContext ? (
-            <Welcome isDark={isDark} onNavigate={navigateToFlow} onManageMembers={navigateToMembers} />
+            <Welcome isDark={isDark} onNavigate={navigateToFlow} onManageMembers={navigateToMembers} onManageDomains={navigateToDomains} />
           ) : (
             <div
               style={{

@@ -685,6 +685,52 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
+      case 'getConfiguration': {
+        const requestId: string = msg.requestId;
+        try {
+          const config = vscode.workspace.getConfiguration('dftIde');
+          const value = config.get(msg.section, msg.defaultValue);
+          currentPanel?.webview.postMessage({
+            command: 'getConfigurationResponse',
+            requestId,
+            value: value
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'getConfigurationResponse',
+            requestId,
+            value: msg.defaultValue,
+            error: String(err)
+          });
+        }
+        return;
+      }
+
+      case 'updateConfiguration': {
+        const requestId: string = msg.requestId;
+        try {
+          const config = vscode.workspace.getConfiguration('dftIde');
+          await config.update(
+            msg.section,
+            msg.value,
+            vscode.ConfigurationTarget.Global
+          );
+          currentPanel?.webview.postMessage({
+            command: 'updateConfigurationResponse',
+            requestId,
+            result: true
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'updateConfigurationResponse',
+            requestId,
+            result: false,
+            error: String(err)
+          });
+        }
+        return;
+      }
+
       case 'getDonauResources': {
         const requestId: string = msg.requestId;
         try {

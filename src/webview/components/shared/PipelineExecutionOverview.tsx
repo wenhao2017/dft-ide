@@ -868,7 +868,18 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
               <div><span style={{ color: themeStyles.textSecondary }}>用时:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{getModuleRuntime(activeModuleData)}</span></div>
             </div>
 
-            <div style={{ display: 'grid', gap: 6, flex: 1, overflowY: 'auto', maxHeight: 430, paddingRight: 4 }}>
+            <div
+              style={{
+                display: 'grid',
+                gridAutoRows: 'max-content',
+                alignContent: 'start',
+                gap: 6,
+                flex: 1,
+                overflowY: 'auto',
+                maxHeight: 430,
+                paddingRight: 4,
+              }}
+            >
               {(activeHierarchy?.topLevelTasks ?? activeModuleData.tasks).map((task) => renderTaskDetail(task))}
             </div>
           </div>

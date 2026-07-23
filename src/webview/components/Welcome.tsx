@@ -11,7 +11,6 @@ import {
   CloudSyncOutlined,
   FolderAddOutlined,
   ExperimentOutlined,
-  FileProtectOutlined,
   FolderOpenOutlined,
   LineChartOutlined,
   RocketOutlined,
@@ -20,9 +19,13 @@ import {
   ThunderboltOutlined,
   RedoOutlined,
   GlobalOutlined,
+  StarOutlined,
+  StarFilled,
+  PartitionOutlined,
 } from '@ant-design/icons';
 import {
   getCurrentUser,
+  updateConfiguration,
   getLocalConfigInfo,
   getWorkspaceProjectInfo,
   openProjectWorkspace,
@@ -44,9 +47,10 @@ import {
   ProjectRepoStatus,
   updateProjectRootPath,
   getProjectDomainLabel,
-  PROJECT_DOMAIN_OPTIONS,
   ProjectDomain,
   updateProjectDomain,
+  updateProjectStar,
+  fetchDomains,
 } from '../services/projectService';
 
 const { Paragraph, Text, Title } = Typography;
@@ -55,6 +59,7 @@ interface Props {
   isDark?: boolean;
   onNavigate?: (category: string) => void;
   onManageMembers?: (project: DftProject) => void;
+  onManageDomains?: () => void;
 }
 
 const flows = [
@@ -178,7 +183,7 @@ type ProjectFormValue = {
   description: string;
 };
 
-const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }) => {
+const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, onManageDomains }) => {
   const {activeProject, setFlowContext, setActiveProject, setActiveProjectDomain, currentUser, setCurrentUser} = useWizardStore(
     useShallow((state) => ({
       activeProject: state.activeProject,
@@ -206,6 +211,8 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
   const [domainProject, setDomainProject] = useState<DftProject | null>(null);
   const [selectedDomain, setSelectedDomain] = useState<ProjectDomain | undefined>();
   const [domainSaving, setDomainSaving] = useState(false);
+  const [showStarProject, setShowStarProject] = useState(false);
+  const [domains, setDomains] = useState<ProjectDomain[]>([]);
 
   const cardBorder = 'var(--vscode-panel-border, rgba(127,127,127,0.18))';
   const panelBg = isDark
@@ -223,13 +230,26 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
 
   const filteredProjects = useMemo(() => {
     const keyword = projectKeyword.trim().toLowerCase();
-    if (!keyword) return projects;
-    return projects?.filter((project) =>
-      [project.name, project.id, project.owner, project.role].some((text) =>
-        text && typeof text === 'string' && text.toLowerCase().includes(keyword)
-      )
-    );
-  }, [projects, projectKeyword]);
+    let filtered = projects || [];
+
+    if (keyword) {
+      filtered = filtered.filter((project) =>
+        [project.name, project.id, project.owner, project.role].some((text) =>
+          text && typeof text === 'string' && text.toLowerCase().includes(keyword)
+        )
+      );
+    }
+
+    if (showStarProject) {
+      filtered = filtered.filter(project => project.is_star === true);
+    }
+
+    return filtered.sort((a, b) => {
+      if (a.is_star && !b.is_star) return -1;
+      if (!a.is_star && b.is_star) return 1;
+      return Number(b.id) - Number(a.id);
+    });
+  }, [projects, projectKeyword, showStarProject]);
 
   const fetchProjectData = useCallback(async () => {
     setLoadingProjects(true);
@@ -273,11 +293,12 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
       .then((info) => {
         if (disposed) return;
         setLocalRootInfo(info);
-        setProjectId(info.lastSelectedProject??'');
+        setProjectId(info.lastSelectedProject ?? '');
+        setShowStarProject(info.filterStarProject ?? false);
       })
       .catch((error) => {
         if (!disposed) {
-          message.warning(error instanceof Error ? error.message : '本地托管目录读取失败');
+          message.warning(error instanceof Error ? error.message : '本地配置读取失败');
         }
       });
 
@@ -366,6 +387,30 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
     }
   }, [currentUser]);
 
+  const setProjectStar = useCallback(async (project: DftProject, isStar: boolean) => {
+    try {
+      await updateProjectStar(project.id, project.ctmp_id, currentUser, isStar);
+      setProjects((prevProjects) => prevProjects?.map(item =>
+        (item.id === project.id && item.ctmp_id === project.ctmp_id) ? { ...item, is_star: isStar } : item
+      ));
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '收藏项目失败');
+    }
+  }, [currentUser]);
+
+  const handleSetShowStarProject = useCallback(async (showStar: boolean) => {
+    try {
+      setShowStarProject(showStar);
+      await updateConfiguration('filterStarProject', showStar);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '我的收藏状态保存失败');
+    }
+  }, [currentUser]);
+
+  const canManageDomains = () =>
+    // currentUser === 'a60096337';
+    true;
+
   const isProjectInitialized = (project: DftProject) =>
     project.repos.length > 0 && project.repos.every((repo) => repo.status === 'ready');
 
@@ -399,6 +444,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
       : '配置或修改项目领域';
 
   const openDomainModal = (project: DftProject) => {
+    loadDomains();
     setDomainProject(project);
     setSelectedDomain(project.domain);
   };
@@ -407,6 +453,15 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
     if (domainSaving) return;
     setDomainProject(null);
     setSelectedDomain(undefined);
+  };
+
+  const loadDomains = async () => {
+    try {
+      const data = await fetchDomains();
+      setDomains(data);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '领域列表加载失败');
+    }
   };
 
   const saveDomain = async () => {
@@ -652,6 +707,17 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
               >
                 创建自定义项目
               </Button>
+              {canManageDomains() && <Button
+                size="large"
+                icon={<PartitionOutlined />}
+                onClick={() => onManageDomains?.()}
+                style={{
+                  color: 'rgba(9, 110, 243, 1)',
+                  borderColor: 'rgba(9, 110, 243, 1)'
+                }}
+              >
+                项目领域配置
+              </Button>}
             </Space>
           </Space>
         </div>
@@ -702,11 +768,18 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
             required
             extra="领域属于项目级配置，保存后 Hibist、Sailor 及其他流程会读取同一个值。"
           >
-            <Select<ProjectDomain>
-              value={selectedDomain}
-              onChange={setSelectedDomain}
+            <Select
+              value={selectedDomain?.key}
+              onChange={(selectedKey) => {
+                const selectedDomainObj = domains.find(d => d.key === selectedKey);
+                setSelectedDomain(selectedDomainObj);
+              }}
               placeholder="请选择领域"
-              options={PROJECT_DOMAIN_OPTIONS}
+              options={domains.map(domain => ({
+                key: domain.key,
+                label: domain.name,
+                value: domain.key
+              }))}
             />
           </Form.Item>
         </Form>
@@ -737,16 +810,24 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
           styles={{body: {padding: 0}}}
         >
           <div style={{ padding: '14px 18px', borderBottom: `1px solid ${cardBorder}`, display: 'flex', gap: 12 }}>
+          <Tooltip title="我的收藏">
+              <Button
+                icon={showStarProject ? <StarFilled /> : <StarOutlined />}
+                onClick={() => handleSetShowStarProject(!showStarProject)}
+              />
+            </Tooltip>
             <Input
               allowClear
               placeholder="搜索项目、角色或负责人"
               value={projectKeyword}
               onChange={(event) => setProjectKeyword(event.target.value)}
             />
-            <Button
-              icon={<RedoOutlined />}
-              onClick={fetchProjectData}
-            />
+            <Tooltip title="刷新">
+              <Button
+                icon={<RedoOutlined />}
+                onClick={fetchProjectData}
+              />
+            </Tooltip>
           </div>
           {projectError && (
             <Alert
@@ -768,6 +849,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
               style={{ padding: 12 }}
               renderItem={(project) => {
                 const active = workspaceProject?.id === project.id;
+                const inited = isProjectInitialized(project);
                 return (
                 <List.Item style={{
                     marginBottom: 10,
@@ -784,7 +866,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                   actions={[
                     <div style={{ minWidth: 330, maxWidth: 380 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, paddingBottom: 12 }}>
-                        <Tooltip key="initialize" title={projectInitializeTooltipTitle(project)}>
+                        {!inited && <Tooltip key="initialize" title={projectInitializeTooltipTitle(project)}>
                           <span>
                             <Button
                               type="primary"
@@ -796,7 +878,19 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                               初始化
                             </Button>
                           </span>
-                        </Tooltip>
+                        </Tooltip>}
+                        {inited && <Tooltip key="domain" title={domainManageTooltipTitle(project)}>
+                          <span>
+                            <Button
+                              icon={<GlobalOutlined />}
+                              disabled={isDomainManageDisable(project)}
+                              onClick={() => openDomainModal(project)}
+                              style={{ flex: 1 }}
+                            >
+                              管理领域
+                            </Button>
+                          </span>
+                        </Tooltip>}
                         <Tooltip key="members" title={memberManageTooltipTitle(project)}>
                           <span>
                             <Button
@@ -806,18 +900,6 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                               style={{ flex: 1}}
                             >
                               管理成员
-                            </Button>
-                          </span>
-                        </Tooltip>
-                        <Tooltip key="domain" title={domainManageTooltipTitle(project)}>
-                          <span>
-                            <Button
-                              icon={<GlobalOutlined />}
-                              disabled={isDomainManageDisable(project)}
-                              onClick={() => openDomainModal(project)}
-                              style={{ flex: 1 }}
-                            >
-                              管理领域
                             </Button>
                           </span>
                         </Tooltip>
@@ -842,6 +924,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                             placeholder="例如 data/DFT/projects"
                             suffix={<FolderOpenOutlined onClick={() => chooseProjectsRoot(project)}/>}
                             allowClear
+                            disabled={!inited}
                           />
                         </Form.Item>
                       </Form>
@@ -849,7 +932,20 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
                     ]}
                 >
                   <List.Item.Meta
-                    avatar={<FileProtectOutlined style={{ color: 'var(--vscode-focusBorder, #2563eb)', fontSize: 22 }} />}
+                    avatar={
+                      project.is_star
+                        ? <Tooltip title="取消收藏">
+                          <StarFilled style={{ color: 'var(--golden-color, #FFD700)', fontSize: 18 }}
+                            onClick={() => { setProjectStar(project, false) }}
+                          />
+                        </Tooltip>
+                        :
+                        <Tooltip title="收藏">
+                          <StarOutlined style={{ color: 'var(--golden-color, #FFD700)', fontSize: 18 }}
+                            onClick={() => { setProjectStar(project, true) }}
+                          />
+                        </Tooltip>
+                    }
                     title={
                       <Space wrap>
                         <Text strong>{project.name}</Text>
