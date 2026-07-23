@@ -1,0 +1,1092 @@
+diff --git a/package.json b/package.json
+index dcbed81..66e7796 100644
+--- a/package.json
++++ b/package.json
+@@ -296,6 +296,11 @@
+           "type": "number",
+           "default": 5,
+           "description": "max history log files."
++        },
++        "dftIde.filterStarProject": {
++          "type": "boolean",
++          "default": false,
++          "description": "only show my star projects."
+         }
+       }
+     }
+diff --git a/src/extension.ts b/src/extension.ts
+index 271113d..ec2285e 100644
+--- a/src/extension.ts
++++ b/src/extension.ts
+@@ -685,6 +685,52 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+         return;
+       }
+ 
++      case 'getConfiguration': {
++        const requestId: string = msg.requestId;
++        try {
++          const config = vscode.workspace.getConfiguration('dftIde');
++          const value = config.get(msg.section, msg.defaultValue);
++          currentPanel?.webview.postMessage({
++            command: 'getConfigurationResponse',
++            requestId,
++            value: value
++          });
++        } catch (err) {
++          currentPanel?.webview.postMessage({
++            command: 'getConfigurationResponse',
++            requestId,
++            value: msg.defaultValue,
++            error: String(err)
++          });
++        }
++        return;
++      }
++
++      case 'updateConfiguration': {
++        const requestId: string = msg.requestId;
++        try {
++          const config = vscode.workspace.getConfiguration('dftIde');
++          await config.update(
++            msg.section,
++            msg.value,
++            vscode.ConfigurationTarget.Global
++          );
++          currentPanel?.webview.postMessage({
++            command: 'updateConfigurationResponse',
++            requestId,
++            result: true
++          });
++        } catch (err) {
++          currentPanel?.webview.postMessage({
++            command: 'updateConfigurationResponse',
++            requestId,
++            result: false,
++            error: String(err)
++          });
++        }
++        return;
++      }
++
+       case 'getDonauResources': {
+         const requestId: string = msg.requestId;
+         try {
+diff --git a/src/services/workspaceService.ts b/src/services/workspaceService.ts
+index 1e2d5f7..15fa736 100644
+--- a/src/services/workspaceService.ts
++++ b/src/services/workspaceService.ts
+@@ -310,12 +310,14 @@ export async function getLocalConfigInfo(): Promise<{
+   defaultPath: string | null;
+   isDefault: boolean;
+   lastSelectedProject?: string;
++  filterStarProject?: boolean;
+ }> {
+   const configuredPath = vscode.workspace.getConfiguration('dftIde').get<string>('localProjectsRoot', '').trim();
+   const projectRoot = resolveProjectRoot();
+   const defaultPath = projectRoot ? path.join(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR) : null;
+   const effectivePath = resolveLocalConfigDirectory() ?? null;
+   const lastSelectedProject = vscode.workspace.getConfiguration('dftIde').get<string>('lastSelectedProject', '').trim();
++  const filterStarProject = vscode.workspace.getConfiguration('dftIde').get<boolean>('filterStarProject', false);
+ 
+   if (effectivePath) {
+     await ensureLocalConfigDirectory(effectivePath);
+@@ -330,6 +332,7 @@ export async function getLocalConfigInfo(): Promise<{
+     defaultPath,
+     isDefault: !configuredPath,
+     lastSelectedProject,
++    filterStarProject,
+   };
+ }
+ 
+@@ -357,12 +360,6 @@ export async function initProjectWorkspace(project: DftProject): Promise<string>
+     throw new Error('Please set the project local root before entering a project.');
+   }
+ 
+-  await vscode.workspace.getConfiguration('dftIde').update(
+-    'lastSelectedProject',
+-    project.id,
+-    vscode.ConfigurationTarget.Global
+-  );
+-
+   const projectName = project.name;
+   const projectDirName = toSafeProjectDirectoryName(project.name);
+   const projectPath = path.join(path.resolve(projectLocalRoot), projectDirName);
+@@ -417,6 +414,12 @@ export async function initProjectWorkspace(project: DftProject): Promise<string>
+   };
+   await writeFileIfMissing(workspaceFile, JSON.stringify(workspaceContent, null, 2));
+ 
++  await vscode.workspace.getConfiguration('dftIde').update(
++    'lastSelectedProject',
++    project.id,
++    vscode.ConfigurationTarget.Global
++  );
++
+   return projectPath;
+ }
+ 
+diff --git a/src/webview/App.tsx b/src/webview/App.tsx
+index 54730eb..1c5905d 100644
+--- a/src/webview/App.tsx
++++ b/src/webview/App.tsx
+@@ -20,6 +20,7 @@ import VerificationFlow from './flows/VerificationFlow';
+ import TaskStepper from './components/wizard/TaskStepper';
+ import Welcome from './components/Welcome';
+ import ProjectMembers from './components/ProjectMembers';
++import Domains from './components/Domains';
+ import useWizardStore from './store/wizardStore';
+ import vscode from './utils/vscode';
+ import { toggleZenMode as ipcToggleZenMode } from './utils/ipc';
+@@ -66,6 +67,11 @@ const flowMeta: Record<string, { title: string; subtitle: string; accent: string
+     subtitle: '维护项目成员工号、角色和 CTMP 标识。',
+     accent: '#0ea5e9',
+   },
++  DomainManagement: {
++    title: '项目领域配置',
++    subtitle: '维护领域编码和名称。',
++    accent: '#0ea5e9',
++  },
+ };
+ 
+ // 优化6：内部 Tab 导航配置
+@@ -178,6 +184,11 @@ const App: React.FC = () => {
+     reset();
+   }, [setFlowContext, reset]);
+ 
++  const navigateToDomains = useCallback(() => {
++    setFlowContext({ category: 'DomainManagement' });
++    reset();
++  }, [setFlowContext, reset]);
++
+   // 优化5：专注模式切换
+   const handleZenToggle = useCallback(async () => {
+     const nextState = !zenMode;
+@@ -205,6 +216,8 @@ const App: React.FC = () => {
+         ) : (
+           <TaskStepper />
+         );
++      case 'DomainManagement':
++        return <Domains />;
+       default:
+         return <TaskStepper />;
+     }
+@@ -525,7 +538,7 @@ const App: React.FC = () => {
+           }}
+         >
+           {!flowContext ? (
+-            <Welcome isDark={isDark} onNavigate={navigateToFlow} onManageMembers={navigateToMembers} />
++            <Welcome isDark={isDark} onNavigate={navigateToFlow} onManageMembers={navigateToMembers} onManageDomains={navigateToDomains} />
+           ) : (
+             <div
+               style={{
+diff --git a/src/webview/components/Domains.tsx b/src/webview/components/Domains.tsx
+new file mode 100644
+index 0000000..3b44fce
+--- /dev/null
++++ b/src/webview/components/Domains.tsx
+@@ -0,0 +1,296 @@
++import React, { useEffect, useMemo, useState } from 'react';
++import {
++  Alert,
++  Button,
++  Card,
++  Form,
++  Input,
++  Modal,
++  Popconfirm,
++  Space,
++  Table,
++  Tag,
++  Tooltip,
++  Typography,
++  message,
++} from 'antd';
++import {
++  DeleteOutlined,
++  EditOutlined,
++  PlusOutlined,
++  ReloadOutlined,
++  PartitionOutlined,
++} from '@ant-design/icons';
++import { useQuery, useQueryClient } from '@tanstack/react-query';
++import type { ColumnsType } from 'antd/es/table';
++import {
++  addDomain,
++  deleteDomain,
++  fetchDomains,
++  ProjectDomain,
++  updateDomain,
++} from '../services/projectService';
++import dayjs from 'dayjs';
++
++const { Text } = Typography;
++
++interface Props {
++  isDark?: boolean;
++}
++
++type DomainFormValue = {
++  key: string;
++  name: string;
++};
++
++const Domains: React.FC<Props> = ({ isDark = true }) => {
++  const [domains, setDomains] = useState<ProjectDomain[]>([]);
++  const [loading, setLoading] = useState(false);
++  const [saving, setSaving] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++  const [editingDomain, setEditingDomain] = useState<ProjectDomain | null>(null);
++  const [modalOpen, setModalOpen] = useState(false);
++  const [form] = Form.useForm<DomainFormValue>();
++  const queryClient = useQueryClient();
++  const {
++    data: domainsData,
++    error: domainsError,
++    isFetching: domainsFetching,
++    refetch: refetchDomains,
++  } = useQuery({
++    queryKey: ['projectDomains', 0],
++    queryFn: () => fetchDomains(),
++  });
++
++  const cardBorder = 'var(--vscode-panel-border, rgba(127,127,127,0.22))';
++  const panelBg = isDark
++    ? 'color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 96%, white)'
++    : 'color-mix(in srgb, var(--vscode-editor-background, #fff) 92%, transparent)';
++
++  const loadDomains = async () => {
++    setLoading(true);
++    try {
++      const result = await refetchDomains();
++      if (result.error) {
++        throw result.error;
++      }
++      const data = result.data;
++      if (!data) {
++        return;
++      }
++      setDomains(data);
++      setError(null);
++    } catch (err) {
++      setError(err instanceof Error ? err.message : '领域列表加载失败');
++    } finally {
++      setLoading(false);
++    }
++  };
++
++  useEffect(() => {
++    if (!domainsData) return;
++    setDomains(domainsData);
++    setError(null);
++  }, [domainsData]);
++
++  useEffect(() => {
++    if (!domainsError) return;
++    setError(domainsError instanceof Error ? domainsError.message : '领域列表加载失败');
++  }, [domainsError]);
++
++  useEffect(() => {
++    setLoading(domainsFetching);
++  }, [domainsFetching]);
++
++  const openAddModal = () => {
++    setEditingDomain(null);
++    form.setFieldsValue({ key: '', name: '' });
++    setModalOpen(true);
++  };
++
++  const openEditModal = (domain: ProjectDomain) => {
++    setEditingDomain(domain);
++    form.setFieldsValue({
++      key: domain.key,
++      name: domain.name,
++    });
++    setModalOpen(true);
++  };
++
++  const closeModal = () => {
++    setModalOpen(false);
++    setEditingDomain(null);
++    form.resetFields();
++  };
++
++  const saveDomain = async () => {
++    const value = await form.validateFields();
++    setSaving(true);
++    try {
++      if (editingDomain) {
++        const updated = await updateDomain(editingDomain.key, {
++          ...editingDomain,
++          key: value.key.trim(),
++          name: value.name.trim(),
++        });
++        setDomains((items) => items.map((item) => item.key === editingDomain.key ? updated : item));
++        message.success('领域已更新');
++      } else {
++        const created = await addDomain({
++          key: value.key.trim(),
++          name: value.name.trim(),
++        });
++        setDomains((items) => [...items, created]);
++        message.success('领域已添加');
++      }
++      closeModal();
++      void queryClient.invalidateQueries({ queryKey: ['projectDomains', ''] });
++    } catch (err) {
++      message.error(err instanceof Error ? err.message : '领域保存失败');
++    } finally {
++      setSaving(false);
++    }
++  };
++
++  const removeDomain = async (domain: ProjectDomain) => {
++    try {
++      await deleteDomain(domain.key);
++      setDomains((items) => items.filter((item) => item.key !== domain.key));
++      void queryClient.invalidateQueries({ queryKey: ['projectDomains', ''] });
++      message.success('领域已删除');
++    } catch (err) {
++      message.error(err instanceof Error ? err.message : '领域删除失败');
++    }
++  };
++
++  const columns = useMemo<ColumnsType<ProjectDomain>>(() => [
++    {
++      title: '编码',
++      dataIndex: 'key',
++      key: 'key',
++      width: 180,
++      render: (value: string) => (
++        <Tag color={'blue'}>{value}</Tag>
++      ),
++    },
++    {
++      title: '名称',
++      dataIndex: 'name',
++      key: 'name',
++      width: 240,
++      render: (value: string, record) => (
++        <Text strong>{value}</Text>
++      ),
++    },
++    {
++      title: '更新时间',
++      dataIndex: 'updatedAt',
++      key: 'updatedAt',
++      ellipsis: true,
++      render: (value?: string) => dayjs(value).format('YYYY-MM-DD HH:mm:ss') || '-',
++    },
++    {
++      title: '操作',
++      key: 'actions',
++      width: 180,
++      align: 'right',
++      render: (_, record) => {
++        return (
++          <Space size={8}>
++            <Tooltip title={'修改领域'}>
++              <Button
++                size="small"
++                icon={<EditOutlined />}
++                onClick={() => openEditModal(record)}
++              />
++            </Tooltip>
++            <Tooltip title={'删除领域'}>
++              <span>
++                <Popconfirm
++                  title="删除领域"
++                  description={`确认删除 ${record.name} 吗？`}
++                  okText="删除"
++                  cancelText="取消"
++                  okButtonProps={{ danger: true }}
++                  onConfirm={() => removeDomain(record)}
++                >
++                  <Button
++                    danger
++                    size="small"
++                    icon={<DeleteOutlined />}
++                  />
++                </Popconfirm>
++              </span>
++            </Tooltip>
++          </Space>
++        );
++      },
++    },
++  ], []);
++
++  return (
++    <Card
++      title={
++        <Space>
++          <PartitionOutlined />
++          <span>管理领域</span>
++        </Space>
++      }
++      extra={
++        <Space wrap>
++          <Button icon={<ReloadOutlined />} onClick={loadDomains} loading={loading}>
++            刷新
++          </Button>
++          <Tooltip title={'增加领域'}>
++            <Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>
++              增加领域
++            </Button>
++          </Tooltip>
++        </Space>
++      }
++      style={{ borderRadius: 8, border: `1px solid ${cardBorder}`, background: panelBg }}
++      styles={{body: {padding: 16}}}
++    >
++      <Space direction="vertical" size={14} style={{ width: '100%' }}>
++        {error && (
++          <Alert
++            type="warning"
++            showIcon
++            message="领域服务暂不可用"
++            description={error}
++          />
++        )}
++
++        <Table<ProjectDomain>
++          rowKey="key"
++          loading={loading}
++          columns={columns}
++          dataSource={domains}
++          pagination={{ pageSize: 8, showSizeChanger: false }}
++          scroll={{ x: 760 }}
++        />
++      </Space>
++
++      <Modal
++        title={editingDomain ? '修改领域' : '增加领域'}
++        open={modalOpen}
++        onCancel={closeModal}
++        onOk={saveDomain}
++        okText={editingDomain ? '保存' : '添加'}
++        confirmLoading={saving}
++        destroyOnHidden
++      >
++        <Form form={form} layout="vertical" preserve={true}>
++          <Form.Item label="编码" name="key" rules={[{ required: true, message: '请输入领域编码' }]}>
++            <Input disabled={Boolean(editingDomain)} />
++          </Form.Item>
++          <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入领域名称' }]}>
++            <Input />
++          </Form.Item>
++        </Form>
++      </Modal>
++    </Card>
++  );
++};
++
++export default Domains;
+diff --git a/src/webview/components/ProjectMembers.tsx b/src/webview/components/ProjectMembers.tsx
+index b7e42d8..33e1b92 100644
+--- a/src/webview/components/ProjectMembers.tsx
++++ b/src/webview/components/ProjectMembers.tsx
+@@ -130,12 +130,12 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
+ 
+   useEffect(() => {
+     if (!membersError) return;
+-    setError(membersError instanceof Error ? membersError.message : '鎴愬憳鍒楄〃鍔犺浇澶辫触');
++    setError(membersError instanceof Error ? membersError.message : '成员列表加载失败');
+   }, [membersError]);
+ 
+   useEffect(() => {
+-    setLoading(membersFetching && !membersData);
+-  }, [membersData, membersFetching]);
++    setLoading(membersFetching);
++  }, [membersFetching]);
+ 
+   const openAddModal = () => {
+     loadUsers();
+diff --git a/src/webview/components/Welcome.tsx b/src/webview/components/Welcome.tsx
+index 78a837a..b1f9d7e 100644
+--- a/src/webview/components/Welcome.tsx
++++ b/src/webview/components/Welcome.tsx
+@@ -11,7 +11,6 @@ import {
+   CloudSyncOutlined,
+   FolderAddOutlined,
+   ExperimentOutlined,
+-  FileProtectOutlined,
+   FolderOpenOutlined,
+   LineChartOutlined,
+   RocketOutlined,
+@@ -20,9 +19,13 @@ import {
+   ThunderboltOutlined,
+   RedoOutlined,
+   GlobalOutlined,
++  StarOutlined,
++  StarFilled,
++  PartitionOutlined,
+ } from '@ant-design/icons';
+ import {
+   getCurrentUser,
++  updateConfiguration,
+   getLocalConfigInfo,
+   getWorkspaceProjectInfo,
+   openProjectWorkspace,
+@@ -44,9 +47,10 @@ import {
+   ProjectRepoStatus,
+   updateProjectRootPath,
+   getProjectDomainLabel,
+-  PROJECT_DOMAIN_OPTIONS,
+   ProjectDomain,
+   updateProjectDomain,
++  updateProjectStar,
++  fetchDomains,
+ } from '../services/projectService';
+ 
+ const { Paragraph, Text, Title } = Typography;
+@@ -55,6 +59,7 @@ interface Props {
+   isDark?: boolean;
+   onNavigate?: (category: string) => void;
+   onManageMembers?: (project: DftProject) => void;
++  onManageDomains?: () => void;
+ }
+ 
+ const flows = [
+@@ -178,7 +183,7 @@ type ProjectFormValue = {
+   description: string;
+ };
+ 
+-const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }) => {
++const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, onManageDomains }) => {
+   const {activeProject, setFlowContext, setActiveProject, setActiveProjectDomain, currentUser, setCurrentUser} = useWizardStore(
+     useShallow((state) => ({
+       activeProject: state.activeProject,
+@@ -206,6 +211,8 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+   const [domainProject, setDomainProject] = useState<DftProject | null>(null);
+   const [selectedDomain, setSelectedDomain] = useState<ProjectDomain | undefined>();
+   const [domainSaving, setDomainSaving] = useState(false);
++  const [showStarProject, setShowStarProject] = useState(false);
++  const [domains, setDomains] = useState<ProjectDomain[]>([]);
+ 
+   const cardBorder = 'var(--vscode-panel-border, rgba(127,127,127,0.18))';
+   const panelBg = isDark
+@@ -223,13 +230,26 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+ 
+   const filteredProjects = useMemo(() => {
+     const keyword = projectKeyword.trim().toLowerCase();
+-    if (!keyword) return projects;
+-    return projects?.filter((project) =>
+-      [project.name, project.id, project.owner, project.role].some((text) =>
+-        text && typeof text === 'string' && text.toLowerCase().includes(keyword)
+-      )
+-    );
+-  }, [projects, projectKeyword]);
++    let filtered = projects || [];
++
++    if (keyword) {
++      filtered = filtered.filter((project) =>
++        [project.name, project.id, project.owner, project.role].some((text) =>
++          text && typeof text === 'string' && text.toLowerCase().includes(keyword)
++        )
++      );
++    }
++
++    if (showStarProject) {
++      filtered = filtered.filter(project => project.is_star === true);
++    }
++
++    return filtered.sort((a, b) => {
++      if (a.is_star && !b.is_star) return -1;
++      if (!a.is_star && b.is_star) return 1;
++      return Number(b.id) - Number(a.id);
++    });
++  }, [projects, projectKeyword, showStarProject]);
+ 
+   const fetchProjectData = useCallback(async () => {
+     setLoadingProjects(true);
+@@ -273,11 +293,12 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+       .then((info) => {
+         if (disposed) return;
+         setLocalRootInfo(info);
+-        setProjectId(info.lastSelectedProject??'');
++        setProjectId(info.lastSelectedProject ?? '');
++        setShowStarProject(info.filterStarProject ?? false);
+       })
+       .catch((error) => {
+         if (!disposed) {
+-          message.warning(error instanceof Error ? error.message : '本地托管目录读取失败');
++          message.warning(error instanceof Error ? error.message : '本地配置读取失败');
+         }
+       });
+ 
+@@ -366,6 +387,30 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+     }
+   }, [currentUser]);
+ 
++  const setProjectStar = useCallback(async (project: DftProject, isStar: boolean) => {
++    try {
++      await updateProjectStar(project.id, project.ctmp_id, currentUser, isStar);
++      setProjects((prevProjects) => prevProjects?.map(item =>
++        (item.id === project.id && item.ctmp_id === project.ctmp_id) ? { ...item, is_star: isStar } : item
++      ));
++    } catch (err) {
++      message.error(err instanceof Error ? err.message : '收藏项目失败');
++    }
++  }, [currentUser]);
++
++  const handleSetShowStarProject = useCallback(async (showStar: boolean) => {
++    try {
++      setShowStarProject(showStar);
++      await updateConfiguration('filterStarProject', showStar);
++    } catch (err) {
++      message.error(err instanceof Error ? err.message : '我的收藏状态保存失败');
++    }
++  }, [currentUser]);
++
++  const canManageDomains = () =>
++    // currentUser === 'a60096337';
++    true;
++
+   const isProjectInitialized = (project: DftProject) =>
+     project.repos.length > 0 && project.repos.every((repo) => repo.status === 'ready');
+ 
+@@ -399,6 +444,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+       : '配置或修改项目领域';
+ 
+   const openDomainModal = (project: DftProject) => {
++    loadDomains();
+     setDomainProject(project);
+     setSelectedDomain(project.domain);
+   };
+@@ -409,6 +455,15 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+     setSelectedDomain(undefined);
+   };
+ 
++  const loadDomains = async () => {
++    try {
++      const data = await fetchDomains();
++      setDomains(data);
++    } catch (err) {
++      message.error(err instanceof Error ? err.message : '领域列表加载失败');
++    }
++  };
++
+   const saveDomain = async () => {
+     if (!domainProject || !selectedDomain) return;
+     setDomainSaving(true);
+@@ -652,6 +707,17 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+               >
+                 创建自定义项目
+               </Button>
++              {canManageDomains() && <Button
++                size="large"
++                icon={<PartitionOutlined />}
++                onClick={() => onManageDomains?.()}
++                style={{
++                  color: 'rgba(9, 110, 243, 1)',
++                  borderColor: 'rgba(9, 110, 243, 1)'
++                }}
++              >
++                项目领域配置
++              </Button>}
+             </Space>
+           </Space>
+         </div>
+@@ -702,11 +768,18 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+             required
+             extra="领域属于项目级配置，保存后 Hibist、Sailor 及其他流程会读取同一个值。"
+           >
+-            <Select<ProjectDomain>
+-              value={selectedDomain}
+-              onChange={setSelectedDomain}
++            <Select
++              value={selectedDomain?.key}
++              onChange={(selectedKey) => {
++                const selectedDomainObj = domains.find(d => d.key === selectedKey);
++                setSelectedDomain(selectedDomainObj);
++              }}
+               placeholder="请选择领域"
+-              options={PROJECT_DOMAIN_OPTIONS}
++              options={domains.map(domain => ({
++                key: domain.key,
++                label: domain.name,
++                value: domain.key
++              }))}
+             />
+           </Form.Item>
+         </Form>
+@@ -737,16 +810,24 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+           styles={{body: {padding: 0}}}
+         >
+           <div style={{ padding: '14px 18px', borderBottom: `1px solid ${cardBorder}`, display: 'flex', gap: 12 }}>
++          <Tooltip title="我的收藏">
++              <Button
++                icon={showStarProject ? <StarFilled /> : <StarOutlined />}
++                onClick={() => handleSetShowStarProject(!showStarProject)}
++              />
++            </Tooltip>
+             <Input
+               allowClear
+               placeholder="搜索项目、角色或负责人"
+               value={projectKeyword}
+               onChange={(event) => setProjectKeyword(event.target.value)}
+             />
+-            <Button
+-              icon={<RedoOutlined />}
+-              onClick={fetchProjectData}
+-            />
++            <Tooltip title="刷新">
++              <Button
++                icon={<RedoOutlined />}
++                onClick={fetchProjectData}
++              />
++            </Tooltip>
+           </div>
+           {projectError && (
+             <Alert
+@@ -768,6 +849,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+               style={{ padding: 12 }}
+               renderItem={(project) => {
+                 const active = workspaceProject?.id === project.id;
++                const inited = isProjectInitialized(project);
+                 return (
+                 <List.Item style={{
+                     marginBottom: 10,
+@@ -784,7 +866,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+                   actions={[
+                     <div style={{ minWidth: 330, maxWidth: 380 }}>
+                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, paddingBottom: 12 }}>
+-                        <Tooltip key="initialize" title={projectInitializeTooltipTitle(project)}>
++                        {!inited && <Tooltip key="initialize" title={projectInitializeTooltipTitle(project)}>
+                           <span>
+                             <Button
+                               type="primary"
+@@ -796,7 +878,19 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+                               初始化
+                             </Button>
+                           </span>
+-                        </Tooltip>
++                        </Tooltip>}
++                        {inited && <Tooltip key="domain" title={domainManageTooltipTitle(project)}>
++                          <span>
++                            <Button
++                              icon={<GlobalOutlined />}
++                              disabled={isDomainManageDisable(project)}
++                              onClick={() => openDomainModal(project)}
++                              style={{ flex: 1 }}
++                            >
++                              管理领域
++                            </Button>
++                          </span>
++                        </Tooltip>}
+                         <Tooltip key="members" title={memberManageTooltipTitle(project)}>
+                           <span>
+                             <Button
+@@ -809,18 +903,6 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+                             </Button>
+                           </span>
+                         </Tooltip>
+-                        <Tooltip key="domain" title={domainManageTooltipTitle(project)}>
+-                          <span>
+-                            <Button
+-                              icon={<GlobalOutlined />}
+-                              disabled={isDomainManageDisable(project)}
+-                              onClick={() => openDomainModal(project)}
+-                              style={{ flex: 1 }}
+-                            >
+-                              管理领域
+-                            </Button>
+-                          </span>
+-                        </Tooltip>
+                         <Tooltip key="enter" title={active ? '当前 VS Code 已加载该项目' : projectEnterTooltipTitle(project)}>
+                           <span>
+                             <Button
+@@ -842,6 +924,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+                             placeholder="例如 data/DFT/projects"
+                             suffix={<FolderOpenOutlined onClick={() => chooseProjectsRoot(project)}/>}
+                             allowClear
++                            disabled={!inited}
+                           />
+                         </Form.Item>
+                       </Form>
+@@ -849,7 +932,20 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers }
+                     ]}
+                 >
+                   <List.Item.Meta
+-                    avatar={<FileProtectOutlined style={{ color: 'var(--vscode-focusBorder, #2563eb)', fontSize: 22 }} />}
++                    avatar={
++                      project.is_star
++                        ? <Tooltip title="取消收藏">
++                          <StarFilled style={{ color: 'var(--golden-color, #FFD700)', fontSize: 18 }}
++                            onClick={() => { setProjectStar(project, false) }}
++                          />
++                        </Tooltip>
++                        :
++                        <Tooltip title="收藏">
++                          <StarOutlined style={{ color: 'var(--golden-color, #FFD700)', fontSize: 18 }}
++                            onClick={() => { setProjectStar(project, true) }}
++                          />
++                        </Tooltip>
++                    }
+                     title={
+                       <Space wrap>
+                         <Text strong>{project.name}</Text>
+diff --git a/src/webview/components/shared/PipelineExecutionOverview.tsx b/src/webview/components/shared/PipelineExecutionOverview.tsx
+index dbf0552..0d4ba22 100644
+--- a/src/webview/components/shared/PipelineExecutionOverview.tsx
++++ b/src/webview/components/shared/PipelineExecutionOverview.tsx
+@@ -868,7 +868,18 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+               <div><span style={{ color: themeStyles.textSecondary }}>用时:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{getModuleRuntime(activeModuleData)}</span></div>
+             </div>
+ 
+-            <div style={{ display: 'grid', gap: 6, flex: 1, overflowY: 'auto', maxHeight: 430, paddingRight: 4 }}>
++            <div
++              style={{
++                display: 'grid',
++                gridAutoRows: 'max-content',
++                alignContent: 'start',
++                gap: 6,
++                flex: 1,
++                overflowY: 'auto',
++                maxHeight: 430,
++                paddingRight: 4,
++              }}
++            >
+               {(activeHierarchy?.topLevelTasks ?? activeModuleData.tasks).map((task) => renderTaskDetail(task))}
+             </div>
+           </div>
+diff --git a/src/webview/services/projectService.ts b/src/webview/services/projectService.ts
+index 21258b0..2c67c74 100644
+--- a/src/webview/services/projectService.ts
++++ b/src/webview/services/projectService.ts
+@@ -1,22 +1,7 @@
+ export type ProjectRepoKey = 'data' | 'hibist' | 'sailor' | 'verification';
+ 
+-export type ProjectDomain = 1 | 2 | 3;
+-
+-export const PROJECT_DOMAIN_OPTIONS: Array<{ value: ProjectDomain; label: string }> = [
+-  { value: 1, label: '联接' },
+-  { value: 2, label: '无线终端' },
+-  { value: 3, label: '图灵' },
+-];
+-
+-export function normalizeProjectDomain(value: unknown): ProjectDomain | undefined {
+-  const numericValue = Number(value);
+-  return numericValue === 1 || numericValue === 2 || numericValue === 3
+-    ? numericValue
+-    : undefined;
+-}
+-
+ export function getProjectDomainLabel(domain?: ProjectDomain): string {
+-  return PROJECT_DOMAIN_OPTIONS.find((option) => option.value === domain)?.label ?? '未配置';
++  return domain?.name ?? '未配置';
+ }
+ 
+ export interface ProjectRepoStatus {
+@@ -42,6 +27,7 @@ export interface DftProject {
+   description: string;
+   repos: ProjectRepoStatus[];
+   local_root?: string;
++  is_star?: boolean;
+ }
+ 
+ export interface ProjectDashboard {
+@@ -58,7 +44,7 @@ const mockProjects: DftProject[] = [
+     owner: 'DFT Platform',
+     role: 'DFTM',
+     canManageMembers: true,
+-    domain: 1,
++    domain: { key: '1', name: '联接' },
+     updatedAt: '2026-04-26 09:30',
+     stage: '85',
+     description: '主芯片 DFT 配置、设计流程与验证数据。',
+@@ -75,7 +61,7 @@ const mockProjects: DftProject[] = [
+     rootPath: 'D:/Downloads',
+     owner: 'Memory Team',
+     role: 'Member',
+-    domain: 2,
++    domain: { key: '2', name: '无线终端' },
+     updatedAt: '2026-04-24 18:10',
+     stage: '95',
+     description: 'MBIST 环境配置、仿真用例和报告归档。',
+@@ -92,7 +78,7 @@ const mockProjects: DftProject[] = [
+     rootPath: 'D:/dft/projects',
+     owner: 'Verification Team',
+     role: 'Member',
+-    domain: 3,
++    domain: { key: '3', name: '图灵' },
+     updatedAt: '2026-04-20 14:45',
+     stage: '75',
+     description: '回归任务配置、集群资源和日志入口。',
+@@ -147,6 +133,18 @@ const mockProjectMembers: Record<string, ProjectMember[]> = {
+   ],
+ };
+ 
++export interface ProjectDomain {
++  key: string;
++  name: string;
++  updatedAt?: string;
++}
++
++const mockDomains: ProjectDomain[] = [
++  { key: 'Kirin', name: '麒麟', updatedAt: '2026-07-20 15:30' },
++  { key: 'Network', name: '网络', updatedAt: '2026-07-20 15:30' },
++  { key: 'Turing', name: '图灵', updatedAt: '2026-07-20 15:30' },
++];
++
+ export function canManageProjectMembers(project: DftProject): boolean {
+   return project.id !== '0' && (project.canManageMembers ?? project.role?.toUpperCase() === 'DFTM');
+ }
+@@ -179,7 +177,7 @@ export async function createProject(currentUser: string, project: {
+     return false;
+   }
+ 
+-  const response = await fetch(`${apiBase}/api/dft-ide/project/create`, {
++  const response = await fetch(`${apiBase}/api/dft-ide/project/create/`, {
+     method: 'POST',
+     headers: {
+       'Content-Type': 'application/json',
+@@ -202,7 +200,7 @@ export async function initProject(currentUser: string, project: DftProject): Pro
+     return false;
+   }
+ 
+-  const response = await fetch(`${apiBase}/api/dft-ide/project/init`, {
++  const response = await fetch(`${apiBase}/api/dft-ide/project/init/`, {
+     method: 'POST',
+     headers: {
+       'Content-Type': 'application/json',
+@@ -253,9 +251,10 @@ export async function fetchProjectDashboard(currentUser:string): Promise<Project
+       name: project.name,
+       role: project.role,
+       rootPath: project.local_root,
++      is_star: project.is_star,
+       owner: project.owner || '',
+       canManageMembers: canManageProjectMembers(project),
+-      domain: normalizeProjectDomain(project.domain ?? project.domainCfg ?? project.domain_cfg),
++      domain: project.domain,
+       updatedAt: project.updatedAt || '',
+       stage: project.stage || '',
+       description: project.description || '',
+@@ -475,3 +474,85 @@ export async function updateProjectRootPath(projectId: string, employeeId: strin
+ 
+   return response.json() as Promise<{ success: boolean}>;
+ }
++
++// -------------------------------------------- 项目收藏 --------------------------------------------
++export async function updateProjectStar(projectId: string, ctmpId: number | undefined, employeeId: string, isStar: boolean): Promise<{ success: boolean }> {
++  const apiBase = getApiBase();
++  if (!apiBase) {
++    console.log('[Mock] Staring project:', projectId, ctmpId, isStar);
++    return { success: true };
++  }
++
++  const response = await fetch(`${apiBase}/api/dft-ide/project/star/`, {
++    method: 'PUT',
++    headers: { 'Content-Type': 'application/json' },
++    body: JSON.stringify({
++      project_id: projectId,
++      ctmp_id: ctmpId,
++      user_id: employeeId,
++      is_star: isStar
++    }),
++  });
++  await responseErrorHandler(response, 'Star project failed');
++
++  return response.json() as Promise<{ success: boolean }>;
++}
++
++// -------------------------------------------- 领域管理 --------------------------------------------
++export async function fetchDomains(): Promise<ProjectDomain[]> {
++  const apiBase = getApiBase();
++  if (!apiBase) {
++    return mockDomains;
++  }
++
++  const response = await fetch(`${apiBase}/api/dft-ide/domains/`);
++  await responseErrorHandler(response, 'Fetch domains failed');
++
++  return response.json() as Promise<ProjectDomain[]>;
++}
++
++export async function addDomain(domain: ProjectDomain): Promise<ProjectDomain> {
++  const apiBase = getApiBase();
++  if (!apiBase) {
++    return domain;
++  }
++
++  const response = await fetch(`${apiBase}/api/dft-ide/domains/`, {
++    method: 'POST',
++    headers: { 'Content-Type': 'application/json' },
++    body: JSON.stringify(domain),
++  });
++  await responseErrorHandler(response, 'Add domain failed');
++
++  return response.json() as Promise<ProjectDomain>;
++}
++
++export async function updateDomain(key: string, domain: ProjectDomain): Promise<ProjectDomain> {
++  const apiBase = getApiBase();
++  if (!apiBase) {
++    return domain;
++  }
++
++  const response = await fetch(`${apiBase}/api/dft-ide/domains/${key}/`, {
++    method: 'PUT',
++    headers: { 'Content-Type': 'application/json' },
++    body: JSON.stringify(domain),
++  });
++  await responseErrorHandler(response, 'Update domain failed');
++
++  return response.json() as Promise<ProjectDomain>;
++}
++
++export async function deleteDomain(key: string): Promise<{ success: boolean }> {
++  const apiBase = getApiBase();
++  if (!apiBase) {
++    return { success: true };
++  }
++
++  const response = await fetch(`${apiBase}/api/dft-ide/domains/${key}/`, {
++    method: 'DELETE',
++  });
++  await responseErrorHandler(response, 'Delete domain failed');
++
++  return response.json() as Promise<{ success: boolean }>;
++}
+diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
+index b20ade5..99fe02a 100644
+--- a/src/webview/utils/ipc.ts
++++ b/src/webview/utils/ipc.ts
+@@ -82,6 +82,22 @@ export async function getCurrentUser(): Promise<string> {
+   return res.user ? (res.user as string) : ''
+ }
+ 
++/**
++ * 获取vscode配置
++ */
++export async function getConfiguration<T>(section: string, defaultValue: T): Promise<T> {
++  const res = await ipcRequest('getConfiguration', { section, defaultValue })
++  return res.value as T;
++}
++
++/**
++ * 更新vscode配置
++ */
++export async function updateConfiguration<T>(section: string, value: T): Promise<boolean> {
++  const res = await ipcRequest('updateConfiguration', { section, value })
++  return res.result as boolean;
++}
++
+ /**
+  * 获取当前环境的 Git 信息 (分支、修改状态等)
+  */
+@@ -608,6 +624,7 @@ export interface LocalConfigInfo {
+   isDefault: boolean
+   error?: string
+   lastSelectedProject?: string
++  filterStarProject?: boolean
+ }
+ 
+ export interface WorkspaceProjectInfo {
+@@ -626,6 +643,7 @@ const localConfigInfoSchema = z.object({
+   isDefault: z.boolean().default(true),
+   error: z.string().optional(),
+   lastSelectedProject: z.string().optional(),
++  filterStarProject: z.boolean().default(false),
+ })
+ 
+ const workspaceProjectInfoSchema = z.object({
