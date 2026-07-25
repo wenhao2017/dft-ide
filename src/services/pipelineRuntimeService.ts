@@ -352,7 +352,7 @@ function buildStepCommands(
   commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
   commands.push('set dft_ide_step_status = 0');
   for (const executionCommand of executionCommands) {
-    commands.push(`echo ${quoteCshArgument(`[DFT IDE] 执行命令: ${executionCommand}`)}`);
+    commands.push(`echo '[DFT IDE] 执行命令: ${executionCommand}'`);
     commands.push(executionCommand);
     commands.push('set dft_ide_step_status = $status');
     commands.push('if ($dft_ide_step_status != 0) goto dft_ide_step_end');
