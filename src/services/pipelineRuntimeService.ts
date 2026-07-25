@@ -7,8 +7,9 @@ import {
   TaskStatus,
   pipelineFlowConfigs,
 } from '../webview/components/shared/pipelineMockData';
-import { resolveProjectPath } from './workspaceService';
+import { resolveProjectPath, resolveProjectRoot } from './workspaceService';
 import { getExecutionTerminalCapabilities, registerExecutionTerminalMonitor, stopExecutionTerminal } from './terminalService';
+import { formatTime } from '../utils';
 
 export type PipelineFlowKey = 'hibist' | 'sailor' | 'verification';
 export type PipelineRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
@@ -79,7 +80,7 @@ interface PipelineExecutionSession {
 const timers = new Map<string, ReturnType<typeof setTimeout>[]>();
 const historySavedRunIds = new Set<string>();
 
-const nowText = () => new Date().toLocaleTimeString();
+const nowText = () => formatTime(new Date());
 const nowStamp = () => Date.now();
 
 function getPipelineTerminalTitle(flowLabel: string, moduleKey: string): string {
@@ -284,12 +285,10 @@ function buildStepCommands(
 ): string | string[] {
   const commands: string[] = [];
   const projectPath = resolveProjectPath(flowKey);
+  const projectSource = typeof envConfig?.project === 'string' ? envConfig.project.trim() : '';
+  commands.push(`setenv DFT_IDE_HISTORY ${quoteCshArgument(runId)}`);
 
   if (index === 0) {
-    const projectSource = typeof envConfig?.project === 'string' ? envConfig.project.trim() : '';
-    if (projectSource) {
-      commands.push(`source ${projectSource}`);
-    }
 
     const moduleEnvName = flowKey === 'verification' ? 'DFT_IDE_MODE' : 'DFT_IDE_MODULE';
     commands.push(`setenv ${moduleEnvName} "${moduleKey}"`);
@@ -336,8 +335,7 @@ function buildStepCommands(
         const dsubArgs = ['-A', clusterGroup, queue, resource, clusterExtra]
           .filter(Boolean)
           .join(' ');
-        commands.push(`alias dsubrun "dsub ${dsubArgs}"`);
-        commands.push(`alias dsubrun_I "dsub -I ${dsubArgs}"`);
+        commands.push(`setenv DFT_IDE_DSUBRUN_I "dsub -I ${dsubArgs}"`);
       }
     }
   }
@@ -354,7 +352,7 @@ function buildStepCommands(
   commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
   commands.push('set dft_ide_step_status = 0');
   for (const executionCommand of executionCommands) {
-    commands.push(`echo ${quoteCshArgument(`[DFT IDE] 执行命令: ${executionCommand}`)}`);
+    commands.push(`echo '[DFT IDE] 执行命令: ${executionCommand}'`);
     commands.push(executionCommand);
     commands.push('set dft_ide_step_status = $status');
     commands.push('if ($dft_ide_step_status != 0) goto dft_ide_step_end');
@@ -378,9 +376,12 @@ function buildStepCommands(
     fs.mkdirSync(targetDir, { recursive: true });
     const targetFile = path.join(targetDir, task.name);
     const scriptContent = commands.map(cmd => cmd.trim()).join('\n');
+    const projectEnvironment = projectSource
+      ? `source ${quoteCshArgument(projectSource)}\nsetenv DFT_IDE_ENV_SOURCE ${quoteCshArgument(projectSource)}\n`
+      : '';
     fs.writeFileSync(
       targetFile,
-      `#!/bin/csh -f\nsource /software/hicad/cshrc/cshrc.modules\n${scriptContent}\n`,
+      `#!/bin/csh -f\n${projectEnvironment}${scriptContent}\n`,
     );
     fs.chmodSync(targetFile, 0o755);
     return `source ${targetFile}`;
@@ -658,8 +659,7 @@ function runSequentialSimulation(
                 resource = `-R '${arr.join(';')}'`;
               }
               const dsubArgs = `-A ${clusterGroup} ${queue} ${resource} ${clusterExtra}`.trim();
-              commands.push(`alias dsubrun "dsub ${dsubArgs}"`);
-              commands.push(`alias dsubrun_I "dsub -I ${dsubArgs}"`);
+              commands.push(`setenv DFT_IDE_DSUBRUN_I "dsub -I ${dsubArgs}"`);
             }
           }
         }
@@ -783,12 +783,20 @@ export class PipelineRuntimeService {
   ): PipelineRuntimeSnapshot {
     const key = getPipelineRuntimeKey(flowKey, moduleKey);
     const config = pipelineFlowConfigs[flowKey];
-    const runId = `pipeline_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const runId = `exec_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 
     const existing = this.runtimes.get(key);
     if (existing?.runState === 'running') {
       this.appendLog(key, config.logPrefix, '已有流水线正在运行，请先停止当前运行后再启动。');
       return existing;
+    }
+
+    const projectRoot = resolveProjectRoot();
+    if (projectRoot) {
+      fs.mkdirSync(
+        path.join(projectRoot, '.dft-ide', 'local-state', 'history', flowKey, runId),
+        { recursive: true },
+      );
     }
 
     clearRuntimeTimers(key);
@@ -1043,10 +1051,7 @@ export class PipelineRuntimeService {
     console.log('parameter rows:', runParameterRows);
     console.groupEnd();
     this.patchTask(key, task.id, (current) => ({
-      logs: [
-        ...current.logs,
-        ...generatedCommands.map((command) => `[${nowText()}] ${session.logPrefix} 执行命令：${command}`),
-      ],
+      logs: [...current.logs, ...generatedCommands.map((command) => `[${nowText()}] ${session.logPrefix} 执行命令：${command}`)],
     }));
     generatedCommands.forEach((command) => {
       this.appendLog(key, session.logPrefix, `${task.name} 执行命令：${command}`);

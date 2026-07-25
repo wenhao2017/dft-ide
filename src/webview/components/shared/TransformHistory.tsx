@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Button, Empty, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Empty, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { fetchTransformLogs, openFileReadonly, type TransformLog } from '../../utils/ipc';
 
@@ -7,10 +7,10 @@ const { Link } = Typography;
 
 interface Props {
   flowKey: string;
-  stage?: string;
+  historyOpen: boolean;
 }
 
-const TransformHistory: React.FC<Props> = ({ flowKey, stage }) => {
+const TransformHistory: React.FC<Props> = ({ flowKey, historyOpen }) => {
   const [logs, setLogs] = useState<TransformLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,13 +20,11 @@ const TransformHistory: React.FC<Props> = ({ flowKey, stage }) => {
       setLogs([]);
       return;
     }
-
     setLoading(true);
     setError(null);
     try {
       const result = await fetchTransformLogs(
-        flowKey as 'hibist' | 'sailor' | 'verification',
-        stage
+        flowKey as 'hibist' | 'sailor' | 'verification'
       );
       if (!result.success) {
         setError('读取历史记录失败');
@@ -43,11 +41,35 @@ const TransformHistory: React.FC<Props> = ({ flowKey, stage }) => {
   };
 
   useEffect(() => {
-    void loadLogs();
-  }, [flowKey, stage]);
+    if (historyOpen) {
+      loadLogs();
+    } else {
+      setLogs([]);
+    }
+  }, [flowKey, historyOpen]);
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <style>
+        {`
+          .multiline-ellipsis .multiline-content {
+            display: -webkit-box;
+            -webkit-line-clamp: 3;       
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.5;            
+            max-height: 4.5em;           
+            white-space: normal;       
+            word-break: break-word;
+          }
+
+          .ant-tooltip-inner {
+            max-width: 600px;     
+            white-space: pre-wrap;
+          }
+        `}
+      </style>
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={loadLogs}>
           刷新
@@ -56,7 +78,7 @@ const TransformHistory: React.FC<Props> = ({ flowKey, stage }) => {
       {error ? <Alert type="error" showIcon message={error} /> : null}
       <Table
         size="small"
-        rowKey={(record, index) => `${record.flow}-${record.timemilles ?? record.timestamp ?? index}`}
+        rowKey={record => `${record.flow}-${record.timemilles ?? record.timestamp}`}
         loading={loading}
         dataSource={logs}
         locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无历史记录" /> }}
@@ -79,7 +101,15 @@ const TransformHistory: React.FC<Props> = ({ flowKey, stage }) => {
           {
             title: 'Module / Stage',
             width: 150,
-            render: (_value: unknown, record) => record.module ?? record.stage ?? '-',
+            className: 'multiline-ellipsis',
+            render: (_value: unknown, record) => {
+              const text = record.module ?? record.stage ?? '-';
+              return (
+                <Tooltip title={text} placement="topLeft" mouseEnterDelay={0.3}>
+                  <div className="multiline-content">{text}</div>
+                </Tooltip>
+              );
+            },
           },
           {
             title: '执行脚本',
@@ -100,6 +130,14 @@ const TransformHistory: React.FC<Props> = ({ flowKey, stage }) => {
           {
             title: '归一化表格',
             dataIndex: 'normTable',
+            ellipsis: true,
+            render: (value?: string) => value
+              ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+              : '-',
+          },
+          {
+            title: 'LANDER_ASSISTANT.json',
+            dataIndex: 'landerAssistant',
             ellipsis: true,
             render: (value?: string) => value
               ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>

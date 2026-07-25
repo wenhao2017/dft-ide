@@ -90,6 +90,7 @@ import {
   shouldKeepDiffItem,
   getIncompleteSyncPathMessage,
 } from './commonFlowHelpers';
+import { formatTime } from '../../utils';
 
 const { Text, Title, Paragraph } = Typography;
 
@@ -791,7 +792,7 @@ const CommonFlow: React.FC = () => {
             </Space>
 
             <Text ellipsis={{ tooltip: info?.repoRoot }} style={{ ...mutedTextStyle, fontSize: 12 }}>
-              {info?.checkedAt ? `已检查云端 · ${new Date(info.checkedAt).toLocaleTimeString()}` : info?.repoRoot ?? '等待仓库信息'}
+              {info?.checkedAt ? `已检查云端 · ${formatTime(new Date(info.checkedAt))}` : info?.repoRoot ?? '等待仓库信息'}
             </Text>
           </Space>
         </button>
@@ -1409,7 +1410,7 @@ const CommonFlow: React.FC = () => {
             </Button>,
           ]}
           width={420}
-          destroyOnClose
+          destroyOnHidden
         >
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Spin />
@@ -1437,7 +1438,7 @@ const CommonFlow: React.FC = () => {
           footer={null}
           width={wizardStep === 1 && selectedStrategy === 'manualMerge' ? 1150 : 750}
           style={{ top: 40 }}
-          destroyOnClose
+          destroyOnHidden
         >
           <div style={{ marginTop: 12, marginBottom: 20 }}>
             {/* Steps bar */}

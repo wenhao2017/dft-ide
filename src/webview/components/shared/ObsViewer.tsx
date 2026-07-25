@@ -550,7 +550,7 @@ const ObsViewer: React.FC<ObsViewerProps> = ({
 };
 
 function toObsPath(spaceName: string, item: ObsFile): string {
-  const suffix = item.type === 'folder' ? '/' : '';
+  const suffix = item.type === 'folder' ? '' : '';
   return `obs://${spaceName}${item.path.replace(/\/+$/, '')}${suffix}`;
 }
 

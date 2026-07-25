@@ -282,7 +282,8 @@ export async function createProject(): Promise<void> {
       { name: 'hibist', path: 'hibist' },
       { name: 'sailor', path: 'sailor' },
       { name: 'verification', path: 'verification' },
-      { name: 'data', path: 'data' }
+      { name: 'data', path: 'data' },
+      { name: 'DFT Local State', path: '.dft-ide' }
     ],
     settings: {
       'workbench.startupEditor': 'none'
@@ -407,7 +408,10 @@ export async function initProjectWorkspace(project: DftProject): Promise<string>
 
   const workspaceFile = vscode.Uri.joinPath(projectRoot, 'dft-ide.code-workspace');
   const workspaceContent = {
-    folders: folders,
+    folders: [
+      ...folders,
+      { name: 'DFT Local State', path: LOCAL_STATE_DIR_NAME },
+    ],
     settings: {
       'workbench.startupEditor': 'none'
     }
@@ -459,7 +463,10 @@ export async function prepareProjectWorkspace(
 
   const workspaceFile = vscode.Uri.joinPath(projectRoot, 'dft-ide.code-workspace');
   const workspaceContent = {
-    folders: PROJECT_REPOS.map((repo) => ({ name: repo, path: repo })),
+    folders: [
+      ...PROJECT_REPOS.map((repo) => ({ name: repo, path: repo })),
+      { name: 'DFT Local State', path: LOCAL_STATE_DIR_NAME },
+    ],
     settings: {
       'workbench.startupEditor': 'none'
     }
@@ -683,7 +690,7 @@ export function getProjectRepoRoot(repo: 'hibist' | 'sailor' | 'data' | 'verific
 
 export async function getFlowConfigsDirectory(flow: 'hibist' | 'sailor' | 'verification', stage?: string): Promise<string> {
   const repoRoot = await resolveProjectRepoRoot(flow);
-  return stage ? path.join(repoRoot, normalizeStageName(stage), flow, 'cfg') : path.join(repoRoot, flow, 'cfg');
+  return stage ? path.join(repoRoot, normalizeStageName(stage)) : path.join(repoRoot, flow, 'cfg');
 }
 
 export function normalizeStageName(value: unknown): string {
@@ -855,6 +862,7 @@ export interface TransformLog {
   time?: string;
   logFile?: string;
   success?: boolean;
+  finished?: boolean;
 }
 
 function quoteCshArg(value: string): string {
@@ -899,9 +907,7 @@ async function waitForDefaultConfigTerminalReady(terminal: vscode.Terminal): Pro
 export async function doConfigTransform(transformLog: TransformLog): Promise<TransformLog> {
   const timestamp = dayjs().format('YYYY-MM-DD HH:mm:ss');
   const timemilles = Date.now().toString();
-  const logsDirectory = path.join(transformLog.configPath, '.logs');
-  await ensureLocalConfigDirectory(logsDirectory);
-  const logFile = path.join(logsDirectory, `${transformLog.flow}-${transformLog.requestId ?? 'request'}-${timemilles}.log`);
+  const logFile = path.join(transformLog.configPath, `${transformLog.flow}-${transformLog.requestId ?? 'request'}-${timemilles}.log`);
   transformLog = { ...transformLog, logFile, timestamp, timemilles };
 
   const runKey = `${transformLog.flow}:${transformLog.stage ?? ''}`;
@@ -940,7 +946,8 @@ export async function doConfigTransform(transformLog: TransformLog): Promise<Tra
         if (error) {
           reject(error);
         } else {
-          // terminal.dispose();
+          terminal.dispose();
+          transformLog = { ...transformLog, finished: true };
           resolve();
         }
       };
@@ -960,8 +967,8 @@ export async function doConfigTransform(transformLog: TransformLog): Promise<Tra
           if (normalized.split((marker)).length - 1 <= 0) {
             return;
           }
-          const exitCodeText = normalized.slice(markerIndex + marker.length).match(/-?\d+/);
-          if (exitCodeText === undefined) {
+          const exitCodeText = normalized.slice(markerIndex + marker.length);
+          if (exitCodeText === undefined || exitCodeText === null || isNaN(Number(exitCodeText))) {
             return;
           }
           const exitCode = Number(exitCodeText);
@@ -997,6 +1004,8 @@ export async function doConfigTransform(transformLog: TransformLog): Promise<Tra
   } catch (error) {
     activeDefaultConfigRuns.delete(runKey);
     throw error;
+  } finally{
+    transformLog = { ...transformLog, finished: true };
   }
   return transformLog;
 }

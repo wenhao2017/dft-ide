@@ -114,6 +114,7 @@ import {
   cleanupObsReadonlyDocument,
 } from './services/obsPreviewService';
 import { parseModuleString } from './services/utils';
+import { DftProject, ProjectDomain } from './webview/services/projectService';
 
 const execFileAsync = promisify(execFile);
 
@@ -958,6 +959,37 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       }
 
 
+      case 'revealExecutionHistory': {
+        const flow = msg.flow;
+        const runId = typeof msg.runId === 'string' ? msg.runId : '';
+        if (!isPipelineFlowKey(flow) || !/^exec_\d+_\d+$/.test(runId)) {
+          void vscode.window.showErrorMessage('无效的执行历史目录。');
+          return;
+        }
+        const projectRoot = resolveProjectRoot();
+        if (!projectRoot) {
+          void vscode.window.showErrorMessage('请先打开 DFT 项目工作区。');
+          return;
+        }
+        const historyUri = vscode.Uri.file(
+          path.join(projectRoot, '.dft-ide', 'local-state', 'history', flow, runId)
+        );
+        try {
+          const stat = await vscode.workspace.fs.stat(historyUri);
+          if (stat.type !== vscode.FileType.Directory) {
+            throw new Error('执行历史路径不是文件夹。');
+          }
+          await vscode.commands.executeCommand('workbench.view.explorer');
+          await vscode.commands.executeCommand('revealInExplorer', historyUri);
+          await vscode.commands.executeCommand('list.expand');
+        } catch (error) {
+          void vscode.window.showErrorMessage(
+            `无法在资源管理器中打开执行历史：${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+        return;
+      }
+
       case 'openObsFileReadOnly': {
         const requestId: string = msg.requestId;
         const obsPath = typeof msg.path === 'string' ? msg.path : '';
@@ -1073,6 +1105,119 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             requestId,
             success: false,
             items: [],
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
+      case 'downloadDomainEcoFromObs': {
+        const requestId: string = msg.requestId;
+        const project = msg.project as DftProject;
+        const domain = msg.domain as ProjectDomain;
+        try {
+          const projectRoot = resolveProjectRoot()
+          if (!projectRoot) {
+            throw new Error('Fetch project root failed.');
+          }
+
+          const domainPath = path.join(projectRoot, domain.key);
+          const result = await obsTrackingService.downloadDirectory('DFT_IDE', `/ECOSCR/${domain.key}`, vscode.Uri.file(domainPath));
+          if (result.failedFiles > 0) {
+            throw new Error(`${result.failedFiles} OBS files failed to download.`);
+          }
+
+          for (const repo of project.repos) {
+            if (repo.key === 'data') {
+              continue;
+            } else if (repo.key === 'verification') {
+              const repoPath = path.join(projectRoot, repo.gitlabProjectName);
+              const files = fs.readdirSync(repoPath, { withFileTypes: true });
+              files.forEach(file => {
+                if (file.isDirectory()) {
+                  const ecoPath = path.join(repoPath, file.name, 'eco');
+                  if (fs.existsSync(ecoPath)) {
+                    if (project.domain && project.domain.key) {
+                      const oldPath = path.join(ecoPath, project.domain.key);
+                      if (fs.existsSync(oldPath)) {
+                        fs.rmSync(oldPath, { recursive: true, force: true });
+                      }
+                    }
+                    const destPath = path.join(ecoPath, domain.key);
+                    fs.cpSync(domainPath, destPath, { recursive: true });
+                  }
+                }
+              });
+            } else {
+              if (project.domain && project.domain.key) {
+                const oldPath = path.join(projectRoot, repo.gitlabProjectName, 'eco', project.domain.key);
+                if (fs.existsSync(oldPath)) {
+                  fs.rmSync(oldPath, { recursive: true, force: true });
+                }
+              }
+              const destPath = path.join(projectRoot, repo.gitlabProjectName, 'eco', domain.key);
+              fs.cpSync(domainPath, destPath, { recursive: true });
+            }
+          }
+          fs.rmSync(domainPath, { recursive: true, force: true });
+
+          // 复制代码仓eco到业务仓, 暂时放在这
+          const scriptPath = path.resolve(__dirname, '../scripts/eco');
+          if (fs.existsSync(scriptPath)) {
+            let ecoList: {
+              hibist: string[];
+              sailor: string[];
+              lander: string[];
+            } = { hibist: [], sailor: [], lander: [] }
+            const files = fs.readdirSync(scriptPath, { withFileTypes: true });
+            files.forEach(file => {
+              if (file.isFile()) {
+                if (file.name.startsWith('run_flow_hibist')) {
+                  ecoList.hibist.push(path.join(scriptPath, file.name));
+                } else if (file.name.startsWith('run_flow_sailor')) {
+                  ecoList.sailor.push(path.join(scriptPath, file.name));
+                } else if (file.name.startsWith('run_flow_lander')) {
+                  ecoList.lander.push(path.join(scriptPath, file.name));
+                }
+              }
+            });
+            for (const repo of project.repos) {
+              if (repo.key === 'data') {
+                continue
+              } else if (repo.key === 'verification') {
+                const repoPath = path.join(projectRoot, repo.gitlabProjectName);
+                const files = fs.readdirSync(repoPath, { withFileTypes: true });
+                files.forEach(file => {
+                  if (file.isDirectory()) {
+                    const destPath = path.join(repoPath, file.name, 'eco');
+                    if (fs.existsSync(destPath)) {
+                      for (const ecoFile of ecoList.lander) {
+                        const desFile = path.join(destPath, path.basename(ecoFile));
+                        fs.cpSync(ecoFile, desFile, { recursive: true });
+                      }
+                    }
+                  }
+                });
+              } else {
+                const destPath = path.join(projectRoot, repo.gitlabProjectName, 'eco');
+                for (const ecoFile of ecoList[repo.key]) {
+                  const desFile = path.join(destPath, path.basename(ecoFile));
+                  fs.cpSync(ecoFile, desFile, { recursive: true });
+                }
+              }
+            }
+          }
+
+          currentPanel?.webview.postMessage({
+            command: 'downloadDomainEcoFromObsResponse',
+            requestId,
+            success: true,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'downloadDomainEcoFromObsResponse',
+            requestId,
+            success: false,
             error: err instanceof Error ? err.message : String(err),
           });
         }
@@ -1800,13 +1945,15 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             stage,
             isAllSelected,
           });
-          const result = await saveTransformLogs(transformLog, stage);
-          currentPanel?.webview.postMessage({
-            command: 'generateDefaultFlowConfigsResponse',
-            requestId,
-            success: true,
-            result,
-          });
+          if (transformLog.finished) {
+            const result = await saveTransformLogs(transformLog, stage);
+            currentPanel?.webview.postMessage({
+              command: 'generateDefaultFlowConfigsResponse',
+              requestId,
+              success: true,
+              result,
+            });
+          }
         } catch (err) {
           currentPanel?.webview.postMessage({
             command: 'generateDefaultFlowConfigsResponse',
@@ -1846,13 +1993,15 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             stage,
             landerAssistant,
           });
-          const result = await saveTransformLogs(transformLog, stage);
-          currentPanel?.webview.postMessage({
-            command: 'generateLanderConfigsResponse',
-            requestId,
-            success: true,
-            result
-          });
+          if (transformLog.finished) {
+            const result = await saveTransformLogs(transformLog, stage);
+            currentPanel?.webview.postMessage({
+              command: 'generateLanderConfigsResponse',
+              requestId,
+              success: true,
+              result
+            });
+          }
         } catch (err) {
           currentPanel?.webview.postMessage({
             command: 'generateLanderConfigsResponse',
@@ -2309,8 +2458,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           if (!flow) {
             throw new Error('Unsupported flow for transform history.');
           }
-          const stage = msg.stage === undefined ? undefined : normalizeStageName(msg.stage);
-          const history = await fetchTransformLogs(flow, stage);
+          const history = await fetchTransformLogs(flow);
           currentPanel?.webview.postMessage({
             command: 'fetchTransformLogsResponse', requestId,
             success: true,

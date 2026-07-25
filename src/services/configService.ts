@@ -9,7 +9,7 @@ import {
   ensureLocalConfigDirectory,
   getSyncedArtifactPath,
   resolveProjectRoot,
-  type TransformLog,
+  type TransformLog, resolveLocalConfigDirectory,
 } from './workspaceService';
 import { obsTrackingService } from './obsTrackingService';
 
@@ -194,7 +194,6 @@ export async function downLoadObsScripts(
       if (path.basename(entrance.fileName) !== entrance.fileName) {
         throw new Error(`Invalid transform entrance file name: ${entrance.fileName}`);
       }
-
       const extensionRoot = path.resolve(context.extensionPath);
       const sourceScript = path.resolve(extensionRoot, entrance.dir, entrance.fileName);
       const sourceRelativePath = path.relative(extensionRoot, sourceScript);
@@ -240,6 +239,24 @@ export async function downLoadObsScripts(
   } else {
     console.info(`[DFT IDE] 尚未配置 dftIde.obs.scriptSpace 或 scriptPaths.${flow}，预留空项待填`);
     return [];
+  }
+}
+
+export async function removeExecutedScripts(
+  flow: 'hibist' | 'sailor' | 'verification',
+  stage?: string,
+) {
+  const configsDir = await getFlowConfigsDirectory(flow, stage);
+  
+  const obsConfig = vscode.workspace.getConfiguration('dftIde.obs');
+  const scriptPaths = obsConfig.get<Record<string, ObsScriptPathConfig>>('scriptPaths', {});
+  const flowConfig = scriptPaths[flow];
+  const files = flowConfig?.files as [{fileName: string, type: number}];
+
+  for (const file of files) {
+    const filename: string = file.fileName;
+    const type: number = file.type;
+    if (type === 1) await vscode.workspace.fs.delete(vscode.Uri.file(path.join(configsDir, filename)), { recursive: false });
   }
 }
 
@@ -384,19 +401,22 @@ export function collectModuleNames(value: unknown, modules: Set<string>): void {
 }
 
 export async function saveTransformLogs(transformLog: TransformLog, stage?: string): Promise<TransformLog> {
-  const configsDir = await getFlowConfigsDirectory(transformLog.flow, stage);
-  const timestampKey = transformLog.timemilles ?? Date.now().toString();
+  const localStateDir = resolveLocalConfigDirectory() as string;
+  const targetPath = path.join(localStateDir, 'transform_history', transformLog.flow);
   const savedLog: TransformLog = {
     ...transformLog,
-    scriptPath: await copyLogFile(transformLog.scriptPath, timestampKey, configsDir),
+    scriptPath: await moveTransformFile(transformLog, transformLog.scriptPath, targetPath, 2),
     designTree: transformLog.designTree
-      ? await copyLogFile(transformLog.designTree, timestampKey, configsDir)
+      ? await moveTransformFile(transformLog, transformLog.designTree, targetPath, 1)
       : undefined,
     normTable: transformLog.normTable
-      ? await copyLogFile(transformLog.normTable, timestampKey, configsDir)
+      ? await moveTransformFile(transformLog, transformLog.normTable, targetPath, 1)
       : undefined,
     landerAssistant: transformLog.landerAssistant
-      ? await copyLogFile(transformLog.landerAssistant, timestampKey, configsDir)
+      ? await moveTransformFile(transformLog, transformLog.landerAssistant, targetPath, 1)
+      : undefined,
+    logFile: transformLog.logFile
+      ? await moveTransformFile(transformLog, transformLog.logFile, targetPath, 2)
       : undefined
   };
 
@@ -404,35 +424,30 @@ export async function saveTransformLogs(transformLog: TransformLog, stage?: stri
     1,
     vscode.workspace.getConfiguration('dftIde').get<number>('maxHistoryCounts', 10)
   );
-  const filePath = resolveCfgPath(configsDir, 'history');
-  await ensureLocalConfigDirectory(path.dirname(filePath));
+  const hisotryJson = path.join(targetPath, "history.json");
 
-  const existing = await readTransformLogFile(filePath);
+  const existing = await readTransformLogFile(hisotryJson);
   const retained = [savedLog, ...existing].slice(0, maxHistoryCounts);
   for (const removed of existing.slice(Math.max(0, maxHistoryCounts - 1))) {
     await removeLogFiles(removed);
   }
   const content = retained.map((item) => JSON.stringify(item)).join('\n');
-  await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), Buffer.from(content, 'utf-8'));
+  await vscode.workspace.fs.writeFile(vscode.Uri.file(hisotryJson), Buffer.from(content, 'utf-8'));
+  await removeExecutedScripts(transformLog.flow, transformLog.stage);
   return savedLog;
 }
 
-export async function copyLogFile(filePath: string, timemilles: string, configsDir: string): Promise<string> {
-  const { name, extension } = getFileNameAndExtension(filePath);
-  if (!name) {
-    throw new Error(`Invalid transform log source path: ${filePath}`);
-  }
-  const fullName = path.join(configsDir, '.logs', `${name}_${timemilles}${extension ? `.${extension}` : ''}`);
-  await vscode.workspace.fs.copy(vscode.Uri.file(filePath), vscode.Uri.file(fullName));
-  return fullName;
-}
-
-export async function moveLogFile(filePath: string, configsDir: string): Promise<string> {
+export async function moveTransformFile(transformLog: TransformLog, sourceFile: string, targetPath: string, type: number): Promise<string> {
   try {
-    const { name, extension } = getFileNameAndExtension(filePath);
-    const fullName = `${configsDir}/.logs/${name}${extension ? '.' + extension : ''}`;
-    await vscode.workspace.fs.rename(vscode.Uri.file(filePath),
-      vscode.Uri.file(fullName));
+    const { name, extension } = getFileNameAndExtension(sourceFile);
+    const fullName = path.join(targetPath, `${name}_${transformLog.timemilles}${extension ? `.${extension}` : ''}`);
+    if (type==1) {
+      // copy
+      await vscode.workspace.fs.copy(vscode.Uri.file(sourceFile), vscode.Uri.file(fullName));
+    } else {
+      // move
+      await vscode.workspace.fs.rename(vscode.Uri.file(sourceFile), vscode.Uri.file(fullName));
+    }
     return fullName;
   } catch (error) {
     vscode.window.showErrorMessage(`${(error as Error).message}`);
@@ -467,25 +482,23 @@ export async function checkTransformStatus(logFile: string): Promise<boolean> {
 
 export async function fetchTransformLogs(
   flow: 'hibist' | 'sailor' | 'verification',
-  stage?: string
 ): Promise<TransformLog[]> {
-  const configsDir = await getFlowConfigsDirectory(flow, stage);
-  await ensureLocalConfigDirectory(configsDir);
-  const filePath = resolveCfgPath(configsDir, 'history');
-  return readTransformLogFile(filePath);
+  const localStateDir = resolveLocalConfigDirectory() as string;
+  const historyFile = path.join(localStateDir, 'transform_history', flow, "history.json");
+  return readTransformLogFile(historyFile);
 }
 
 async function readTransformLogFile(filePath: string): Promise<TransformLog[]> {
   if (!await pathExists(filePath)) {
     return [];
   }
-  const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+  const fileUri = vscode.Uri.file(filePath);
+  const buffer = await vscode.workspace.fs.readFile(fileUri);
+  const content = new TextDecoder().decode(buffer);
+  const lines = content.split(/\r\n|\n|\r/g).filter(line => line.length > 0);
   const logs: TransformLog[] = [];
-  for (let i = 0; i < document.lineCount; i += 1) {
-    const text = document.lineAt(i).text.trim();
-    if (!text) {
-      continue;
-    }
+  for (let i = 0; i < lines.length; i += 1) {
+    const text = lines[i];
     try {
       const parsed: unknown = JSON.parse(text);
       if (isRecord(parsed) && typeof parsed.flow === 'string' && typeof parsed.scriptPath === 'string') {

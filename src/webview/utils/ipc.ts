@@ -7,7 +7,7 @@
  */
 
 import vscode from './vscode';
-import type { DftProject } from '../services/projectService';
+import type { DftProject, ProjectDomain } from '../services/projectService';
 import { z } from 'zod';
 import type { LanderStep } from '../../services/landerPipelineService';
 import type { CommonSyncArtifact } from '../../services/commonSyncArtifacts';
@@ -265,6 +265,20 @@ export async function listObsChildren(
 ): Promise<{ success: boolean; items: ObsChildItemDto[]; error?: string }> {
   const res = await ipcRequest('listObsChildren', { spaceName, remotePath })
   return res as unknown as { success: boolean; items: ObsChildItemDto[]; error?: string }
+}
+
+export async function downloadDomainEcoFromObs(
+  project: DftProject,
+  domain: ProjectDomain,
+): Promise<{
+  success: boolean
+  error?: string
+}> {
+  const res = await ipcRequest('downloadDomainEcoFromObs', { project, domain }, 30 * 60_000)
+  return res as {
+    success: boolean
+    error?: string
+  }
 }
 
 export function runVscodeDemo(action: string): void {
@@ -812,6 +826,13 @@ export async function openExecutionTerminal(options: {
   return { success: true }
 }
 
+export function revealExecutionHistory(
+  flow: 'hibist' | 'sailor' | 'verification',
+  runId: string,
+): void {
+  vscode.postMessage({ command: 'revealExecutionHistory', flow, runId })
+}
+
 export interface ExecutionHistoryRecord {
   id: string
   flow: string
@@ -1053,10 +1074,6 @@ export async function fetchTransformLogs(
   const res = await ipcRequest('fetchTransformLogs', { flow, stage });
   return res as unknown as { success: boolean; history: TransformLog[]; error?: string };
 }
-
-// Compatibility for the existing history component and saved-flow surface.
-export type DefaultConfigLog = TransformLog;
-export const fetchDefaultConfigLogs = fetchTransformLogs;
 
 export async function appendLanderStage(
   flow: 'verification',

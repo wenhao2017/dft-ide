@@ -35,6 +35,7 @@ import {
   LocalConfigInfo,
   WorkspaceProjectInfo,
   openExternalUrl,
+  downloadDomainEcoFromObs,
 } from '../utils/ipc';
 import useWizardStore from '../store/wizardStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -408,7 +409,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
   }, [currentUser]);
 
   const canManageDomains = () =>
-    // currentUser === 'a60096337';
+    // currentUser === 'y00519437';
     true;
 
   const isProjectInitialized = (project: DftProject) =>
@@ -420,8 +421,8 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
   const isMemberManageDisable = (project: DftProject) =>
     !isProjectInitialized(project) || project.role !== 'DFTM';
 
-  const isDomainManageDisable = (project: DftProject) =>
-    project.role.toUpperCase() !== 'DFTM';
+  const isDomainManageDisable = (project: DftProject, active: boolean) =>
+    !active || project.role.toUpperCase() !== 'DFTM';
 
   const isProjectEnterDisable = (project: DftProject) =>
     !isProjectInitialized(project);
@@ -438,10 +439,11 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     return '管理项目成员'
   }
 
-  const domainManageTooltipTitle = (project: DftProject) =>
-    isDomainManageDisable(project)
-      ? '只有 DFTM 角色可以管理项目领域'
-      : '配置或修改项目领域';
+  const domainManageTooltipTitle = (project: DftProject, active: boolean) => {
+    if (!active) return '未进入项目无法管理项目领域'
+    if (project.role !== 'DFTM') return '只有 DFTM 角色可以管理项目领域'
+    return '配置或修改项目领域'
+  }
 
   const openDomainModal = (project: DftProject) => {
     loadDomains();
@@ -468,19 +470,24 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     if (!domainProject || !selectedDomain) return;
     setDomainSaving(true);
     try {
-      await updateProjectDomain(domainProject.id, selectedDomain);
-      const updateDomain = (project: DftProject) =>
-        project.id === domainProject.id ? { ...project, domain: selectedDomain } : project;
-      setProjects((previous) => previous.map(updateDomain));
-      setDashboard((previous) => previous
-        ? { ...previous, projects: previous.projects.map(updateDomain) }
-        : previous);
-      if (activeProject?.id === domainProject.id) {
-        setActiveProjectDomain(selectedDomain);
+      const result = await downloadDomainEcoFromObs(domainProject, selectedDomain);
+      if (result.success) {
+        await updateProjectDomain(domainProject.id, selectedDomain);
+        const updateDomain = (project: DftProject) =>
+          project.id === domainProject.id ? { ...project, domain: selectedDomain } : project;
+        setProjects((previous) => previous.map(updateDomain));
+        setDashboard((previous) => previous
+          ? { ...previous, projects: previous.projects.map(updateDomain) }
+          : previous);
+        if (activeProject?.id === domainProject.id) {
+          setActiveProjectDomain(selectedDomain);
+        }
+        message.success(`项目领域已更新为“${getProjectDomainLabel(selectedDomain)}”`);
+        setDomainProject(null);
+        setSelectedDomain(undefined);
+      } else {
+        message.error(result.error ?? '拉取领域 ECO 脚本失败');
       }
-      message.success(`项目领域已更新为“${getProjectDomainLabel(selectedDomain)}”`);
-      setDomainProject(null);
-      setSelectedDomain(undefined);
     } catch (error) {
       message.error(error instanceof Error ? error.message : '项目领域更新失败');
     } finally {
@@ -879,11 +886,11 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
                             </Button>
                           </span>
                         </Tooltip>}
-                        {inited && <Tooltip key="domain" title={domainManageTooltipTitle(project)}>
+                        {inited && <Tooltip key="domain" title={domainManageTooltipTitle(project, active)}>
                           <span>
                             <Button
                               icon={<GlobalOutlined />}
-                              disabled={isDomainManageDisable(project)}
+                              disabled={isDomainManageDisable(project, active)}
                               onClick={() => openDomainModal(project)}
                               style={{ flex: 1 }}
                             >

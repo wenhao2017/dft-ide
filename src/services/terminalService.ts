@@ -145,11 +145,27 @@ export async function saveExecutionHistoryRecord(
     const toDelete = jsonFiles.slice(0, jsonFiles.length - 499);
     for (const name of toDelete) {
       await vscode.workspace.fs.delete(vscode.Uri.file(path.join(historyDir, name)));
+      const executionDir = path.join(historyDir, path.basename(name, '.json'));
+      try {
+        await vscode.workspace.fs.delete(vscode.Uri.file(executionDir), { recursive: true });
+      } catch {
+        // Older history entries may not have a matching execution directory.
+      }
     }
   }
 
-  const id = `exec_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const runtimeRunId = 'runtimeSnapshot' in record
+    && record.runtimeSnapshot
+    && typeof record.runtimeSnapshot === 'object'
+    && 'runId' in record.runtimeSnapshot
+    && typeof record.runtimeSnapshot.runId === 'string'
+    ? record.runtimeSnapshot.runId
+    : '';
+  const id = /^exec_\d+_\d+$/.test(runtimeRunId)
+    ? runtimeRunId
+    : `exec_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
   const fullRecord = { ...record, flow: normalizedFlow, id, executedAt: Date.now() };
+  await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.join(historyDir, id)));
   const filePath = path.join(historyDir, `${id}.json`);
   await vscode.workspace.fs.writeFile(
     vscode.Uri.file(filePath),

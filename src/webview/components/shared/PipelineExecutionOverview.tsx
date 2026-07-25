@@ -23,7 +23,7 @@ import usePipelineRuntimeStore, {
   getPipelineRuntimeKey,
 } from '../../store/pipelineRuntimeStore';
 import { PipelineLink, PipelineTask } from './pipelineMockData';
-import { openExecutionTerminal } from '../../utils/ipc';
+import { openExecutionTerminal, revealExecutionHistory } from '../../utils/ipc';
 import { useShallow } from 'zustand/react/shallow';
 
 type OverviewRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
@@ -428,6 +428,9 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
       return next;
     });
     selectRuntimeTask(flowKey, run.moduleKey, taskId);
+    if (run.runId) {
+      revealExecutionHistory(flowKey, run.runId);
+    }
 
     const task = run.tasks.find((t) => t.id === taskId);
     if (task && task.status !== 'pending' && task.status !== 'skipped') {

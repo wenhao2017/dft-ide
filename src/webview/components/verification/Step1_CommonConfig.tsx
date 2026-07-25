@@ -191,7 +191,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey }) => {
             marginBottom: 16
           }}>
             <Space direction="vertical" size={16} style={{ width: '100%' }}>
-              <TransformHistory flowKey={flowKey} stage={stage} />
+              <TransformHistory flowKey={flowKey} historyOpen={historyOpen}/>
             </Space>
           </div>
         </div>
