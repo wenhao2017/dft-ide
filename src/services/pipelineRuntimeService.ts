@@ -381,7 +381,7 @@ function buildStepCommands(
       : '';
     fs.writeFileSync(
       targetFile,
-      `#!/bin/csh -f\n${projectEnvironment}${scriptContent}\n`,
+      `#!/bin/csh -f\nstty sane >& /dev/null\nstty onlcr >& /dev/null\n${projectEnvironment}${scriptContent}\n`,
     );
     fs.chmodSync(targetFile, 0o755);
     return `source ${targetFile}`;
