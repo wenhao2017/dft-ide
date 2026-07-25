@@ -269,7 +269,7 @@ const CommonFlow: React.FC = () => {
 
   useEffect(() => {
     void refreshRepoInfo(true, true);
-    const timer = window.setInterval(() => void refreshRepoInfo(true, true), 5 * 60_000);
+    const timer = window.setInterval(() => void refreshRepoInfo(false, true), 5 * 60_000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
