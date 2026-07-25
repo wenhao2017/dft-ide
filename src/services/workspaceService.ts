@@ -501,7 +501,7 @@ export async function cloneRepoWithTerminal(repoUrl: string, projectPath: string
           }
         }
       });
-      terminal.sendText(`git clone ${repoUrl}`);
+      terminal.sendText(`git clone -c credential.helper=store ${repoUrl}`);
     } else {
       let output = '';
       const windowWithTerminalData = vscode.window as typeof vscode.window & {
@@ -528,7 +528,7 @@ export async function cloneRepoWithTerminal(repoUrl: string, projectPath: string
           }
         }
       });
-      terminal.sendText(`git clone ${repoUrl} ; echo "CLONE_FINISHED"`);
+      terminal.sendText(`git clone -c credential.helper=store ${repoUrl} ; echo "CLONE_FINISHED"`);
     }
   });
 }
