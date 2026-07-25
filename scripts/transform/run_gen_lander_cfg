@@ -17,4 +17,4 @@ if ($status != 0) exit $status
 cd lander_env
 python lander_assistant_2_0.py
 if ($status != 0) exit $status
-python lander_cfg_mode_2_0.py
+python lander_cfg_mode_2_0.py
