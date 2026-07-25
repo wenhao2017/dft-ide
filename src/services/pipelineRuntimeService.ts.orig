@@ -92,7 +92,7 @@ const DEFAULT_DONAU_GROUP = 'ug_dft.HIS-HIS-ASIC-HISC-DFT-PLAT-WS';
 const DEFAULT_DONAU_QUEUE = 'normal';
 
 function quoteCshArgument(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
+  return `"${value.replace(/(["\\$`])/g, '\\$1')}"`;
 }
 
 type RuntimeToolConfig =
@@ -244,8 +244,8 @@ function getApplicableVerificationParameterSets(
   });
 }
 
-function buildVerificationExecutionCommands(projectPath: string | undefined, task: PipelineTask): string[] {
-  return [buildPipelineStepExecutionCommand(projectPath, task.command.trim())];
+function buildVerificationExecutionCommands(task: PipelineTask): string[] {
+  return [task.command.trim()];
 }
 
 function appendVerificationParameterCommands(
@@ -285,6 +285,7 @@ function buildStepCommands(
 ): string | string[] {
   const commands: string[] = [];
   const projectPath = resolveProjectPath(flowKey);
+  const projectSource = typeof envConfig?.project === 'string' ? envConfig.project.trim() : '';
   commands.push(`setenv DFT_IDE_HISTORY ${quoteCshArgument(runId)}`);
 
   if (index === 0) {
@@ -345,7 +346,7 @@ function buildStepCommands(
 
   const stepCommand = task.command.trim();
   const executionCommands = flowKey === 'verification'
-    ? buildVerificationExecutionCommands(projectPath, task)
+    ? buildVerificationExecutionCommands(task)
     : [buildPipelineStepExecutionCommand(projectPath, stepCommand)];
   commands.push(`echo "__DFT_IDE_STEP_START__|${runId}|${markerTaskId}"`);
   commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
@@ -375,9 +376,12 @@ function buildStepCommands(
     fs.mkdirSync(targetDir, { recursive: true });
     const targetFile = path.join(targetDir, task.name);
     const scriptContent = commands.map(cmd => cmd.trim()).join('\n');
+    const projectEnvironment = projectSource
+      ? `source ${quoteCshArgument(projectSource)}\nsetenv DFT_IDE_ENV_SOURCE ${quoteCshArgument(projectSource)}\n`
+      : '';
     fs.writeFileSync(
       targetFile,
-      `#!/bin/csh -f\nstty sane >& /dev/null\nstty onlcr >& /dev/null\n${scriptContent}\n`,
+      `#!/bin/csh -f\nstty sane >& /dev/null\nstty onlcr >& /dev/null\n${projectEnvironment}${scriptContent}\n`,
     );
     fs.chmodSync(targetFile, 0o755);
     return `source ${targetFile}`;
@@ -1034,7 +1038,7 @@ export class PipelineRuntimeService {
       execution.markerTaskId,
     );
     const generatedCommands = session.flowKey === 'verification'
-      ? buildVerificationExecutionCommands(resolveProjectPath(session.flowKey), task)
+      ? buildVerificationExecutionCommands(task)
       : [buildPipelineStepExecutionCommand(resolveProjectPath(session.flowKey), task.command.trim())];
     const runParameterRows = execution.parameters ? [execution.parameters] : [];
     console.group(`[DFT IDE] Pipeline Task: ${session.flowLabel} / ${session.moduleKey} / ${task.name} / ${execution.markerTaskId}`);

@@ -318,16 +318,15 @@ def csh_quote(value):
 
 
 def run_csh(lines, env, log_file=None):
-    shell = env.get("DFT_IDE_FLOW_SHELL", "/bin/csh")
     script_path = None
     try:
         with tempfile.NamedTemporaryFile("w", suffix=".csh", encoding="utf-8", newline="\n", delete=False) as handle:
-            handle.write("#!/bin/csh -f\n")
+            handle.write("#!/bin/csh\n")
             handle.write("\n".join(lines))
             handle.write("\n")
             script_path = handle.name
         process = subprocess.Popen(
-            [shell, "-f", script_path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            ["/bin/csh", script_path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding=env.get("DFT_IDE_OUTPUT_ENCODING", "utf-8"),
             errors="replace", env=env,
         )
@@ -345,7 +344,7 @@ def run_csh(lines, env, log_file=None):
                 log_handle.close()
         return process.wait()
     except FileNotFoundError:
-        fail(f"找不到 Csh 可执行程序: {shell}", 127)
+        fail("找不到 Csh 可执行程序: /bin/csh", 127)
     finally:
         if script_path:
             try:
@@ -361,7 +360,7 @@ def source_lines(source_file):
 def read_dsubrun_prefix(env):
     raw_value = env.get("DFT_IDE_DSUBRUN_I", "").strip()
     if not raw_value:
-        return []
+        fail("DFT_IDE_DSUBRUN_I is required and must not be empty")
     try:
         return shlex.split(raw_value)
     except ValueError as error:
