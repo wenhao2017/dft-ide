@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { message, Segmented } from 'antd'
+import { message } from 'antd'
 import type {
   ModeConfigItem,
   ModePanelItem,
@@ -14,6 +14,7 @@ import ModeTitle from './components/ModeTitle'
 import ModeToolbar from './components/ModeToolbar'
 import ModeList from './components/ModeList'
 import ModeFooter from './components/ModeFooter'
+import ModeTypeSwitcher from './components/ModeTypeSwitcher'
 import CreateModal from './components/CreateModal'
 import RenameModal from './components/RenameModal'
 
@@ -532,17 +533,10 @@ export default function ModePanel({
       />
 
       <div style={{ padding: '10px 12px 0' }}>
-        <Segmented
-          block
-          size={'small'}
-          value={activeTab}
-          options={[
-            { label: 'Mode', value: 'mode' },
-            { label: 'Group', value: 'group' },
-            { label: 'TC', value: 'tc' },
-            { label: 'SubAttr', value: 'subattr' },
-          ]}
-          onChange={(value) => setActiveTab(value as ModePanelTab)}
+        <ModeTypeSwitcher
+          activeTab={activeTab}
+          accent={accentColor}
+          onChange={setActiveTab}
         />
       </div>
 
