@@ -28,6 +28,7 @@ export interface DftProject {
   repos: ProjectRepoStatus[];
   local_root?: string;
   is_star?: boolean;
+  projectPath?: string;
 }
 
 export interface ProjectDashboard {
@@ -170,6 +171,7 @@ function getApiBase(): string | null {
 
 export async function createProject(currentUser: string, project: {
   name: string;
+  domain: string;
   description: string;
 }): Promise<boolean> {
   const apiBase = getApiBase();
@@ -185,6 +187,7 @@ export async function createProject(currentUser: string, project: {
     body: JSON.stringify({
       user_id: currentUser,
       project_name: project.name,
+      domain: project.domain,
       description: project.description,
     }),
   });

@@ -28,7 +28,11 @@ import usePipelineRuntimeStore, {
   getPipelineRuntimeKey,
 } from '../../store/pipelineRuntimeStore';
 import { PipelineLink, PipelineTask } from './pipelineMockData';
-import { openExecutionTerminal, revealExecutionHistory } from '../../utils/ipc';
+import {
+  openExecutionTerminal,
+  parseExecutionHistoryDiagnostics,
+  revealExecutionHistory,
+} from '../../utils/ipc';
 import { useShallow } from 'zustand/react/shallow';
 
 type OverviewRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
@@ -53,6 +57,7 @@ interface PipelineRunOverview {
   failed: number;
   startedAt?: number;
   finishedAt?: number;
+  updatedAt?: number;
   logs: string[];
   tasks: PipelineTask[];
   links: PipelineLink[];
@@ -218,6 +223,7 @@ function summarizeRuntime(
     failed,
     startedAt: runtime?.startedAt,
     finishedAt: runtime?.finishedAt,
+    updatedAt: runtime?.updatedAt,
     logs: runtime?.logs.length ? runtime.logs : [`${moduleKey} is queued and waiting to start.`],
     tasks,
     links,
@@ -366,6 +372,12 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   const activeHierarchy = useMemo(() => {
     return activeModuleData ? getTaskHierarchy(activeModuleData) : undefined;
   }, [activeModuleData]);
+
+  const activeRunId = activeModuleData?.runId;
+  const activeRunUpdatedAt = activeModuleData?.updatedAt;
+  useEffect(() => {
+    parseExecutionHistoryDiagnostics(flowKey, activeRunId);
+  }, [activeModuleKey, activeRunId, activeRunUpdatedAt, flowKey]);
 
   const filteredRuns = useMemo(() => {
     const term = searchText.trim().toLowerCase();

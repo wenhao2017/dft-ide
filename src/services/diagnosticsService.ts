@@ -99,11 +99,11 @@ export async function parseDftExecutionLog(
     const range = createDiagnosticRange(issue, targetUri.toString() === logUri.toString() ? issue.logLine : undefined);
     const diagnostic = new vscode.Diagnostic(
       range,
-      `[${options.tool}/${options.flow}] ${issue.message}`,
+      `[${options.flow}] ${issue.message}`,
       issue.severity
     );
     diagnostic.source = 'DFT IDE';
-    diagnostic.code = options.tool;
+    diagnostic.code = options.flow;
     diagnostic.relatedInformation = [
       new vscode.DiagnosticRelatedInformation(
         new vscode.Location(logUri, new vscode.Position(Math.max(issue.logLine - 1, 0), 0)),
@@ -132,6 +132,89 @@ export async function parseDftExecutionLog(
     infoCount,
     totalCount: issues.length,
   };
+}
+
+export async function parseDftExecutionLogDirectory(
+  logDirectory: string,
+  options: DftDiagnosticParseOptions
+): Promise<DftDiagnosticParseResult> {
+  dftDiagnostics.clear();
+
+  const logUris = await collectLogFiles(vscode.Uri.file(logDirectory));
+  const diagnosticsByFile = new Map<string, { uri: vscode.Uri; diagnostics: vscode.Diagnostic[] }>();
+  let errorCount = 0;
+  let warningCount = 0;
+  let infoCount = 0;
+
+  for (const logUri of logUris) {
+    let raw: Uint8Array;
+    try {
+      raw = await vscode.workspace.fs.readFile(logUri);
+    } catch {
+      continue;
+    }
+
+    if (raw.includes(0)) {
+      continue;
+    }
+
+    for (const issue of parseDftLogContent(Buffer.from(raw).toString('utf-8'))) {
+      const targetUri = await resolveDiagnosticTargetUri(issue, logUri);
+      const range = createDiagnosticRange(
+        issue,
+        targetUri.toString() === logUri.toString() ? issue.logLine : undefined
+      );
+      const diagnostic = new vscode.Diagnostic(
+        range,
+        `[${options.flow}] ${issue.message}`,
+        issue.severity
+      );
+      diagnostic.source = 'DFT IDE';
+      diagnostic.code = options.flow;
+      diagnostic.relatedInformation = [
+        new vscode.DiagnosticRelatedInformation(
+          new vscode.Location(logUri, new vscode.Position(Math.max(issue.logLine - 1, 0), 0)),
+          `Parsed from ${path.basename(logUri.fsPath)} line ${issue.logLine}`
+        ),
+      ];
+
+      const key = targetUri.toString();
+      const bucket = diagnosticsByFile.get(key) ?? { uri: targetUri, diagnostics: [] };
+      bucket.diagnostics.push(diagnostic);
+      diagnosticsByFile.set(key, bucket);
+
+      if (issue.severity === vscode.DiagnosticSeverity.Error) errorCount += 1;
+      else if (issue.severity === vscode.DiagnosticSeverity.Warning) warningCount += 1;
+      else infoCount += 1;
+    }
+  }
+
+  for (const bucket of diagnosticsByFile.values()) {
+    dftDiagnostics.set(bucket.uri, bucket.diagnostics);
+  }
+
+  return {
+    logPath: logDirectory,
+    errorCount,
+    warningCount,
+    infoCount,
+    totalCount: errorCount + warningCount + infoCount,
+  };
+}
+
+async function collectLogFiles(directory: vscode.Uri): Promise<vscode.Uri[]> {
+  const files: vscode.Uri[] = [];
+  const entries = await vscode.workspace.fs.readDirectory(directory);
+
+  for (const [name, type] of entries) {
+    const child = vscode.Uri.joinPath(directory, name);
+    if (type & vscode.FileType.Directory) {
+      files.push(...await collectLogFiles(child));
+    } else if (type & vscode.FileType.File) {
+      files.push(child);
+    }
+  }
+  return files;
 }
 
 export function parseDftLogContent(content: string): ParsedDftLogIssue[] {

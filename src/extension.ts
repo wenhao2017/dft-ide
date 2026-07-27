@@ -54,6 +54,7 @@ import {
   getNormalizeTablePath,
   doConfigTransform,
   normalizeStageName,
+  pushDomainEcoWithTerminal,
 } from './services/workspaceService';
 
 // Import config services
@@ -95,6 +96,7 @@ import {
 // Import diagnostics services
 import {
   dftDiagnostics,
+  parseDftExecutionLogDirectory,
 } from './services/diagnosticsService';
 
 // Import terminal and execution history services
@@ -1025,6 +1027,33 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
+      case 'parseExecutionHistoryDiagnostics': {
+        const flow = msg.flow;
+        const runId = typeof msg.runId === 'string' ? msg.runId : '';
+        dftDiagnostics.clear();
+        if (!isPipelineFlowKey(flow) || !/^exec_\d+_\d+$/.test(runId)) {
+          return;
+        }
+        const projectRoot = resolveProjectRoot();
+        if (!projectRoot) {
+          return;
+        }
+        const historyUri = vscode.Uri.file(
+          path.join(projectRoot, '.dft-ide', 'local-state', 'history', flow, runId)
+        );
+        try {
+          await parseDftExecutionLogDirectory(historyUri.fsPath, {
+            flow,
+            tool: flow === 'verification' ? 'lander' : flow,
+          });
+        } catch (error) {
+          console.warn(
+            `Failed to parse execution diagnostics: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+        return;
+      }
+
       case 'openObsFileReadOnly': {
         const requestId: string = msg.requestId;
         const obsPath = typeof msg.path === 'string' ? msg.path : '';
@@ -1150,97 +1179,12 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         const requestId: string = msg.requestId;
         const project = msg.project as DftProject;
         const domain = msg.domain as ProjectDomain;
+        const isInit = msg.isInit as boolean;
         try {
-          const projectRoot = resolveProjectRoot()
-          if (!projectRoot) {
-            throw new Error('Fetch project root failed.');
-          }
-
-          const domainPath = path.join(projectRoot, domain.key);
-          const result = await obsTrackingService.downloadDirectory('DFT_IDE', `/ECOSCR/${domain.key}`, vscode.Uri.file(domainPath));
-          if (result.failedFiles > 0) {
-            throw new Error(`${result.failedFiles} OBS files failed to download.`);
-          }
-
-          for (const repo of project.repos) {
-            if (repo.key === 'data') {
-              continue;
-            } else if (repo.key === 'verification') {
-              const repoPath = path.join(projectRoot, repo.gitlabProjectName);
-              const files = fs.readdirSync(repoPath, { withFileTypes: true });
-              files.forEach(file => {
-                if (file.isDirectory()) {
-                  const ecoPath = path.join(repoPath, file.name, 'eco');
-                  if (fs.existsSync(ecoPath)) {
-                    if (project.domain && project.domain.key) {
-                      const oldPath = path.join(ecoPath, project.domain.key);
-                      if (fs.existsSync(oldPath)) {
-                        fs.rmSync(oldPath, { recursive: true, force: true });
-                      }
-                    }
-                    const destPath = path.join(ecoPath, domain.key);
-                    fs.cpSync(domainPath, destPath, { recursive: true });
-                  }
-                }
-              });
-            } else {
-              if (project.domain && project.domain.key) {
-                const oldPath = path.join(projectRoot, repo.gitlabProjectName, 'eco', project.domain.key);
-                if (fs.existsSync(oldPath)) {
-                  fs.rmSync(oldPath, { recursive: true, force: true });
-                }
-              }
-              const destPath = path.join(projectRoot, repo.gitlabProjectName, 'eco', domain.key);
-              fs.cpSync(domainPath, destPath, { recursive: true });
-            }
-          }
-          fs.rmSync(domainPath, { recursive: true, force: true });
-
-          // 复制代码仓eco到业务仓, 暂时放在这
-          const scriptPath = path.resolve(__dirname, '../scripts/eco');
-          if (fs.existsSync(scriptPath)) {
-            let ecoList: {
-              hibist: string[];
-              sailor: string[];
-              lander: string[];
-            } = { hibist: [], sailor: [], lander: [] }
-            const files = fs.readdirSync(scriptPath, { withFileTypes: true });
-            files.forEach(file => {
-              if (file.isFile()) {
-                if (file.name.startsWith('run_flow_hibist')) {
-                  ecoList.hibist.push(path.join(scriptPath, file.name));
-                } else if (file.name.startsWith('run_flow_sailor')) {
-                  ecoList.sailor.push(path.join(scriptPath, file.name));
-                } else if (file.name.startsWith('run_flow_lander')) {
-                  ecoList.lander.push(path.join(scriptPath, file.name));
-                }
-              }
-            });
-            for (const repo of project.repos) {
-              if (repo.key === 'data') {
-                continue
-              } else if (repo.key === 'verification') {
-                const repoPath = path.join(projectRoot, repo.gitlabProjectName);
-                const files = fs.readdirSync(repoPath, { withFileTypes: true });
-                files.forEach(file => {
-                  if (file.isDirectory()) {
-                    const destPath = path.join(repoPath, file.name, 'eco');
-                    if (fs.existsSync(destPath)) {
-                      for (const ecoFile of ecoList.lander) {
-                        const desFile = path.join(destPath, path.basename(ecoFile));
-                        fs.cpSync(ecoFile, desFile, { recursive: true });
-                      }
-                    }
-                  }
-                });
-              } else {
-                const destPath = path.join(projectRoot, repo.gitlabProjectName, 'eco');
-                for (const ecoFile of ecoList[repo.key]) {
-                  const desFile = path.join(destPath, path.basename(ecoFile));
-                  fs.cpSync(ecoFile, desFile, { recursive: true });
-                }
-              }
-            }
+          await initProjectWorkspace(project);
+          await downloadDomainEcoFiles(project, domain);
+          if(isInit){
+            await pushDomainEcoFiles(project);
           }
 
           currentPanel?.webview.postMessage({
@@ -2727,6 +2671,126 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
     }
   });
+}
+
+async function downloadDomainEcoFiles(project: DftProject, domain: ProjectDomain) {
+  const projectRoot = project.projectPath;
+  if (!projectRoot) {
+    throw new Error('Fetch project root failed.');
+  }
+
+  const domainPath = path.join(projectRoot, domain.key);
+  const result = await obsTrackingService.downloadDirectory('ALC_IDE', `/ECOSCR/${domain.key}`, vscode.Uri.file(domainPath));
+  if (result.failedFiles > 0) {
+    throw new Error(`${result.failedFiles} OBS files failed to download.`);
+  }
+
+  for (const repo of project.repos) {
+    if (repo.key === 'data') {
+      continue;
+    } else if (repo.key === 'verification') {
+      const repoPath = path.join(projectRoot, repo.gitlabProjectName);
+      const files = fs.readdirSync(repoPath, { withFileTypes: true });
+      files.forEach(file => {
+        if (file.isDirectory()) {
+          const ecoPath = path.join(repoPath, file.name, 'eco');
+          if (fs.existsSync(ecoPath)) {
+            if (project.domain && project.domain.key) {
+              const oldPath = path.join(ecoPath, project.domain.key);
+              if (fs.existsSync(oldPath)) {
+                fs.rmSync(oldPath, { recursive: true, force: true });
+              }
+            }
+            const destPath = path.join(ecoPath, domain.key);
+            fs.cpSync(domainPath, destPath, { recursive: true });
+          }
+        }
+      });
+    } else {
+      if (project.domain && project.domain.key) {
+        const oldPath = path.join(projectRoot, repo.gitlabProjectName, 'eco', project.domain.key);
+        if (fs.existsSync(oldPath)) {
+          fs.rmSync(oldPath, { recursive: true, force: true });
+        }
+      }
+      const destPath = path.join(projectRoot, repo.gitlabProjectName, 'eco', domain.key);
+      fs.cpSync(domainPath, destPath, { recursive: true });
+    }
+  }
+  fs.rmSync(domainPath, { recursive: true, force: true });
+
+  // 复制代码仓eco到业务仓, 暂时放在这
+  const scriptPath = path.resolve(__dirname, '../scripts/eco');
+  if (fs.existsSync(scriptPath)) {
+    let ecoList: {
+      hibist: string[];
+      sailor: string[];
+      lander: string[];
+    } = { hibist: [], sailor: [], lander: [] }
+    const files = fs.readdirSync(scriptPath, { withFileTypes: true });
+    files.forEach(file => {
+      if (file.isFile()) {
+        if (file.name.startsWith('run_flow_hibist')) {
+          ecoList.hibist.push(path.join(scriptPath, file.name));
+        } else if (file.name.startsWith('run_flow_sailor')) {
+          ecoList.sailor.push(path.join(scriptPath, file.name));
+        } else if (file.name.startsWith('run_flow_lander')) {
+          ecoList.lander.push(path.join(scriptPath, file.name));
+        }
+      }
+    });
+    for (const repo of project.repos) {
+      if (repo.key === 'data') {
+        continue
+      } else if (repo.key === 'verification') {
+        const repoPath = path.join(projectRoot, repo.gitlabProjectName);
+        const files = fs.readdirSync(repoPath, { withFileTypes: true });
+        files.forEach(file => {
+          if (file.isDirectory()) {
+            const destPath = path.join(repoPath, file.name, 'eco');
+            if (fs.existsSync(destPath)) {
+              for (const ecoFile of ecoList.lander) {
+                const desFile = path.join(destPath, path.basename(ecoFile));
+                if (!fs.existsSync(desFile)) {
+                  fs.cpSync(ecoFile, desFile, { recursive: true });
+                }
+              }
+            }
+          }
+        });
+      } else {
+        const destPath = path.join(projectRoot, repo.gitlabProjectName, 'eco');
+        for (const ecoFile of ecoList[repo.key]) {
+          const desFile = path.join(destPath, path.basename(ecoFile));
+          if (!fs.existsSync(desFile)) {
+            fs.cpSync(ecoFile, desFile, { recursive: true });
+          }
+        }
+      }
+    }
+  }
+}
+
+async function pushDomainEcoFiles(project: DftProject) {
+  const projectRoot = project.projectPath;
+  if (!projectRoot) {
+    throw new Error('Fetch project root failed.');
+  }
+
+  for (const repo of project.repos) {
+    if (repo.key === 'data') {
+      continue;
+    } else{
+      const repoPath = path.join(projectRoot, repo.gitlabProjectName);
+
+      const commands = [];
+      commands.push("git add .");
+      commands.push(`git commit -m "Commit domain eco"`);
+      commands.push("git push origin master");
+
+      await pushDomainEcoWithTerminal(repoPath, commands);
+    }
+  }
 }
 
 export function deactivate() {}

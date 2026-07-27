@@ -364,6 +364,7 @@ export async function initProjectWorkspace(project: DftProject): Promise<string>
   const projectName = project.name;
   const projectDirName = toSafeProjectDirectoryName(project.name);
   const projectPath = path.join(path.resolve(projectLocalRoot), projectDirName);
+  project.projectPath = projectPath;
   const projectRoot = vscode.Uri.file(projectPath);
   await vscode.workspace.fs.createDirectory(projectRoot);
 
@@ -529,6 +530,58 @@ export async function cloneRepoWithTerminal(repoUrl: string, projectPath: string
         }
       });
       terminal.sendText(`git clone -c credential.helper=store ${repoUrl} ; echo "CLONE_FINISHED"`);
+    }
+  });
+}
+
+export async function pushDomainEcoWithTerminal(projectPath: string, commands: string[]) {
+  const terminal = vscode.window.createTerminal({
+    name: 'Git Push',
+    cwd: projectPath
+  });
+
+  const command = commands.join(';');
+  await new Promise<void>((resolve, reject) => {
+    if ('onDidEndTerminalShellExecution' in vscode.window) {
+      const disposable = vscode.window.onDidEndTerminalShellExecution(e => {
+        if (e.terminal === terminal) {
+          disposable.dispose();
+          if (e.exitCode === 0) {
+            terminal.dispose();
+            resolve();
+          } else {
+            reject(new Error('Failed to push the domain eco. See terminal logs for specific error details'));
+          }
+        }
+      });
+      terminal.sendText(command);
+    } else {
+      let output = '';
+      const windowWithTerminalData = vscode.window as typeof vscode.window & {
+        onDidWriteTerminalData: (
+          listener: (event: { terminal: vscode.Terminal; data: string }) => unknown
+        ) => vscode.Disposable;
+      };
+      const disposable = windowWithTerminalData.onDidWriteTerminalData(e => {
+        if (e.terminal === terminal) {
+          output += e.data;
+          const lines = output.replace(/(\r\n|\r)/g, '\n').split('\n');
+          const cloneFinishedIndex = lines.indexOf('PUSH_FINISHED');
+          if (cloneFinishedIndex > 0) {
+            disposable.dispose();
+            const result = lines[cloneFinishedIndex - 1].toLowerCase();
+            if (result.includes('-> master')) {
+              terminal.dispose();
+              resolve();
+            } else if (result.includes('fatal:')) {
+              reject(new Error(result));
+            } else {
+              reject(new Error('Failed to push the domain eco. See terminal logs for specific error details'));
+            }
+          }
+        }
+      });
+      terminal.sendText(`${command} ; echo "PUSH_FINISHED"`);
     }
   });
 }

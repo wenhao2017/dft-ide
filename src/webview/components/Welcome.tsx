@@ -181,6 +181,7 @@ function repoTagColor(status: ProjectRepoStatus['status']): string {
 
 type ProjectFormValue = {
   name: string;
+  domainKey: string;
   description: string;
 };
 
@@ -212,6 +213,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
   const [domainProject, setDomainProject] = useState<DftProject | null>(null);
   const [selectedDomain, setSelectedDomain] = useState<ProjectDomain | undefined>();
   const [domainSaving, setDomainSaving] = useState(false);
+  const [isInitDomain, setIsInitDomain] = useState(false);
   const [showStarProject, setShowStarProject] = useState(false);
   const [domains, setDomains] = useState<ProjectDomain[]>([]);
 
@@ -259,6 +261,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
       setDashboard(data);
       setProjects(data.projects);
       setProjectError(null);
+      return data.projects;
     } catch (error) {
       setProjectError(error instanceof Error ? error.message : '项目列表加载失败');
     } finally {
@@ -334,7 +337,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     });
   }, [setActiveProject, workspaceProject, workspaceProjectInfo]);
 
-  const chooseProjectsRootRef = useRef<((project: DftProject, doEnter?: boolean) => Promise<void>) | null>(null);
+  const chooseProjectsRootRef = useRef<((project: DftProject, doEnter?: boolean) => Promise<{ success: boolean; projectPath?: string; } | undefined>) | null>(null);
 
   const enterProject = useCallback(async (project: DftProject, rootPath?: string) => {
     setWorkingProjectId(project.id);
@@ -381,7 +384,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     // 请求后端保存项目目录数据
     try {
       await updateProjectRootPath(project.id, currentUser ,porjectRootPath);
-      return { success: true };
+      return { success: true, projectPath: porjectRootPath };
     } catch (err) {
       message.error(err instanceof Error ? err.message : '项目目录保存失败');
       return { success: false };
@@ -421,8 +424,8 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
   const isMemberManageDisable = (project: DftProject) =>
     !isProjectInitialized(project) || project.role !== 'DFTM';
 
-  const isDomainManageDisable = (project: DftProject, active: boolean) =>
-    !active || project.role.toUpperCase() !== 'DFTM';
+  const isDomainManageDisable = (project: DftProject) =>
+    project.role.toUpperCase() !== 'DFTM';
 
   const isProjectEnterDisable = (project: DftProject) =>
     !isProjectInitialized(project);
@@ -439,22 +442,23 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     return '管理项目成员'
   }
 
-  const domainManageTooltipTitle = (project: DftProject, active: boolean) => {
-    if (!active) return '未进入项目无法管理项目领域'
+  const domainManageTooltipTitle = (project: DftProject) => {
     if (project.role !== 'DFTM') return '只有 DFTM 角色可以管理项目领域'
     return '配置或修改项目领域'
   }
 
-  const openDomainModal = (project: DftProject) => {
+  const openDomainModal = (project: DftProject, isInit: boolean = false) => {
     loadDomains();
     setDomainProject(project);
     setSelectedDomain(project.domain);
+    setIsInitDomain(isInit);
   };
 
   const closeDomainModal = () => {
     if (domainSaving) return;
     setDomainProject(null);
     setSelectedDomain(undefined);
+    setIsInitDomain(false);
   };
 
   const loadDomains = async () => {
@@ -470,7 +474,12 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     if (!domainProject || !selectedDomain) return;
     setDomainSaving(true);
     try {
-      const result = await downloadDomainEcoFromObs(domainProject, selectedDomain);
+      if (!domainProject.rootPath) {
+        const result = await chooseProjectsRootRef.current?.(domainProject, false);
+        if (!result?.success || !result.projectPath) return;
+        domainProject.rootPath = result.projectPath;
+      }
+      const result = await downloadDomainEcoFromObs(domainProject, selectedDomain, isInitDomain);
       if (result.success) {
         await updateProjectDomain(domainProject.id, selectedDomain);
         const updateDomain = (project: DftProject) =>
@@ -482,14 +491,15 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
         if (activeProject?.id === domainProject.id) {
           setActiveProjectDomain(selectedDomain);
         }
-        message.success(`项目领域已更新为“${getProjectDomainLabel(selectedDomain)}”`);
+        message.success(`项目领域已设置为“${getProjectDomainLabel(selectedDomain)}”`);
         setDomainProject(null);
         setSelectedDomain(undefined);
+        setIsInitDomain(false);
       } else {
         message.error(result.error ?? '拉取领域 ECO 脚本失败');
       }
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '项目领域更新失败');
+      message.error(error instanceof Error ? error.message : '项目领域设置失败');
     } finally {
       setDomainSaving(false);
     }
@@ -504,7 +514,12 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     setInitializingProjectId(project.ctmp_id?.toString() ?? '');
     try {
       await initProject(currentUser, project);
-      fetchProjectData();
+      const projects = await fetchProjectData();
+      const initedProject = projects?.find(d => d.name === project.name);
+      if (initedProject) {
+        openDomainModal(initedProject, true);
+      }
+      message.success('项目初始化成功');
     } catch (err) {
       message.error(err instanceof Error ? err.message : '项目初始化失败');
     } finally {
@@ -588,13 +603,15 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
       if (doEnter && result.success) {
         enterProject( {...project, rootPath: selected}, selected);
       }
+      return result;
     }
   }, [setProjectRoot, enterProject]);
 
   chooseProjectsRootRef.current = chooseProjectsRoot;
 
   const openProjectModal = useCallback(() => {
-    projectForm.setFieldsValue({ name: '', description: '' });
+    loadDomains();
+    projectForm.setFieldsValue({ name: '', domainKey: 'Kirin', description: '' });
     setProjectModalOpen(true);
   }, [projectForm]);
 
@@ -603,23 +620,65 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     projectForm.resetFields();
   }, [projectForm]);
 
+  const initProjectDomain = useCallback(async (projects: DftProject[], projectName: string, domainKey: string) => {
+    const project = projects.find(d => d.name === projectName);
+    if (!project) {
+      message.error(`项目 ${projectName} 不存在`);
+      return;
+    }
+    const domain = domains.find(d => d.key === domainKey);
+    if (!domain) {
+      message.error(`领域 ${domainKey} 不存在`);
+      return;
+    }
+
+    message.info('开始初始化项目领域');
+    message.info('请选择项目目录');
+    if (!project.rootPath) {
+      const result = await chooseProjectsRootRef.current?.(project, false);
+      if (!result?.success || !result.projectPath) return;
+      project.rootPath = result.projectPath;
+    }
+
+    setDomainSaving(true);
+    try {
+      const result = await downloadDomainEcoFromObs(project, domain, true);
+      if (result.success) {
+        message.success('初始化领域 ECO 成功');
+      } else {
+        message.error(result.error ?? '初始化领域 ECO 失败');
+      }
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '初始化领域 ECO 失败');
+    } finally {
+      setDomainSaving(false);
+    }
+  }, [domains]);
+
   const saveProject = useCallback(async () => {
     const value = await projectForm.validateFields();
     setProjectSaving(true);
     try {
+      const projectName = value.name.trim();
       await createProject(currentUser, {
-        name: value.name.trim(),
+        name: projectName,
+        domain: value.domainKey,
         description: value.description.trim(),
       });
       message.success('创建自定义项目成功');
       closeProjectModal();
-      fetchProjectData();
+      if (value.domainKey) {
+        const projects = await fetchProjectData();
+        initProjectDomain(projects ?? [], projectName, value.domainKey);
+      } else {
+        fetchProjectData();
+      }
     } catch (err) {
       message.error(err instanceof Error ? err.message : '创建自定义项目失败');
     } finally {
       setProjectSaving(false);
     }
-  }, [projectForm, currentUser, closeProjectModal, fetchProjectData]);
+  }, [projectForm, currentUser, closeProjectModal, fetchProjectData, initProjectDomain]);
 
   return (
     <div>
@@ -748,6 +807,23 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
             ]}
           >
             <Input placeholder="请输入项目名称" />
+          </Form.Item>
+
+          <Form.Item
+            label="项目领域"
+            name="domainKey"
+            rules={[
+              { required: true, message: '请选择项目领域' },
+            ]}
+          >
+            <Select
+              placeholder="请选择项目领域"
+              options={domains.map(domain => ({
+                key: domain.key,
+                label: domain.name,
+                value: domain.key
+              }))}
+            />
           </Form.Item>
 
           <Form.Item
@@ -886,13 +962,14 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
                             </Button>
                           </span>
                         </Tooltip>}
-                        {inited && <Tooltip key="domain" title={domainManageTooltipTitle(project, active)}>
+                        {inited && <Tooltip key="domain" title={domainManageTooltipTitle(project)}>
                           <span>
                             <Button
                               icon={<GlobalOutlined />}
-                              disabled={isDomainManageDisable(project, active)}
+                              disabled={isDomainManageDisable(project)}
                               onClick={() => openDomainModal(project)}
                               style={{ flex: 1 }}
+                              loading={domainSaving}
                             >
                               管理领域
                             </Button>

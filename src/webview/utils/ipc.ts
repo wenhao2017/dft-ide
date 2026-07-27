@@ -301,11 +301,12 @@ export async function listObsChildren(
 export async function downloadDomainEcoFromObs(
   project: DftProject,
   domain: ProjectDomain,
+  isInit: boolean,
 ): Promise<{
   success: boolean
   error?: string
 }> {
-  const res = await ipcRequest('downloadDomainEcoFromObs', { project, domain }, 30 * 60_000)
+  const res = await ipcRequest('downloadDomainEcoFromObs', { project, domain, isInit }, 30 * 60_000)
   return res as {
     success: boolean
     error?: string
@@ -869,6 +870,13 @@ export function revealExecutionHistory(
   runId: string,
 ): void {
   vscode.postMessage({ command: 'revealExecutionHistory', flow, runId })
+}
+
+export function parseExecutionHistoryDiagnostics(
+  flow: 'hibist' | 'sailor' | 'verification',
+  runId?: string,
+): void {
+  vscode.postMessage({ command: 'parseExecutionHistoryDiagnostics', flow, runId })
 }
 
 export interface ExecutionHistoryRecord {
