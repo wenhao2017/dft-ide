@@ -1,9 +1,3 @@
-import {
-  ApartmentOutlined,
-  AppstoreOutlined,
-  FileTextOutlined,
-  TagsOutlined,
-} from '@ant-design/icons'
 import { Button } from 'antd'
 
 import type { ModePanelTab } from '../../types'
@@ -14,15 +8,11 @@ interface ModeTypeSwitcherProps {
   onChange: (tab: ModePanelTab) => void
 }
 
-const options: Array<{
-  value: ModePanelTab
-  label: string
-  icon: React.ReactNode
-}> = [
-  { value: 'mode', label: 'Mode', icon: <AppstoreOutlined /> },
-  { value: 'group', label: 'Group', icon: <ApartmentOutlined /> },
-  { value: 'tc', label: 'TC', icon: <FileTextOutlined /> },
-  { value: 'subattr', label: 'SubAttr', icon: <TagsOutlined /> },
+const options: Array<{ value: ModePanelTab; label: string }> = [
+  { value: 'mode', label: 'Mode' },
+  { value: 'group', label: 'Group' },
+  { value: 'tc', label: 'TC' },
+  { value: 'subattr', label: 'SubAttr' },
 ]
 
 export default function ModeTypeSwitcher({
@@ -33,16 +23,17 @@ export default function ModeTypeSwitcher({
   return (
     <div
       role="group"
-      aria-label="配置类型"
+      aria-label="Configuration type"
       style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-        gap: 4,
-        padding: 4,
-        border: '1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.2))',
-        borderRadius: 9,
+        gap: 2,
+        padding: 3,
+        border:
+          '1px solid color-mix(in srgb, var(--vscode-editor-foreground) 9%, transparent)',
+        borderRadius: 8,
         background:
-          'color-mix(in srgb, var(--vscode-editor-foreground) 4%, transparent)',
+          'color-mix(in srgb, var(--vscode-editor-foreground) 4.5%, transparent)',
       }}
     >
       {options.map((option) => {
@@ -58,58 +49,58 @@ export default function ModeTypeSwitcher({
             style={{
               position: 'relative',
               minWidth: 0,
-              height: 50,
-              padding: '5px 2px 4px',
+              height: 36,
+              padding: '0 4px',
               color: active
-                ? accent
-                : 'var(--vscode-foreground, currentColor)',
+                ? 'var(--vscode-foreground, currentColor)'
+                : 'var(--vscode-descriptionForeground, currentColor)',
               border: active
-                ? `1px solid color-mix(in srgb, ${accent} 34%, transparent)`
+                ? '1px solid color-mix(in srgb, var(--vscode-editor-foreground) 12%, transparent)'
                 : '1px solid transparent',
-              borderRadius: 6,
+              borderRadius: 5,
               background: active
-                ? `color-mix(in srgb, ${accent} 13%, var(--vscode-sideBar-background, var(--vscode-editor-background)))`
+                ? 'var(--vscode-editor-background)'
                 : 'transparent',
               boxShadow: active
-                ? `inset 0 -2px 0 ${accent}, 0 1px 2px rgba(0, 0, 0, 0.08)`
+                ? '0 1px 3px rgba(0, 0, 0, 0.14)'
                 : 'none',
+              transition:
+                'color 140ms ease, background 140ms ease, border-color 140ms ease, box-shadow 140ms ease',
             }}
           >
             <span
               style={{
                 display: 'flex',
                 height: '100%',
-                flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: 3,
+                overflow: 'hidden',
+                maxWidth: '100%',
+                fontSize: 12,
+                fontWeight: active ? 600 : 500,
+                letterSpacing: '0.1px',
+                lineHeight: '16px',
+                textOverflow: 'ellipsis',
               }}
             >
+              {option.label}
+            </span>
+
+            {active && (
               <span
                 aria-hidden="true"
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  fontSize: 14,
-                  lineHeight: 1,
+                  position: 'absolute',
+                  bottom: 3,
+                  left: '50%',
+                  width: 18,
+                  height: 2,
+                  borderRadius: 2,
+                  background: accent,
+                  transform: 'translateX(-50%)',
                 }}
-              >
-                {option.icon}
-              </span>
-
-              <span
-                style={{
-                  overflow: 'hidden',
-                  maxWidth: '100%',
-                  fontSize: 11,
-                  fontWeight: active ? 700 : 500,
-                  lineHeight: '14px',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {option.label}
-              </span>
-            </span>
+              />
+            )}
           </Button>
         )
       })}
