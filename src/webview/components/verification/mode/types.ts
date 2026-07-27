@@ -153,8 +153,6 @@ export type NameStore = Record<ModePanelTab, string>
  */
 export type NameListStore = Record<ModePanelTab, string[]>
 
-export type SearchStore = Record<ModePanelTab, string>
-
 export type LoadingStore = Record<ModePanelTab, boolean>
 
 export type SelectorField = 'groupNames' | 'tcNames' | 'subattrNames'

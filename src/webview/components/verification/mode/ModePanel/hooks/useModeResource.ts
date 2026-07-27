@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { ResourceStore } from '../../types'
 
-import { readConfig } from '../../../../../utils/ipc'
+import { readConfig, syncVerificationModes, watchVerificationModes } from '../../../../../utils/ipc'
 
 import { useVerificationStageConfig } from '../hooks/useVerificationStageConfig'
 
@@ -134,6 +134,42 @@ export function useModeResource() {
     setHydrated(true)
   }, [stage])
 
+  const syncModesFromDirectory = useCallback(async () => {
+    if (!stage) return
+    const modes = await syncVerificationModes(stage)
+    setResources((current) => {
+      const validNames = new Set(modes.map((item) => item.name))
+      const next = {
+        ...current,
+        mode: modes,
+        focusModes: current.focusModes.filter((name) => validNames.has(name)),
+      }
+      resourcesRef.current = next
+      return next
+    })
+  }, [stage])
+
+  useEffect(() => {
+    if (!stage || stageLoading) return
+    let disposed = false
+    const sync = () => {
+      void syncModesFromDirectory().catch((error) => {
+        if (!disposed) console.error('Failed to sync Lander modes', error)
+      })
+    }
+    void watchVerificationModes(stage).then(sync, (error) => {
+      if (!disposed) console.error('Failed to watch Lander modes', error)
+    })
+    const listener = (event: MessageEvent) => {
+      if (event.data?.command === 'verificationModesChanged' && event.data?.stage === stage) sync()
+    }
+    window.addEventListener('message', listener)
+    return () => {
+      disposed = true
+      window.removeEventListener('message', listener)
+    }
+  }, [stage, stageLoading, syncModesFromDirectory])
+
   return {
     stage,
 
@@ -148,5 +184,6 @@ export function useModeResource() {
     updateResources,
 
     refreshResources,
+    syncModesFromDirectory,
   }
 }

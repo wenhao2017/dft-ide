@@ -8,6 +8,7 @@ import re
 import secrets
 import shlex
 import subprocess
+import threading
 import sys
 import tempfile
 import time
@@ -317,7 +318,19 @@ def csh_quote(value):
     return "'" + value.replace("'", "'\\''") + "'"
 
 
-def run_csh(lines, env, log_file=None):
+_CONSOLE_OUTPUT_LOCK = threading.Lock()
+_CONSOLE_LINE_ENDING = "\r\n" if sys.stdout.isatty() else "\n"
+
+
+def write_console_line(line, output_prefix=None):
+    output = line.rstrip("\r\n")
+    if output_prefix:
+        output = f"[{output_prefix}] {output}"
+    with _CONSOLE_OUTPUT_LOCK:
+        sys.stdout.write(output + _CONSOLE_LINE_ENDING)
+        sys.stdout.flush()
+
+def run_csh(lines, env):
     script_path = None
     try:
         with tempfile.NamedTemporaryFile("w", suffix=".csh", encoding="utf-8", newline="\n", delete=False) as handle:
@@ -330,18 +343,9 @@ def run_csh(lines, env, log_file=None):
             text=True, encoding=env.get("DFT_IDE_OUTPUT_ENCODING", "utf-8"),
             errors="replace", env=env,
         )
-        log_handle = open(log_file, "w", encoding="utf-8") if log_file else None
-        try:
-            assert process.stdout is not None
-            for line in process.stdout:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-                if log_handle:
-                    log_handle.write(line)
-                    log_handle.flush()
-        finally:
-            if log_handle:
-                log_handle.close()
+        assert process.stdout is not None
+        for line in process.stdout:
+            write_console_line(line)
         return process.wait()
     except FileNotFoundError:
         fail("找不到 Csh 可执行程序: /bin/csh", 127)

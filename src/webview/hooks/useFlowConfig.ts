@@ -21,6 +21,29 @@ import useWizardStore from '../store/wizardStore';
 
 type FlowType = string;
 
+const configCache = new Map<FlowType, Record<string, unknown> | null>();
+const configRequests = new Map<FlowType, Promise<Record<string, unknown> | null>>();
+
+function isReadableFlow(flow: FlowType): boolean {
+  return Boolean(flow) && !flow.split('/').some(
+    (part) => !part || part === 'undefined' || part === '__unselected__'
+  );
+}
+
+function loadConfig(flow: FlowType): Promise<Record<string, unknown> | null> {
+  if (configCache.has(flow)) return Promise.resolve(configCache.get(flow) ?? null);
+  const pending = configRequests.get(flow);
+  if (pending) return pending;
+  const request = readConfig(flow)
+    .then((data) => {
+      configCache.set(flow, data);
+      return data;
+    })
+    .finally(() => configRequests.delete(flow));
+  configRequests.set(flow, request);
+  return request;
+}
+
 export interface FlowConfigState {
   /** 上次从文件系统读取到的配置，可用于表单的初始回填 */
   savedData: Record<string, unknown> | null;
@@ -89,8 +112,13 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
   // ── 挂载时读取配置文件 ─────────────────────────────
   useEffect(() => {
     let cancelled = false;
+    if (!isReadableFlow(flow)) {
+      setSavedData(null);
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
     setLoading(true);
-    readConfig(flow)
+    loadConfig(flow)
       .then((data) => {
         if (!cancelled && mountedRef.current) {
           setSavedData(data);
@@ -113,6 +141,7 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
       if (result.success) {
         message.success(`配置已保存${result.filePath ? `（${result.filePath}）` : ''}`);
         setSavedData(data);
+        configCache.set(flow, data);
         setHasUnsaved(false);
         clearDirtyStore(flow);
         return true;
@@ -143,6 +172,7 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
         const result = await saveConfig(flow, data);
         if (result.success && mountedRef.current) {
           setSavedData(data);
+          configCache.set(flow, data);
           // 自动保存成功后标记已保存（但保留 hasUnsaved = true 直到手动 sync）
         }
       } catch {
@@ -172,6 +202,7 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
         return false;
       }
       setSavedData(data);
+      configCache.set(flow, data);
 
       // 然后 Git commit (+可选 push)
       const gitResult = await syncGit(flow, commitMessage, push);

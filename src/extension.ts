@@ -120,6 +120,8 @@ const execFileAsync = promisify(execFile);
 
 let currentPanel: vscode.WebviewPanel | undefined = undefined;
 let activeCategory: string | undefined = undefined;
+let landerModeWatcher: vscode.FileSystemWatcher | undefined;
+const flowConfigWatchers = new Map<'hibist' | 'sailor', vscode.FileSystemWatcher>();
 let pendingWebviewCommand: InitialWebviewCommand | undefined;
 
 let configQueue: Promise<any> = Promise.resolve();  // 全局配置读写队列
@@ -529,6 +531,10 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
   );
 
   currentPanel.onDidDispose(() => {
+    landerModeWatcher?.dispose();
+    landerModeWatcher = undefined;
+    flowConfigWatchers.forEach((watcher) => watcher.dispose());
+    flowConfigWatchers.clear();
     currentPanel = undefined;
   });
 
@@ -825,7 +831,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         try {
           const stage = normalizeStageName(msg.stage);
           const repoRoot = await resolveProjectRepoRoot('verification');
-          const cfgRoot = path.join(repoRoot, stage, 'verification', 'cfg');
+          const cfgRoot = path.join(repoRoot, stage, 'lander_env', 'lander_cfg');
           await ensureLocalConfigDirectory(cfgRoot);
           const picked = await vscode.window.showOpenDialog({
             canSelectFiles: true,
@@ -878,7 +884,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           const sourceMode = normalizeModeName(msg.sourceMode);
           const targetMode = normalizeModeName(msg.targetMode);
           const repoRoot = await resolveProjectRepoRoot('verification');
-          const cfgRoot = path.join(repoRoot, stage, 'verification', 'cfg');
+          const cfgRoot = path.join(repoRoot, stage, 'lander_env', 'lander_cfg');
           const source = path.join(cfgRoot, `${sourceMode}.cfg`);
           const target = path.join(cfgRoot, `${targetMode}.cfg`);
           try {
@@ -898,6 +904,35 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         } catch (err) {
           currentPanel?.webview.postMessage({
             command: `${command}Response`, requestId, success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
+      case 'deleteVerificationModeCfg': {
+        const requestId: string = msg.requestId;
+        try {
+          const stage = normalizeStageName(msg.stage);
+          if (!Array.isArray(msg.modeNames) || msg.modeNames.length === 0) {
+            throw new Error('请选择需要删除的 Mode。');
+          }
+          const repoRoot = await resolveProjectRepoRoot('verification');
+          const cfgRoot = path.join(repoRoot, stage, 'lander_env', 'lander_cfg');
+          for (const value of msg.modeNames) {
+            if (typeof value !== 'string') throw new Error('Mode 名称无效。');
+            const modeName = value.trim();
+            if (!modeName || modeName === '.' || modeName === '..' || path.basename(modeName) !== modeName) {
+              throw new Error(`无效的 Mode 名称：${String(value)}`);
+            }
+            await vscode.workspace.fs.delete(vscode.Uri.file(path.join(cfgRoot, `${modeName}.cfg`)));
+          }
+          currentPanel?.webview.postMessage({
+            command: 'deleteVerificationModeCfgResponse', requestId, success: true,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'deleteVerificationModeCfgResponse', requestId, success: false,
             error: err instanceof Error ? err.message : String(err),
           });
         }
@@ -1805,6 +1840,38 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
+      case 'watchFlowConfigFiles': {
+        const requestId: string = msg.requestId;
+        const flow = normalizeConfigFlow(msg.flow);
+        try {
+          if (flow !== 'hibist' && flow !== 'sailor') {
+            throw new Error('Unsupported flow for module directory watching.');
+          }
+          const { configsDir } = await listFlowConfigFiles(flow);
+          flowConfigWatchers.get(flow)?.dispose();
+          const watcher = vscode.workspace.createFileSystemWatcher(
+            new vscode.RelativePattern(configsDir, '**/*')
+          );
+          const notify = () => currentPanel?.webview.postMessage({
+            command: 'flowConfigFilesChanged',
+            flow,
+          });
+          watcher.onDidCreate(notify);
+          watcher.onDidChange(notify);
+          watcher.onDidDelete(notify);
+          flowConfigWatchers.set(flow, watcher);
+          currentPanel?.webview.postMessage({
+            command: 'watchFlowConfigFilesResponse', requestId, success: true,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'watchFlowConfigFilesResponse', requestId, success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
       case 'createFlowConfigFile': {
         const requestId: string = msg.requestId;
         const flow = normalizeConfigFlow(msg.flow);
@@ -2606,6 +2673,53 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           currentPanel,
           msg,
         );
+        return;
+      }
+
+      case 'syncVerificationModes': {
+        const requestId: string = msg.requestId;
+        try {
+          const stage = normalizeStageName(msg.stage);
+          const repoRoot = await resolveProjectRepoRoot('verification');
+          const cfgRoot = path.join(repoRoot, stage, 'lander_env', 'lander_cfg');
+          await ensureLocalConfigDirectory(cfgRoot);
+          const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(cfgRoot));
+          const modes = await Promise.all(entries.filter(([name, type]) => type === vscode.FileType.File && name.toLowerCase().endsWith('.cfg')).sort(([a], [b]) => a.localeCompare(b)).map(async ([fileName]) => {
+            const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(path.join(cfgRoot, fileName)));
+            const text = Buffer.from(bytes).toString('utf8');
+            const assignment = text.match(/(?:^|[\r\n])\s*(?:preMode|pre_mode|PRE_MODE)\s*(?:=|:)\s*["']?([A-Za-z0-9_-]+)["']?/m);
+            const pipeline = text.match(/lander_([A-Za-z0-9_-]+)\.ya?ml/i);
+            void assignment;
+            void pipeline;
+            const mockPreModes = ['ip', 'atpg', 'fml', 'jtag', 'mbist-top'];
+            const stableIndex = Array.from(fileName).reduce((sum, char) => sum + char.charCodeAt(0), 0) % mockPreModes.length;
+            const preMode = mockPreModes[stableIndex];
+            return { name: path.basename(fileName, path.extname(fileName)), preMode };
+          }));
+          currentPanel?.webview.postMessage({ command: 'syncVerificationModesResponse', requestId, modes });
+        } catch (err) {
+          currentPanel?.webview.postMessage({ command: 'syncVerificationModesResponse', requestId, modes: [], error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
+      case 'watchVerificationModes': {
+        const requestId: string = msg.requestId;
+        try {
+          const stage = normalizeStageName(msg.stage);
+          const repoRoot = await resolveProjectRepoRoot('verification');
+          const cfgRoot = path.join(repoRoot, stage, 'lander_env', 'lander_cfg');
+          await ensureLocalConfigDirectory(cfgRoot);
+          landerModeWatcher?.dispose();
+          landerModeWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(cfgRoot, '*.cfg'));
+          const notify = () => currentPanel?.webview.postMessage({ command: 'verificationModesChanged', stage });
+          landerModeWatcher.onDidCreate(notify);
+          landerModeWatcher.onDidChange(notify);
+          landerModeWatcher.onDidDelete(notify);
+          currentPanel?.webview.postMessage({ command: 'watchVerificationModesResponse', requestId, success: true });
+        } catch (err) {
+          currentPanel?.webview.postMessage({ command: 'watchVerificationModesResponse', requestId, success: false, error: err instanceof Error ? err.message : String(err) });
+        }
         return;
       }
 

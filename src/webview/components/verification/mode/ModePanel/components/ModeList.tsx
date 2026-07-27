@@ -76,11 +76,18 @@ export default function ModeList({
   }
 
   return (
-    <List
-      size="small"
-      split={false}
-      dataSource={items}
-      renderItem={(item) => {
+    <div
+      style={{
+        maxHeight: items.length > 5 ? 260 : undefined,
+        overflowY: items.length > 5 ? 'auto' : undefined,
+        paddingRight: items.length > 5 ? 4 : undefined,
+      }}
+    >
+      <List
+        size="small"
+        split={false}
+        dataSource={items}
+        renderItem={(item) => {
         const selected = selectedName === item.name
 
         const checked = checkedNames.includes(item.name)
@@ -268,7 +275,8 @@ export default function ModeList({
             </div>
           </List.Item>
         )
-      }}
-    />
+        }}
+      />
+    </div>
   )
 }

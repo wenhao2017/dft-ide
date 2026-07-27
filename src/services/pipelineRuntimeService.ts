@@ -9,7 +9,7 @@ import {
 } from '../webview/components/shared/pipelineMockData';
 import { resolveProjectPath, resolveProjectRoot } from './workspaceService';
 import { getExecutionTerminalCapabilities, registerExecutionTerminalMonitor, stopExecutionTerminal } from './terminalService';
-import { formatTime } from '../utils';
+import { formatTime, getVersionFromModuleName } from '../utils';
 
 export type PipelineFlowKey = 'hibist' | 'sailor' | 'verification';
 export type PipelineRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
@@ -288,7 +288,11 @@ function buildStepCommands(
   commands.push(`setenv DFT_IDE_HISTORY ${quoteCshArgument(runId)}`);
 
   if (index === 0) {
-
+    const [oriModuleKey, version] = getVersionFromModuleName(moduleKey);
+    if (version) {
+      commands.push(`setenv DFT_IDE_MODULE_ORI "${oriModuleKey}"`);
+      commands.push(`setenv DFT_IDE_VERSION "${version}"`);
+    }
     const moduleEnvName = flowKey === 'verification' ? 'DFT_IDE_MODE' : 'DFT_IDE_MODULE';
     commands.push(`setenv ${moduleEnvName} "${moduleKey}"`);
     if (projectPath) {

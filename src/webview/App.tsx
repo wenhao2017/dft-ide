@@ -205,9 +205,9 @@ const App: React.FC = () => {
       case 'Common':
         return <CommonFlow />;
       case 'Hibist':
-        return <DesignFlow category={category}/>;
+        return <DesignFlow key={category} category={category}/>;
       case 'Sailor':
-        return <DesignFlow category={category}/>;
+        return <DesignFlow key={category} category={category}/>;
       case 'Verification':
         return <VerificationFlow />;
       case 'MemberManagement':

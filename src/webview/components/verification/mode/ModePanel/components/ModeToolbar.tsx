@@ -1,4 +1,4 @@
-import { Button, Input, Select, Space, Tooltip, Typography } from 'antd'
+import { Button, Select, Space, Tooltip, Typography } from 'antd'
 
 import {
   CopyOutlined,
@@ -7,7 +7,6 @@ import {
   FilterOutlined,
   PlusOutlined,
   ReloadOutlined,
-  SearchOutlined,
 } from '@ant-design/icons'
 
 import type { ModePanelTab } from '../../types'
@@ -21,8 +20,6 @@ export interface ModeToolbarOption {
 
 interface ModeToolbarProps {
   activeTab: ModePanelTab
-
-  searchValue: string
 
   /**
    * 当前是否存在点击选中的条目。
@@ -41,8 +38,6 @@ interface ModeToolbarProps {
   focusedNames: string[]
 
   accent?: string
-
-  onSearchChange: (value: string) => void
 
   onFocusChange: (names: string[]) => void
 
@@ -69,13 +64,11 @@ const tabLabels: Partial<Record<ModePanelTab, string>> = {
 
 export default function ModeToolbar({
   activeTab,
-  searchValue,
   hasSelected,
   checkedCount,
   focusOptions,
   focusedNames,
   accent = 'var(--vscode-focusBorder, #1677ff)',
-  onSearchChange,
   onFocusChange,
   onCreate,
   onCopy,
@@ -97,28 +90,6 @@ export default function ModeToolbar({
         width: '100%',
       }}
     >
-      <Space.Compact
-        style={{
-          width: '100%',
-        }}
-      >
-        <Input
-          allowClear
-          prefix={<SearchOutlined />}
-          placeholder={`搜索 ${activeTabLabel}`}
-          value={searchValue}
-          onChange={(event) => {
-            onSearchChange(event.target.value)
-          }}
-        />
-
-        {onRefresh && (
-          <Tooltip title="刷新">
-            <Button icon={<ReloadOutlined />} onClick={onRefresh} />
-          </Tooltip>
-        )}
-      </Space.Compact>
-
       {focusOptions.length > 0 && (
       <Space
         direction="vertical"
@@ -168,19 +139,29 @@ export default function ModeToolbar({
           )}
         </Space>
 
-        <Select
-          mode="multiple"
-          allowClear
-          size="small"
-          maxTagCount="responsive"
-          placeholder={`选择关注的 ${activeTabLabel}`}
-          value={focusedNames}
-          options={focusOptions}
-          onChange={handleFocusChange}
-          style={{
-            width: '100%',
-          }}
-        />
+        <Space.Compact style={{ width: '100%' }}>
+          <Select
+            mode="multiple"
+            allowClear
+            size="small"
+            maxTagCount="responsive"
+            placeholder={`选择关注的 ${activeTabLabel}`}
+            value={focusedNames}
+            options={focusOptions}
+            onChange={handleFocusChange}
+            style={{ flex: 1, minWidth: 0 }}
+          />
+          {onRefresh && (
+            <Tooltip title="刷新 Mode 配置">
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                aria-label="刷新 Mode 配置"
+                onClick={onRefresh}
+              />
+            </Tooltip>
+          )}
+        </Space.Compact>
       </Space>
       )}
 

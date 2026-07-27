@@ -10,6 +10,7 @@ import re
 import secrets
 import shlex
 import subprocess
+import threading
 import sys
 import tempfile
 import time
@@ -330,6 +331,18 @@ def csh_quote(value):
     return "'" + value.replace("'", "'\\''") + "'"
 
 
+_CONSOLE_OUTPUT_LOCK = threading.Lock()
+_CONSOLE_LINE_ENDING = "\r\n" if sys.stdout.isatty() else "\n"
+
+
+def write_console_line(line, output_prefix=None):
+    output = line.rstrip("\r\n")
+    if output_prefix:
+        output = f"[{output_prefix}] {output}"
+    with _CONSOLE_OUTPUT_LOCK:
+        sys.stdout.write(output + _CONSOLE_LINE_ENDING)
+        sys.stdout.flush()
+
 def run_csh(lines, env, output_prefix=None):
     script_path = None
     try:
@@ -346,11 +359,7 @@ def run_csh(lines, env, output_prefix=None):
         )
         assert process.stdout is not None
         for line in process.stdout:
-            if output_prefix:
-                sys.stdout.write(f"[{output_prefix}] {line}")
-            else:
-                sys.stdout.write(line)
-            sys.stdout.flush()
+            write_console_line(line, output_prefix)
         return process.wait()
     except FileNotFoundError:
         fail("找不到 Csh 可执行程序: /bin/csh", 127)

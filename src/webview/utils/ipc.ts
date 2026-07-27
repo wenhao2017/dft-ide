@@ -206,6 +206,37 @@ export const duplicateVerificationModeCfg = (
   targetMode: string,
 ) => mutateVerificationModeCfg('duplicateVerificationModeCfg', stage, sourceMode, targetMode)
 
+export async function deleteVerificationModeCfg(stage: string, modeNames: string[]): Promise<void> {
+  const res = await ipcRequest('deleteVerificationModeCfg', { stage, modeNames })
+  if (res.success !== true) {
+    throw new Error(typeof res.error === 'string' ? res.error : 'Mode 配置文件删除失败')
+  }
+}
+
+export interface VerificationModeCfg {
+  name: string
+  preMode: string
+}
+
+export async function syncVerificationModes(stage: string): Promise<VerificationModeCfg[]> {
+  const res = await ipcRequest('syncVerificationModes', { stage })
+  if (typeof res.error === 'string') throw new Error(res.error)
+  return Array.isArray(res.modes)
+    ? res.modes.filter((item): item is VerificationModeCfg =>
+        typeof item === 'object' && item !== null &&
+        typeof (item as VerificationModeCfg).name === 'string' &&
+        typeof (item as VerificationModeCfg).preMode === 'string')
+    : []
+}
+
+export async function watchVerificationModes(stage: string): Promise<void> {
+  const res = await ipcRequest('watchVerificationModes', { stage })
+  if (res.success !== true) {
+    throw new Error(typeof res.error === 'string' ? res.error : 'Failed to watch mode directory')
+  }
+}
+
+
 /**
  * 在 VS Code 编辑器中打开指定文件路径。
  * 这是单向通知，不等待响应。
@@ -560,6 +591,13 @@ export async function listFlowConfigFiles(
     configs: FlowConfigFileInfo[]
     configsDir?: string
     error?: string
+  }
+}
+
+export async function watchFlowConfigFiles(flow: 'hibist' | 'sailor'): Promise<void> {
+  const res = await ipcRequest('watchFlowConfigFiles', { flow })
+  if (res.success !== true) {
+    throw new Error(typeof res.error === 'string' ? res.error : 'Failed to watch module directory')
   }
 }
 

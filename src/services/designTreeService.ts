@@ -92,20 +92,32 @@ export async function updateModuleConfigSkeleton(flow: string, treeState: Record
 
   await ensureLocalConfigDirectory(path.dirname(flowPath));
   const existing = await readJsonFile(flowPath) ?? {};
-  const { moduleConfigs: _legacyModuleConfigs, ...flowState } = existing;
   const modules = collectDesignTreeModules(treeState.nodes);
+  const flowState = flow === 'hibist' || flow === 'sailor'
+    ? {
+        ...existing,
+        focusModules: [existing.focusModules, existing.forcusModules, existing.focusModuleKeys, existing.executionModuleKeys]
+          .find(Array.isArray)?.filter((key): key is string => typeof key === 'string' && Boolean(key)) ?? [],
+        forcusModules: undefined,
+        focusModuleKeys: undefined,
+        executionModuleKeys: undefined,
+        activeModuleKey: undefined,
+        moduleConfigs: undefined,
+      }
+    : {
+        ...existing,
+        moduleConfigs: undefined,
+        activeModuleKey: undefined,
+        modules: modules.map((module) => ({
+          key: module.key,
+          title: module.title,
+          type: module.type
+        }))
+      };
 
   await vscode.workspace.fs.writeFile(
     vscode.Uri.file(flowPath),
-    Buffer.from(JSON.stringify({
-      ...flowState,
-      activeModuleKey: typeof existing.activeModuleKey === 'string' ? existing.activeModuleKey : modules[0]?.key,
-      modules: modules.map((module) => ({
-        key: module.key,
-        title: module.title,
-        type: module.type
-      }))
-    }, null, 2), 'utf-8')
+    Buffer.from(JSON.stringify(flowState, null, 2), 'utf-8')
   );
 
   for (const module of modules) {

@@ -2,8 +2,11 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import {
   Button,
   Col,
+  Dropdown,
   Empty,
+  Input,
   List,
+  Pagination,
   Row,
   Space,
   Tag,
@@ -15,6 +18,8 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseCircleOutlined,
+  FilterOutlined,
+  SearchOutlined,
   SyncOutlined,
 } from '@ant-design/icons';
 import usePipelineRuntimeStore, {
@@ -95,6 +100,14 @@ const statusText: Record<string, string> = {
   skipped: '已跳过',
   completed: '已完成',
 };
+
+const runStatusOptions: Array<{ value: OverviewRunState; label: string }> = [
+  { value: 'idle', label: '等待' },
+  { value: 'running', label: '运行中' },
+  { value: 'completed', label: '已完成' },
+  { value: 'failed', label: '失败' },
+  { value: 'stopped', label: '已停止' },
+];
 
 function getStatusColor(status?: string): string {
   if (status === 'success' || status === 'passed' || status === 'completed') {
@@ -312,6 +325,10 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(() => new Set());
   const [peakMetrics, setPeakMetrics] = useState<Record<string, { maxCpu: number; maxMem: number }>>({});
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [statusFilters, setStatusFilters] = useState<OverviewRunState[]>([]);
+  const [searchText, setSearchText] = useState('');
   const taskDetailRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const getFlowLabel = useCallback((_moduleKey: string) => flowLabel, [flowLabel]);
@@ -350,8 +367,18 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     return activeModuleData ? getTaskHierarchy(activeModuleData) : undefined;
   }, [activeModuleData]);
 
+  const filteredRuns = useMemo(() => {
+    const term = searchText.trim().toLowerCase();
+    const selectedStatuses = new Set(statusFilters);
+    return visibleRuns.filter((run) => {
+      const matchesStatus = !statusFilters.length || selectedStatuses.has(run.runState);
+      const matchesSearch = !term || run.moduleKey.toLowerCase().includes(term);
+      return matchesStatus && matchesSearch;
+    });
+  }, [searchText, statusFilters, visibleRuns]);
+
   const visibleRunsWithHierarchies = useMemo(() => {
-    return visibleRuns.map((run) => {
+    return filteredRuns.map((run) => {
       const hierarchy = getTaskHierarchy(run);
       const trackTasks = hierarchy.topLevelTasks.length ? hierarchy.topLevelTasks : run.tasks;
       const trackTaskId = getTrackTaskId(run, hierarchy.parentByChild);
@@ -375,7 +402,21 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
       const counterText = `${Math.min(Math.max(trackTaskIndex + 1, completedTrackTasks), trackTasks.length)}/${trackTasks.length}`;
       return { counterText, hierarchy, run, trackTasks };
     });
-  }, [visibleRuns]);
+  }, [filteredRuns]);
+  const pagedRuns = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return visibleRunsWithHierarchies.slice(start, start + pageSize);
+  }, [currentPage, pageSize, visibleRunsWithHierarchies]);
+
+  useEffect(() => {
+    const lastPage = Math.max(1, Math.ceil(visibleRunsWithHierarchies.length / pageSize));
+    if (currentPage > lastPage) setCurrentPage(lastPage);
+  }, [currentPage, pageSize, visibleRunsWithHierarchies.length]);
+
+  useEffect(() => {
+    if (!activeModuleKey || filteredRuns.some((run) => run.moduleKey === activeModuleKey)) return;
+    setActiveModuleKey(filteredRuns[0]?.moduleKey);
+  }, [activeModuleKey, filteredRuns]);
 
 
 
@@ -387,10 +428,14 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   useEffect(() => {
     if (externalActiveModuleKey) {
       setActiveModuleKey(externalActiveModuleKey);
+      const selectedIndex = selectedModuleKeys.indexOf(externalActiveModuleKey);
+      if (selectedIndex >= 0) {
+        setCurrentPage(Math.floor(selectedIndex / pageSize) + 1);
+      }
     } else if (selectedModuleKeys.length && !activeModuleKey) {
       setActiveModuleKey(selectedModuleKeys[0]);
     }
-  }, [activeModuleKey, externalActiveModuleKey, selectedModuleKeys]);
+  }, [activeModuleKey, externalActiveModuleKey, pageSize, selectedModuleKeys]);
 
   useEffect(() => {
     visibleRuns.forEach((run) => {
@@ -412,7 +457,6 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
       });
     });
   }, [visibleRuns]);
-
 
   const selectStep = useCallback((run: PipelineRunOverview, taskId: string) => {
     const hierarchy = getTaskHierarchy(run);
@@ -688,6 +732,41 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
           }
         `}
       </style>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <Dropdown
+          trigger={['click']}
+          menu={{
+            multiple: true,
+            selectable: true,
+            selectedKeys: statusFilters,
+            items: runStatusOptions.map((option) => ({ key: option.value, label: option.label })),
+            onSelect: ({ selectedKeys }) => {
+              setStatusFilters(selectedKeys as OverviewRunState[]);
+              setCurrentPage(1);
+            },
+            onDeselect: ({ selectedKeys }) => {
+              setStatusFilters(selectedKeys as OverviewRunState[]);
+              setCurrentPage(1);
+            },
+          }}
+        >
+          <Button size={'small'} icon={<FilterOutlined />} type={statusFilters.length ? 'primary' : 'default'}>
+            Status{statusFilters.length ? ` (${statusFilters.length})` : ''}
+          </Button>
+        </Dropdown>
+        <Input
+          allowClear
+          size={'small'}
+          prefix={<SearchOutlined />}
+          placeholder={`搜索 ${flowKey === 'verification' ? 'mode' : 'module'}`}
+          value={searchText}
+          onChange={(event) => {
+            setSearchText(event.target.value);
+            setCurrentPage(1);
+          }}
+          style={{ width: 240 }}
+        />
+      </div>
       <Row
       gutter={12}
       style={{
@@ -717,7 +796,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
       <Col span={16}>
         <List
           size="small"
-          dataSource={visibleRunsWithHierarchies}
+          dataSource={pagedRuns}
           renderItem={({ run, counterText, trackTasks }) => {
             const isSelected = run.moduleKey === activeModuleKey;
             const statusColor = run.runState === 'running'
@@ -824,6 +903,21 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
             );
           }}
         />
+        {visibleRunsWithHierarchies.length > 0 && (
+          <Pagination
+            current={currentPage}
+            pageSize={pageSize}
+            total={visibleRunsWithHierarchies.length}
+            showSizeChanger
+            pageSizeOptions={['10', '20', '50']}
+            size="small"
+            onChange={(page, nextPageSize) => {
+              setCurrentPage(page);
+              setPageSize(nextPageSize);
+            }}
+            style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}
+          />
+        )}
       </Col>
 
       <Col span={8}>

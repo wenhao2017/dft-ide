@@ -36,10 +36,12 @@ import {
   deleteFlowConfigFile,
   duplicateFlowConfigFile,
   listFlowConfigFiles,
+  readConfig,
   renameFlowConfigFile,
   saveConfig,
+  watchFlowConfigFiles,
 } from '../../utils/ipc';
-import { useFlowConfig } from '../../hooks/useFlowConfig';
+import { confirmDelete } from '../../utils/confirmDelete';
 import usePipelineRuntimeStore from '../../store/pipelineRuntimeStore';
 import { useShallow } from 'zustand/react/shallow';
 import StepSelector, {
@@ -79,8 +81,19 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   const selectedFg = 'var(--vscode-list-inactiveSelectionForeground, var(--vscode-editor-foreground, var(--vscode-foreground)))';
   const selectedBorder = `color-mix(in srgb, ${accent} 68%, var(--vscode-panel-border, rgba(127,127,127,0.26)))`;
   const selectedShadow = `0 0 0 1px color-mix(in srgb, ${accent} 24%, transparent), 0 4px 12px rgba(0,0,0,0.08)`;
-  const { savedData: flowSavedData } = useFlowConfig(flow);
+  const [loadedFlowConfig, setLoadedFlowConfig] = useState<{
+    flow: DesignTreePanelProps['flow'];
+    data: Record<string, unknown>;
+  }>();
+  const flowSavedData = loadedFlowConfig?.flow === flow
+    ? loadedFlowConfig.data
+    : undefined;
   const focusHydratedRef = useRef(false);
+  const focusKeysRef = useRef<string[]>([]);
+  const moduleStateSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const selectedKeyRef = useRef(selectedKey);
+  const skipWatchRefreshUntilRef = useRef(0);
+  const configsRef = useRef<FlowConfigFileInfo[]>([]);
   const [configs, setConfigs] = useState<FlowConfigFileInfo[]>([]);
   const [configsDir, setConfigsDir] = useState('');
   const [search, setSearch] = useState('');
@@ -98,6 +111,10 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   const [modalStepRange, setModalStepRange] = useState<[number, number]>([0, 0]);
 
   const selectedConfig = configs.find((item) => item.key === selectedKey) ?? configs[0];
+
+  useEffect(() => {
+    selectedKeyRef.current = selectedKey;
+  }, [selectedKey]);
 
   const flowTasks = usePipelineRuntimeStore(
     useShallow((state) => {
@@ -141,9 +158,9 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   }, [taskModalOpen, stepList.length]);
 
   const selectModule = useCallback((key: string) => {
+    selectedKeyRef.current = key;
     onSelect(key);
-    saveConfig(flow, { activeModuleKey: key, moduleConfigs: undefined }).catch(() => undefined);
-  }, [flow, onSelect]);
+  }, [onSelect]);
 
   const updateExecutionKeys = useCallback((keys: string[]) => {
     if (!onExecutionSelectionChange) {
@@ -151,13 +168,30 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     }
     const nextKeys = Array.from(new Set(keys.filter(Boolean)));
     onExecutionSelectionChange(nextKeys);
-    saveConfig(flow, { executionModuleKeys: nextKeys }).catch(() => undefined);
-  }, [flow, onExecutionSelectionChange]);
+  }, [onExecutionSelectionChange]);
+
+  const saveModulePatch = useCallback((patch: Record<string, unknown>) => {
+    const saveLatest = () => saveConfig(flow, patch).then(() => undefined);
+    moduleStateSaveQueueRef.current = moduleStateSaveQueueRef.current.then(saveLatest, saveLatest);
+    return moduleStateSaveQueueRef.current;
+  }, [flow]);
+
+  const saveModuleState = useCallback((modules: string[], focusedModules: string[]) => {
+    return saveModulePatch({
+      modules: Array.from(new Set(modules.filter(Boolean))),
+      focusModules: Array.from(new Set(focusedModules.filter(Boolean))),
+      forcusModules: undefined,
+      focusModuleKeys: undefined,
+      executionModuleKeys: undefined,
+      activeModuleKey: undefined,
+      moduleConfigs: undefined,
+    });
+  }, [saveModulePatch]);
 
   const syncFocusedModules = useCallback((keys: string[]) => {
     const nextKeys = Array.from(new Set(keys.filter(Boolean)));
     updateExecutionKeys(nextKeys);
-    const configByKey = new Map(configs.map((item) => [item.key, item]));
+    const configByKey = new Map(configsRef.current.map((item) => [item.key, item]));
     const nextWorkDirs = nextKeys.reduce<Record<string, string>>((acc, key) => {
       const workDir = configByKey.get(key)?.workDir;
       if (workDir) {
@@ -166,7 +200,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
       return acc;
     }, {});
     onModuleWorkDirsChange?.(nextWorkDirs);
-  }, [configs, onModuleWorkDirsChange, updateExecutionKeys]);
+  }, [onModuleWorkDirsChange, updateExecutionKeys]);
 
   const handleFullRun = useCallback((targetKeys: string[]) => {
     const keys = targetKeys.filter(Boolean);
@@ -206,29 +240,84 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
         return;
       }
 
+      configsRef.current = result.configs;
       setConfigs(result.configs);
       setConfigsDir(result.configsDir ?? '');
       setConfigsLoaded(true);
+      const moduleKeys = result.configs.map((item) => item.key);
+      const validModuleKeys = new Set(moduleKeys);
+      const nextFocusKeys = focusKeysRef.current.filter((key) => validModuleKeys.has(key));
+      if (focusHydratedRef.current) {
+        focusKeysRef.current = nextFocusKeys;
+        setFocusKeys(nextFocusKeys);
+        syncFocusedModules(nextFocusKeys);
+        void saveModuleState(moduleKeys, nextFocusKeys);
+      } else {
+        void saveModulePatch({ modules: moduleKeys, activeModuleKey: undefined, moduleConfigs: undefined });
+      }
       const nextKey =
         preferredKey && result.configs.some((item) => item.key === preferredKey)
           ? preferredKey
-          : result.configs.some((item) => item.key === selectedKey)
-            ? selectedKey
+          : result.configs.some((item) => item.key === selectedKeyRef.current)
+            ? selectedKeyRef.current
             : result.configs[0]?.key ?? '';
-      if (nextKey) {
+      if (nextKey && nextKey !== selectedKeyRef.current) {
         selectModule(nextKey);
       }
     } finally {
       setLoading(false);
     }
-  }, [flow, selectModule, selectedKey]);
+  }, [saveModulePatch, saveModuleState, selectModule, syncFocusedModules]);
 
   useEffect(() => {
     void refreshConfigs();
   }, [refreshConfigs]);
 
   useEffect(() => {
+    let disposed = false;
+    void readConfig(flow).then(
+      (data) => {
+        if (!disposed) setLoadedFlowConfig({ flow, data: data ?? {} });
+      },
+      (error) => {
+        console.error(`Failed to restore ${flow} module focus`, error);
+        if (!disposed) setLoadedFlowConfig({ flow, data: {} });
+      },
+    );
+    return () => {
+      disposed = true;
+    };
+  }, [flow]);
+
+  useEffect(() => {
+    if (flow !== 'hibist' && flow !== 'sailor') return;
+    let disposed = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const scheduleRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        if (!disposed) void refreshConfigs();
+      }, 100);
+    };
+    const listener = (event: MessageEvent) => {
+      if (event.data?.command === 'flowConfigFilesChanged' && event.data?.flow === flow) {
+        if (Date.now() >= skipWatchRefreshUntilRef.current) scheduleRefresh();
+      }
+    };
+    window.addEventListener('message', listener);
+    void watchFlowConfigFiles(flow).catch((error) => {
+      if (!disposed) console.error(`Failed to watch ${flow} module directory`, error);
+    });
+    return () => {
+      disposed = true;
+      if (refreshTimer) clearTimeout(refreshTimer);
+      window.removeEventListener('message', listener);
+    };
+  }, [flow, refreshConfigs]);
+
+  useEffect(() => {
     focusHydratedRef.current = false;
+    focusKeysRef.current = [];
     setConfigsLoaded(false);
     setFocusKeys([]);
     onExecutionSelectionChange?.([]);
@@ -238,15 +327,24 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     if (focusHydratedRef.current) {
       return;
     }
-    const rawKeys = flowSavedData?.focusModuleKeys;
-    if (!Array.isArray(rawKeys)) {
+    if (flowSavedData === undefined) {
       return;
     }
-    const nextKeys = rawKeys.filter((key): key is string => typeof key === 'string' && Boolean(key));
+    const rawKeys = flowSavedData?.focusModules
+      ?? flowSavedData?.forcusModules
+      ?? flowSavedData?.focusModuleKeys
+      ?? flowSavedData?.executionModuleKeys;
+    const restoredKeys = Array.isArray(rawKeys)
+      ? rawKeys.filter((key): key is string => typeof key === 'string' && Boolean(key))
+      : [];
+    const validKeys = new Set(configs.map((item) => item.key));
+    const nextKeys = configsLoaded ? restoredKeys.filter((key) => validKeys.has(key)) : restoredKeys;
+    focusKeysRef.current = nextKeys;
     setFocusKeys(nextKeys);
     syncFocusedModules(nextKeys);
+    void saveModuleState(configs.map((item) => item.key), nextKeys);
     focusHydratedRef.current = true;
-  }, [flowSavedData, syncFocusedModules]);
+  }, [configs, configsLoaded, flowSavedData, saveModuleState, syncFocusedModules]);
 
   useEffect(() => {
     if (!configs.length || !focusKeys.length) {
@@ -255,11 +353,12 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     const validKeys = new Set(configs.map((item) => item.key));
     const nextKeys = focusKeys.filter((key) => validKeys.has(key));
     if (nextKeys.length !== focusKeys.length) {
+      focusKeysRef.current = nextKeys;
       setFocusKeys(nextKeys);
-      saveConfig(flow, { focusModuleKeys: nextKeys }).catch(() => undefined);
+      saveModuleState(configs.map((item) => item.key), nextKeys).catch(() => undefined);
       syncFocusedModules(nextKeys);
     }
-  }, [configs, flow, focusKeys, syncFocusedModules]);
+  }, [configs, focusKeys, saveModuleState, syncFocusedModules]);
 
   useEffect(() => {
     syncFocusedModules(focusKeys);
@@ -280,6 +379,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     const nextName = createValue.trim();
     if (!nextName) return;
 
+    skipWatchRefreshUntilRef.current = Date.now() + 500;
     const result = await createFlowConfigFile(flow, nextName);
     if (!result.success || !result.config) {
       message.error(result.error ?? '新增模块失败');
@@ -288,8 +388,9 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
 
     setCreateOpen(false);
     const nextFocusKeys = Array.from(new Set([...focusKeys, result.config.key]));
+    focusKeysRef.current = nextFocusKeys;
     setFocusKeys(nextFocusKeys);
-    saveConfig(flow, { focusModuleKeys: nextFocusKeys }).catch(() => undefined);
+    saveModuleState([...configs.map((item) => item.key), result.config.key], nextFocusKeys).catch(() => undefined);
     syncFocusedModules(nextFocusKeys);
     message.success(`已创建模块 ${result.config.moduleName}`);
     await refreshConfigs(result.config.key);
@@ -297,11 +398,17 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
 
   const duplicateSelected = async (moduleName = selectedConfig?.moduleName) => {
     if (!moduleName) return;
+    skipWatchRefreshUntilRef.current = Date.now() + 500;
     const result = await duplicateFlowConfigFile(flow, moduleName);
     if (!result.success || !result.config) {
       message.error(result.error ?? '复制模块失败');
       return;
     }
+    const nextFocusKeys = Array.from(new Set([...focusKeys, result.config.key]));
+    focusKeysRef.current = nextFocusKeys;
+    setFocusKeys(nextFocusKeys);
+    saveModuleState([...configs.map((item) => item.key), result.config.key], nextFocusKeys).catch(() => undefined);
+    syncFocusedModules(nextFocusKeys);
     message.success(`已复制模块 ${result.config.moduleName}`);
     await refreshConfigs(result.config.key);
   };
@@ -318,6 +425,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     const nextName = renameValue.trim();
     if (!nextName) return;
 
+    skipWatchRefreshUntilRef.current = Date.now() + 500;
     const result = await renameFlowConfigFile(flow, selectedConfig.moduleName, nextName);
     if (!result.success || !result.config) {
       message.error(result.error ?? '重命名模块失败');
@@ -327,38 +435,66 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     setRenameOpen(false);
     if (focusKeys.includes(selectedConfig.key)) {
       const nextFocusKeys = focusKeys.map((key) => key === selectedConfig.key ? result.config!.key : key);
+      focusKeysRef.current = nextFocusKeys;
       setFocusKeys(nextFocusKeys);
-      saveConfig(flow, { focusModuleKeys: nextFocusKeys }).catch(() => undefined);
+      const nextModules = configs.map((item) => item.key === selectedConfig.key ? result.config!.key : item.key);
+      saveModuleState(nextModules, nextFocusKeys).catch(() => undefined);
       syncFocusedModules(nextFocusKeys);
     }
     message.success(`已重命名为 ${result.config.moduleName}`);
     await refreshConfigs(result.config.key);
   };
 
-  const deleteSelected = (moduleName = selectedConfig?.moduleName) => {
-    if (!moduleName) return;
-    Modal.confirm({
-      title: `删除模块 ${moduleName}？`,
-      content: '该操作会从当前流程配置目录中删除该模块配置文件。',
-      okText: '删除',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: async () => {
-        const result = await deleteFlowConfigFile(flow, moduleName);
-        if (!result.success) {
-          message.error(result.error ?? '删除模块失败');
+  const deleteSelected = async (moduleName?: string) => {
+    const targetKeys = Array.from(new Set(
+      moduleName
+        ? [moduleName]
+        : batchModuleKeys.length > 0
+          ? batchModuleKeys
+          : selectedConfig?.key
+            ? [selectedConfig.key]
+            : []
+    ));
+    if (!targetKeys.length) return;
+    const isBatch = targetKeys.length > 1;
+    if (!await confirmDelete('Module', targetKeys)) return;
+        skipWatchRefreshUntilRef.current = Date.now() + 500;
+    const results = await Promise.all(
+          targetKeys.map(async (key) => ({
+            key,
+            result: await deleteFlowConfigFile(flow, key),
+          }))
+        );
+        const deletedKeys = results
+          .filter(({ result }) => result.success)
+          .map(({ key }) => key);
+        const failedResults = results.filter(({ result }) => !result.success);
+
+        if (!deletedKeys.length) {
+          message.error(failedResults[0]?.result.error ?? '删除模块失败');
           return;
         }
-        message.success(`已删除模块 ${moduleName}`);
-        const nextFocusKeys = focusKeys.filter((key) => key !== moduleName);
+        const deletedSet = new Set(deletedKeys);
+        const nextFocusKeys = focusKeys.filter((key) => !deletedSet.has(key));
+        setBatchModuleKeys((current) => current.filter((key) => !deletedSet.has(key)));
         if (nextFocusKeys.length !== focusKeys.length) {
+          focusKeysRef.current = nextFocusKeys;
           setFocusKeys(nextFocusKeys);
-          saveConfig(flow, { focusModuleKeys: nextFocusKeys }).catch(() => undefined);
+          saveModuleState(configs.filter((item) => !deletedSet.has(item.key)).map((item) => item.key), nextFocusKeys).catch(() => undefined);
           syncFocusedModules(nextFocusKeys);
         }
-        await refreshConfigs();
-      },
-    });
+        const nextSelectedKey = deletedSet.has(selectedKeyRef.current)
+          ? configs.find((item) => !deletedSet.has(item.key) && nextFocusKeys.includes(item.key))?.key
+          : selectedKeyRef.current;
+        await refreshConfigs(nextSelectedKey);
+
+        if (failedResults.length) {
+          message.warning(
+            `已删除 ${deletedKeys.length} 个模块，${failedResults.length} 个删除失败：${failedResults.map(({ key }) => key).join('、')}`
+          );
+        } else {
+          message.success(isBatch ? `已删除 ${deletedKeys.length} 个模块` : `已删除模块 ${deletedKeys[0]}`);
+        }
   };
 
   const scopedConfigs = useMemo(() => {
@@ -395,15 +531,18 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
 
   const updateFocusKeys = (keys: string[]) => {
     const nextKeys = Array.from(new Set(keys.filter(Boolean)));
+    focusKeysRef.current = nextKeys;
     setFocusKeys(nextKeys);
     setBatchModuleKeys((prev) => prev.filter((key) => nextKeys.includes(key)));
-    saveConfig(flow, { focusModuleKeys: nextKeys }).catch(() => undefined);
-    syncFocusedModules(nextKeys);
-    if (keys.length === 0) {
+    saveModuleState(configs.map((item) => item.key), nextKeys).catch(() => undefined);
+    if (nextKeys.length === 0) {
       return;
     }
-    const preferred = nextKeys.find((key) => configs.some((item) => item.key === key));
-    if (preferred) {
+    if (!nextKeys.includes(selectedKey)) {
+      const preferred = nextKeys.find((key) => configs.some((item) => item.key === key));
+      if (!preferred) {
+        return;
+      }
       selectModule(preferred);
     }
   };
@@ -418,6 +557,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
 
   const renderList = () => (
     <>
+      {false && (
       <Space.Compact style={{ width: '100%', marginBottom: 10 }}>
         <Input
           allowClear
@@ -430,6 +570,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
           <Button icon={<ReloadOutlined />} loading={loading} onClick={() => refreshConfigs()} />
         </Tooltip>
       </Space.Compact>
+      )}
 
       <Space direction="vertical" size={6} style={{ width: '100%', marginBottom: 10 }}>
         <Space size={6}>
@@ -441,6 +582,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
             </Button>
           )}
         </Space>
+        <Space.Compact style={{ width: '100%' }}>
         <Select
           mode="multiple"
           allowClear
@@ -450,8 +592,12 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
           value={focusKeys}
           options={moduleOptions}
           onChange={(keys) => updateFocusKeys(keys)}
-          style={{ width: '100%' }}
+          style={{ flex: 1, minWidth: 0 }}
         />
+        <Tooltip title={'刷新'}>
+          <Button size={'small'} icon={<ReloadOutlined />} loading={loading} onClick={() => refreshConfigs()} />
+        </Tooltip>
+        </Space.Compact>
       </Space>
 
       <Space size={6} wrap style={{ marginBottom: 10 }}>
@@ -465,7 +611,13 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
           <Button size="small" icon={<EditOutlined />} disabled={!selectedConfig} onClick={() => openRename()} />
         </Tooltip>
         <Tooltip title="删除">
-          <Button size="small" danger icon={<DeleteOutlined />} disabled={!selectedConfig} onClick={() => deleteSelected()} />
+          <Button
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            disabled={!batchModuleKeys.length && !selectedConfig}
+            onClick={() => deleteSelected()}
+          />
         </Tooltip>
         {enableRun && (
           <>

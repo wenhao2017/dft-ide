@@ -26,11 +26,13 @@ import { createCopyName, parseImportedModeCfg, sameName } from './utils'
 import { readSavedParams, updateSavedParamReferences } from '../savedParamUtils'
 
 import {
+  deleteVerificationModeCfg,
   duplicateVerificationModeCfg,
   getLanderModePipelines,
   renameVerificationModeCfg,
   selectVerificationModeCfg,
 } from '../../../../utils/ipc'
+import { confirmDelete } from '../../../../utils/confirmDelete'
 import { useVerificationStageConfig } from './hooks/useVerificationStageConfig'
 
 export default function ModePanel({
@@ -64,7 +66,7 @@ export default function ModePanel({
     subattr: [],
   })
 
-  const { resources, updateResources } = useModeResource()
+  const { resources, updateResources, syncModesFromDirectory } = useModeResource()
 
   const handleModeFocusChange = useCallback(
     (names: string[]) => {
@@ -131,8 +133,6 @@ export default function ModePanel({
 
   const batchCheckedNames = batchCheckedNamesByTab[activeTab]
 
-  const searchValue = selection.searchValues[activeTab]
-
   /**
    * resources.focusModes may be restored asynchronously from persisted state.
    * Keep the execution overview in sync even when the user has not changed the
@@ -174,45 +174,7 @@ export default function ModePanel({
     [allItems],
   )
 
-  /**
-   * 当前列表仅显示：
-   *
-   * 1. Mode 仅显示已关注项目，其他类型显示全部项目；
-   * 2. 符合当前搜索条件的项目。
-   */
-  const visibleItems = useMemo(() => {
-    if (!focusedNames.length) {
-      return []
-    }
-
-    const focusedSet = new Set(focusedNames)
-
-    const term = searchValue.trim().toLowerCase()
-
-    return allItems.filter((item) => {
-      if (!focusedSet.has(item.name)) {
-        return false
-      }
-
-      if (!term) {
-        return true
-      }
-
-      if (item.name.toLowerCase().includes(term)) {
-        return true
-      }
-
-      if (
-        activeTab === 'mode' &&
-        'preMode' in item &&
-        typeof item.preMode === 'string'
-      ) {
-        return item.preMode.toLowerCase().includes(term)
-      }
-
-      return false
-    })
-  }, [activeTab, allItems, focusedNames, searchValue])
+  const visibleItems = selection.filteredItems
 
   useEffect(() => {
     const validNames = new Set(allItems.map((item) => item.name))
@@ -438,7 +400,17 @@ export default function ModePanel({
       return
     }
 
-    if (activeTab !== 'mode') {
+    if (!await confirmDelete('Mode', batchCheckedNames)) return
+
+    if (activeTab === 'mode') {
+      if (!stage) return
+      try {
+        await deleteVerificationModeCfg(stage, batchCheckedNames)
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : 'Mode 配置文件删除失败')
+        return
+      }
+    } else {
       const result = updateSavedParamReferences(
         readSavedParams(stageConfig?.params),
         activeTab,
@@ -583,23 +555,23 @@ export default function ModePanel({
       >
         <ModeToolbar
           activeTab={activeTab}
-          searchValue={searchValue}
           hasSelected={Boolean(selectedItem)}
           checkedCount={batchCheckedNames.length}
           focusOptions={activeTab === 'mode' ? focusOptions : []}
           focusedNames={focusedNames}
           accent={accentColor}
-          onSearchChange={(value) => {
-            selection.setSearchValues((current) => ({
-              ...current,
-              [activeTab]: value,
-            }))
-          }}
           onFocusChange={handleFocusChange}
           onCreate={openCreate}
           onCopy={handleCopy}
           onRename={handleRename}
           onDelete={handleDelete}
+          onRefresh={activeTab === 'mode' ? () => {
+            void syncModesFromDirectory()
+              .then(() => message.success('Modes synced from lander_cfg'))
+              .catch((error) => message.error(
+                error instanceof Error ? error.message : 'Failed to sync modes',
+              ))
+          } : undefined}
         />
 
         <div style={{ marginTop: 10 }}>

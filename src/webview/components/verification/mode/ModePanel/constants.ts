@@ -3,7 +3,6 @@ import type {
   ModePanelTab,
   NameListStore,
   NameStore,
-  SearchStore,
 } from '../types'
 
 export const TAB_LABELS: Record<ModePanelTab, string> = {
@@ -25,13 +24,6 @@ export const INITIAL_NAME_LISTS: NameListStore = {
   group: [],
   tc: [],
   subattr: [],
-}
-
-export const INITIAL_SEARCH: SearchStore = {
-  mode: '',
-  group: '',
-  tc: '',
-  subattr: '',
 }
 
 export const INITIAL_LOADING: LoadingStore = {

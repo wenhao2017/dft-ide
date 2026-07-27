@@ -178,7 +178,7 @@ Shared design tree behavior lives in `src/webview/components/shared/DesignTreePa
 
 If Common config has a `designTree` path, the extension writes tree state there. Directory paths resolve to `design_tree.mock.json`. If no design-tree path is configured, the tree is stored as `designTreeDraft` in Common local state.
 
-Saving a design tree also updates module config skeletons for the current flow, including `activeModuleKey`, module metadata, and per-module config files.
+Saving a design tree also updates module config skeletons for the current flow. Sailor and Hibist persist `modules` from the CFG directory and `focusModules` from the user's focused selection; the currently displayed module remains transient UI state.
 
 ## Git Integration
 

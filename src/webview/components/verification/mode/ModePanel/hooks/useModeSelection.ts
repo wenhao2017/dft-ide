@@ -6,10 +6,9 @@ import type {
   ResourceStore,
   NameListStore,
   NameStore,
-  SearchStore,
 } from '../../types'
 
-import { INITIAL_NAME_LISTS, INITIAL_NAMES, INITIAL_SEARCH } from '../constants'
+import { INITIAL_NAME_LISTS, INITIAL_NAMES } from '../constants'
 
 interface UseModeSelectionProps {
   activeTab: ModePanelTab
@@ -45,8 +44,6 @@ export function useModeSelection({
    */
   const [localCheckedNames, setLocalCheckedNames] =
     useState<NameListStore>(INITIAL_NAME_LISTS)
-
-  const [searchValues, setSearchValues] = useState<SearchStore>(INITIAL_SEARCH)
 
   /**
    * 对外暴露统一的关注状态。
@@ -94,29 +91,9 @@ export function useModeSelection({
    */
   const selectedName = selectedItem?.name ?? ''
 
-  const filteredItems = useMemo(() => {
-    const keyword = searchValues[activeTab].trim().toLowerCase()
-
-    if (!keyword) {
-      return activeItems
-    }
-
-    return activeItems.filter((item) => {
-      if (item.name.toLowerCase().includes(keyword)) {
-        return true
-      }
-
-      return (
-        'preMode' in item &&
-        typeof item.preMode === 'string' &&
-        item.preMode.toLowerCase().includes(keyword)
-      )
-    })
-  }, [activeItems, activeTab, searchValues])
-
   const visibleNames = useMemo(
-    () => filteredItems.map((item) => item.name),
-    [filteredItems],
+    () => activeItems.map((item) => item.name),
+    [activeItems],
   )
 
   const allVisibleChecked =
@@ -197,15 +174,11 @@ export function useModeSelection({
 
     checkedNames,
 
-    searchValues,
-
-    setSearchValues,
-
     activeItems,
 
     selectedItem,
 
-    filteredItems,
+    filteredItems: activeItems,
 
     selectedName,
 

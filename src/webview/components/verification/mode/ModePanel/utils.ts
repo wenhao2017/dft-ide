@@ -78,30 +78,18 @@ const MOCK_PRE_MODES = ['ip', 'atpg', 'fml', 'jtag', 'mbist-top'] as const
 
 const pickMockPreMode = (): string => {
   const index = Math.floor(Math.random() * MOCK_PRE_MODES.length)
-
   return MOCK_PRE_MODES[index]
 }
 
 export async function parseImportedModeCfg(
   file: File | string,
 ): Promise<ParsedCfgResult> {
-  // 占位实现：当前不解析 mode.cfg 内容。
-  // 保留 file 参数，是为了后续替换成真实解析逻辑时不改调用方。
   void file
-
-  const preMode = pickMockPreMode()
-
-  return {
-    extractedCandidate: preMode,
-    preMode,
-  }
+  return parseModeCfgText('')
 }
 
 export function parseModeCfgText(text: string): ParsedCfgResult {
-  // 占位实现：当前不解析文本内容。
-  // 保留 text 参数，是为了后续做单元测试或真实解析。
   void text
-
   const preMode = pickMockPreMode()
 
   return {
