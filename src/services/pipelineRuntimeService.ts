@@ -21,7 +21,6 @@ export interface PipelineRuntimeSnapshot {
   flowLabel: string;
   tasks: PipelineTask[];
   links: PipelineLink[];
-  logs: string[];
   selectedTaskId?: string;
   runState: PipelineRunState;
   startedAt?: number;
@@ -29,14 +28,19 @@ export interface PipelineRuntimeSnapshot {
   updatedAt: number;
 }
 
+export type PipelineHistoryTask = PipelineTask;
+
+export interface PipelineRuntimeHistorySnapshot extends PipelineRuntimeSnapshot {
+  tasks: PipelineHistoryTask[];
+}
+
 export interface PipelineRuntimeHistoryRecord {
   flow: string;
   flowKey: PipelineFlowKey;
   moduleKey: string;
   flowLabel: string;
-  status: 'success' | 'error' | 'cancelled';
-  logs: string[];
-  runtimeSnapshot: PipelineRuntimeSnapshot;
+  status: 'running' | 'success' | 'error' | 'cancelled';
+  runtimeSnapshot: PipelineRuntimeHistorySnapshot;
 }
 
 interface PipelineRuntimeServiceOptions {
@@ -78,8 +82,6 @@ interface PipelineExecutionSession {
 }
 
 const timers = new Map<string, ReturnType<typeof setTimeout>[]>();
-const historySavedRunIds = new Set<string>();
-
 const nowText = () => formatTime(new Date());
 const nowStamp = () => Date.now();
 
@@ -427,7 +429,6 @@ function parseYamlTasks(content: string): PipelineTask[] {
           status: 'pending',
           attempts: 1,
           description: currentTask.description || '',
-          logs: [],
         });
       }
       currentTask = {};
@@ -462,7 +463,6 @@ function parseYamlTasks(content: string): PipelineTask[] {
       status: 'pending',
       attempts: 1,
       description: currentTask.description || '',
-      logs: [],
     });
   }
 
@@ -584,119 +584,6 @@ function loadPipelineConfig(flowKey: PipelineFlowKey): { tasks: PipelineTask[]; 
     return { tasks: defaultTasks, links: defaultLinks };
   }
 }
-
-function runSequentialSimulation(
-  key: string,
-  tasks: PipelineTask[],
-  logPrefix: string,
-  flowLabel: string,
-  flowKey: string,
-  moduleKey: string,
-  cwd: string | undefined,
-  envConfig: Record<string, unknown> | null | undefined,
-  taskConfig: Record<string, unknown> | null | undefined,
-  openTerminal: (title: string, command: string | string[], cwd?: string) => void,
-  patchTask: (id: string, patch: Partial<PipelineTask> | ((task: PipelineTask) => Partial<PipelineTask>)) => void,
-  appendLog: (msg: string) => void,
-  setRunState: (state: PipelineRunState) => void,
-) {
-  let delay = 500;
-  tasks.forEach((task, index) => {
-    // 1. Schedule Task Start
-    scheduleRuntime(key, delay, () => {
-      patchTask(task.id, {
-        status: 'running',
-        startedAt: nowText(),
-      });
-      const stepCommand = task.command.trim();
-      if (stepCommand) {
-        const projectPath = resolveProjectPath(flowKey);
-        let commands: string[] = [];
-        if (index === 0) {
-          // a. 加载环境配置
-          if (envConfig) {
-            commands.push(`source ${envConfig.project}`);
-          }
-          // b. 设置环境变量
-          // Verification 使用 mode 名称，设计流程使用 module 名称
-          const moduleEnvName = flowKey === 'verification' ? 'DFT_IDE_MODE' : 'DFT_IDE_MODULE';
-          commands.push(`setenv ${moduleEnvName} "${moduleKey}"`);
-          // 项目路径
-          if (projectPath) {
-            commands.push(`setenv DFT_IDE_WORK_PATH "${projectPath}"`);
-          }
-          // setenv STAGE DFT
-          // setenv DIE CDIE
-          // setenv GRP xxx
-          // setenv TC xxx
-          // c. 自定义配置
-          const source = taskConfig?.step2 as Record<string, unknown> | undefined;
-          const customConfig = source?.step2Task as Record<string, unknown> | undefined;
-          if(customConfig){
-            // 工具版本
-            appendToolCommands(commands, customConfig.tools);
-            // 集群
-            const clusterGroup = String(customConfig.clusterGroup ?? "").trim();
-            const clusterQueue = String(customConfig.clusterQueue ?? "").trim();
-            const cpu = String(customConfig.cpu ?? "").trim();
-            const memory = String(customConfig.memory ?? "").trim();
-            const clusterExtra = String(customConfig.clusterExtra ?? "").trim();
-            if (clusterGroup) {
-              commands.push(`setenv DONAU_GROUP "${clusterGroup}"`);
-              let queue = '';
-              let resource = '';
-              if (clusterQueue) {
-                queue = `-q ${clusterQueue}`;
-              }
-              if (cpu || memory) {
-                let arr: string[] = [];
-                if (cpu) {
-                  arr.push(`cpu=${cpu}`);
-                }
-                if (memory) {
-                  arr.push(`mem=${memory}`);
-                }
-                resource = `-R '${arr.join(';')}'`;
-              }
-              const dsubArgs = `-A ${clusterGroup} ${queue} ${resource} ${clusterExtra}`.trim();
-              commands.push(`setenv DFT_IDE_DSUBRUN_I "dsub -I ${dsubArgs}"`);
-            }
-          }
-        }
-        commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
-        // d. 步骤命令
-        commands.push(flowKey === 'verification'
-          ? stepCommand
-          : buildPipelineStepExecutionCommand(projectPath, stepCommand));
-
-        openTerminal(getPipelineTerminalTitle(flowLabel, moduleKey), commands, cwd);
-      }
-      appendLog(`${logPrefix} ${task.name} 运行启动。`);
-    });
-
-    delay += 1500;
-
-    // 2. Schedule Task End
-    scheduleRuntime(key, delay, () => {
-      patchTask(task.id, {
-        status: 'success',
-        finishedAt: nowText(),
-        duration: '1.2s',
-        logs: [`[${nowText()}] ${logPrefix} ${task.name} 执行完成。`],
-      });
-      appendLog(`${logPrefix} ${task.name} 执行成功。`);
-
-      // If it's the last task, complete the run
-      if (index === tasks.length - 1) {
-        setRunState('completed');
-        appendLog(`${logPrefix} 流水线执行成功。`);
-      }
-    });
-
-    delay += 500;
-  });
-}
-
 function makeTask(
   id: string,
   name: string,
@@ -711,7 +598,6 @@ function makeTask(
     status,
     attempts: 1,
     description,
-    logs: [],
   };
 }
 
@@ -728,7 +614,6 @@ function createIdleRuntime(
     flowLabel,
     tasks: tasks.map((t) => ({ ...t, status: 'pending' })),
     links,
-    logs: [`流水线运行态已就绪，点击“启动流水线”开始接收 ${config.title} 事件流。`],
     runState: 'idle',
     updatedAt: nowStamp(),
   };
@@ -787,7 +672,6 @@ export class PipelineRuntimeService {
 
     const existing = this.runtimes.get(key);
     if (existing?.runState === 'running') {
-      this.appendLog(key, config.logPrefix, '已有流水线正在运行，请先停止当前运行后再启动。');
       return existing;
     }
 
@@ -817,9 +701,6 @@ export class PipelineRuntimeService {
         ...task,
         status: index === 0 ? 'failed' as TaskStatus : 'skipped' as TaskStatus,
         finishedAt: nowText(),
-        logs: index === 0
-          ? [`[${nowText()}] ${config.logPrefix} 当前 VS Code 环境不支持 terminalDataWriteEvent，无法可靠监控流水线步骤。`]
-          : [`[${nowText()}] ${config.logPrefix} 因 terminal 监控能力不可用跳过。`],
       }));
       const failedRuntime: PipelineRuntimeSnapshot = {
         runId,
@@ -828,7 +709,6 @@ export class PipelineRuntimeService {
         flowLabel,
         tasks: failedTasks,
         links: parsedLinks,
-        logs: [`[${nowText()}] ${config.logPrefix} 当前 VS Code 环境不支持 terminalDataWriteEvent，流水线未启动。`],
         selectedTaskId: failedTasks[0]?.id,
         runState: 'failed',
         startedAt: nowStamp(),
@@ -854,9 +734,6 @@ export class PipelineRuntimeService {
           ? (isFirstSelected ? 'running' as TaskStatus : 'pending' as TaskStatus)
           : 'skipped' as TaskStatus,
         startedAt: isFirstSelected ? nowText() : undefined,
-        logs: isSelected
-          ? [`[${nowText()}] ${config.logPrefix} ${t.name} 已创建，初始状态：${isFirstSelected ? 'running' : 'pending'}。`]
-          : [`[${nowText()}] ${config.logPrefix} ${t.name} 已跳过。`],
       };
     });
 
@@ -867,7 +744,6 @@ export class PipelineRuntimeService {
       flowLabel,
       tasks: initialTasks,
       links: parsedLinks,
-      logs: [`[${nowText()}] ${config.logPrefix} 流水线已启动。`],
       selectedTaskId: initialTasks.find((t) => t.status === 'running')?.id || initialTasks[0]?.id,
       runState: 'running',
       startedAt: nowStamp(),
@@ -951,7 +827,6 @@ export class PipelineRuntimeService {
       startedAt: nowText(),
       finishedAt: undefined,
     });
-    this.appendLog(key, config.logPrefix, `手动重跑任务 ${taskId}...`);
 
     if (task && task.command.trim() && runtime) {
       const stepCommand = task.command.trim();
@@ -969,7 +844,6 @@ export class PipelineRuntimeService {
         finishedAt: nowText(),
         duration: '1.2s',
       });
-      this.appendLog(key, config.logPrefix, `任务 ${taskId} 重跑成功。`);
     });
   }
 
@@ -1013,7 +887,6 @@ export class PipelineRuntimeService {
         status: execution.isLastTaskRun ? 'success' : 'running',
         startedAt: nowText(),
         finishedAt: nowText(),
-        logs: [`[${nowText()}] ${session.logPrefix} ${task.name} 无执行命令，已跳过。`],
       });
       this.startNextSessionTask(key);
       return;
@@ -1024,7 +897,6 @@ export class PipelineRuntimeService {
       startedAt: nowText(),
       finishedAt: undefined,
     }));
-    this.appendLog(key, session.logPrefix, `${task.name} 运行启动。`);
 
     const commands = buildStepCommands(
       session.runId,
@@ -1051,11 +923,7 @@ export class PipelineRuntimeService {
     console.log('parameter rows:', runParameterRows);
     console.groupEnd();
     this.patchTask(key, task.id, (current) => ({
-      logs: [...current.logs, ...generatedCommands.map((command) => `[${nowText()}] ${session.logPrefix} 执行命令：${command}`)],
     }));
-    generatedCommands.forEach((command) => {
-      this.appendLog(key, session.logPrefix, `${task.name} 执行命令：${command}`);
-    });
     void Promise.resolve(
       this.options.openTerminal(session.terminalTitle, commands, session.cwd, session.shellPath),
     ).catch((error) => {
@@ -1129,9 +997,7 @@ export class PipelineRuntimeService {
           ? current.status
           : execution?.isLastTaskRun ? 'success' : 'running',
         finishedAt: execution?.isLastTaskRun || current.status === 'failed' ? nowText() : undefined,
-        logs: [...current.logs, `[${nowText()}] ${session.logPrefix} ${current.name} 当前参数组合执行完成。`],
       }));
-      this.appendLog(key, session.logPrefix, `${task?.name ?? runtimeTaskId} 当前参数组合执行成功。`);
       this.startNextSessionTask(key);
       return;
     }
@@ -1145,13 +1011,7 @@ export class PipelineRuntimeService {
       this.patchTask(key, runtimeTaskId, (current) => ({
         status: 'failed',
         finishedAt: execution.isLastTaskRun ? nowText() : undefined,
-        logs: [...current.logs, `[${nowText()}] ${session.logPrefix} 当前参数组合执行失败，退出码 ${exitCode}；继续执行后续任务。`],
       }));
-      this.appendLog(
-        key,
-        session.logPrefix,
-        `${task?.name ?? runtimeTaskId} 当前参数组合执行失败，退出码 ${exitCode}；该 Step 判定失败，流水线继续推进。`,
-      );
       this.startNextSessionTask(key);
       return;
     }
@@ -1169,7 +1029,6 @@ export class PipelineRuntimeService {
     clearRuntimeTimers(key);
     this.disposeExecutionSession(key);
     if (message) {
-      this.appendLog(key, logPrefix, message);
     }
     this.updateRuntime(key, (runtime) => ({
       ...runtime,
@@ -1181,7 +1040,6 @@ export class PipelineRuntimeService {
             ...task,
             status: 'failed',
             finishedAt: nowText(),
-            logs: [...task.logs, `[${nowText()}] ${logPrefix} 执行失败，退出码 ${exitCode}。`],
           };
         }
         if (task.status === 'pending') {
@@ -1189,12 +1047,10 @@ export class PipelineRuntimeService {
             ...task,
             status: 'skipped',
             finishedAt: nowText(),
-            logs: [...task.logs, `[${nowText()}] ${logPrefix} 因前置任务失败跳过。`],
           };
         }
         return task;
       }),
-      logs: [...runtime.logs, `[${nowText()}] ${logPrefix} 任务 ${taskId} 执行失败，流水线停止推进。`],
     }));
   }
 
@@ -1207,10 +1063,6 @@ export class PipelineRuntimeService {
         ...runtime,
         runState: hasFailedTask ? 'failed' : 'completed',
         finishedAt: nowStamp(),
-        logs: [
-          ...runtime.logs,
-          `[${nowText()}] ${logPrefix} ${hasFailedTask ? '流水线已执行完毕，但存在失败 Step。' : '流水线执行成功。'}`,
-        ],
       };
     });
   }
@@ -1242,7 +1094,6 @@ export class PipelineRuntimeService {
             ...task,
             status: 'stopped',
             finishedAt: nowText(),
-            logs: [...task.logs, `[${nowText()}] ${logPrefix} ${reason}`],
           };
         }
         if (task.status === 'pending') {
@@ -1250,23 +1101,12 @@ export class PipelineRuntimeService {
             ...task,
             status: 'skipped',
             finishedAt: nowText(),
-            logs: [...task.logs, `[${nowText()}] ${logPrefix} 因流水线停止跳过。`],
           };
         }
         return task;
       }),
-      logs: [...current.logs, `[${nowText()}] ${logPrefix} ${reason}`],
     }));
   }
-
-  private appendLog(key: string, prefix: string, msg: string): void {
-    const formatted = msg.startsWith(prefix) ? msg : `${prefix} ${msg}`;
-    this.updateRuntime(key, (runtime) => ({
-      ...runtime,
-      logs: [...runtime.logs, `[${nowText()}] ${formatted}`],
-    }));
-  }
-
   private patchTask(
     key: string,
     id: string,
@@ -1283,7 +1123,6 @@ export class PipelineRuntimeService {
         return {
           ...task,
           ...nextPatch,
-          logs: nextPatch.logs ?? task.logs,
         };
       }),
     }));
@@ -1317,29 +1156,27 @@ export class PipelineRuntimeService {
     if (!runtime.runId || runtime.tasks.length === 0) {
       return;
     }
-    if (runtime.runState !== 'completed' && runtime.runState !== 'failed' && runtime.runState !== 'stopped') {
-      return;
-    }
-    if (historySavedRunIds.has(runtime.runId)) {
-      return;
-    }
-
-    historySavedRunIds.add(runtime.runId);
     const failed = runtime.tasks.some((task) => task.status === 'failed');
     const status = runtime.runState === 'stopped'
       ? 'cancelled'
+      : runtime.runState === 'running'
+        ? 'running'
       : failed
         ? 'error'
         : 'success';
 
+    const { tasks, ...historySnapshot } = runtime;
+    const historyTasks = tasks.map((task) => ({ ...task }));
     this.options.onHistory({
       flow: runtime.flowKey,
       flowKey: runtime.flowKey,
       moduleKey: runtime.moduleKey,
       flowLabel: runtime.flowLabel,
       status,
-      logs: runtime.logs,
-      runtimeSnapshot: runtime,
+      runtimeSnapshot: {
+        ...historySnapshot,
+        tasks: historyTasks,
+      },
     });
   }
 }

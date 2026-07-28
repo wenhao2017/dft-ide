@@ -15,7 +15,6 @@ import {
   Button,
   Descriptions,
   Empty,
-  List,
   Space,
   Tag,
   Tooltip,
@@ -420,10 +419,6 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
             background: color-mix(in srgb, var(--vscode-editor-background, #fff) 94%, var(--vscode-focusBorder, #1677ff));
           }
 
-          .dft-pipeline-runtime .pipeline-log {
-            background: var(--vscode-terminal-background, color-mix(in srgb, var(--vscode-editor-background, #fff) 90%, #000));
-          }
-
           .dft-pipeline-runtime .react-flow {
             width: 100%;
             height: 100%;
@@ -693,32 +688,12 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
                     </Button>
                   )}
                 </Space>
-                <List
-                  size="small"
-                  header={<Text strong>节点日志</Text>}
-                  dataSource={selectedTask.logs}
-                  renderItem={(item) => (
-                    <List.Item>
-                      <Text style={{ fontSize: 12 }}>{item}</Text>
-                    </List.Item>
-                  )}
-                />
               </Space>
             ) : (
               <Empty description="点击节点查看详情" />
             )}
           </section>
 
-          <section className="pipeline-panel pipeline-log">
-            <Space direction="vertical" size={4} style={{ width: '100%' }}>
-              <Text strong>全局日志</Text>
-              {runtime.logs.map((line, index) => (
-                <Text key={`${line}-${index}`} style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)', fontSize: 12 }}>
-                  {line}
-                </Text>
-              ))}
-            </Space>
-          </section>
         </aside>
       </main>
     </section>

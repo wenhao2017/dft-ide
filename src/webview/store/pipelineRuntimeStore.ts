@@ -13,7 +13,6 @@ import {
   PipelineLink,
   PipelineTask,
   TaskStatus,
-  pipelineFlowConfigs,
 } from '../components/shared/pipelineMockData';
 import { mergeLatestSnapshot } from './pipelineRuntimeMerge';
 
@@ -27,7 +26,6 @@ export interface PipelineRuntimeSnapshot {
   flowLabel: string;
   tasks: PipelineTask[];
   links: PipelineLink[];
-  logs: string[];
   selectedTaskId?: string;
   runState: PipelineRunState;
   startedAt?: number;
@@ -74,7 +72,6 @@ const pipelineTaskSchema = z.object({
   duration: z.string().optional(),
   attempts: z.number(),
   description: z.string(),
-  logs: z.array(z.string()),
 });
 const pipelineLinkSchema = z.object({
   source: z.string(),
@@ -87,7 +84,6 @@ const pipelineRuntimeSnapshotSchema = z.object({
   flowLabel: z.string(),
   tasks: z.array(pipelineTaskSchema),
   links: z.array(pipelineLinkSchema),
-  logs: z.array(z.string()),
   selectedTaskId: z.string().optional(),
   runState: pipelineRunStateSchema,
   startedAt: z.number().optional(),
@@ -115,14 +111,12 @@ export function makeInitialRuntime(
   moduleKey: string,
   flowLabel: string,
 ): PipelineRuntimeSnapshot {
-  const config = pipelineFlowConfigs[flowKey];
   return {
     flowKey,
     moduleKey,
     flowLabel,
     tasks: [],
     links: [],
-    logs: [`流水线运行态已就绪，点击“启动流水线”开始接收 ${config.title} 事件流。`],
     runState: 'idle',
     updatedAt: Date.now(),
   };
@@ -168,7 +162,6 @@ function makeTask(
     status,
     attempts: 1,
     description,
-    logs: [],
   };
 }
 
@@ -225,7 +218,6 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
         ...task,
         status: isSelected ? (isFirstSelected ? 'running' : 'pending') : 'skipped',
         attempts: 1,
-        logs: [],
       };
     });
     set((state) => ({
@@ -240,7 +232,6 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
           })),
           selectedTaskId: optimisticTasks.find((task) => task.status === 'running')?.id
             ?? optimisticTasks[0]?.id,
-          logs: [`${flowLabel} 已提交启动请求，等待 VS Code runtime 同步。`],
           runState: 'running',
         },
       ),

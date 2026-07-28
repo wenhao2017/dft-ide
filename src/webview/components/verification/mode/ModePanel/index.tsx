@@ -35,6 +35,8 @@ import {
 } from '../../../../utils/ipc'
 import { confirmDelete } from '../../../../utils/confirmDelete'
 import { useVerificationStageConfig } from './hooks/useVerificationStageConfig'
+import usePipelineRuntimeStore from '../../../../store/pipelineRuntimeStore'
+import { useShallow } from 'zustand/react/shallow'
 
 export default function ModePanel({
   accent,
@@ -99,6 +101,17 @@ export default function ModePanel({
     onRun,
     onStop,
   })
+  const runningModeNames = usePipelineRuntimeStore(
+    useShallow((state) =>
+      Object.values(state.runtimes)
+        .filter(
+          (runtime) =>
+            runtime.flowKey === 'verification' &&
+            runtime.runState === 'running',
+        )
+        .map((runtime) => runtime.moduleKey),
+    ),
+  )
 
   const crud = useModeCrud({
     resources,
@@ -574,7 +587,7 @@ export default function ModePanel({
             items={visibleItems}
             selectedName={selectedItem?.name ?? ''}
             checkedNames={batchCheckedNames}
-            runningNames={run.runningNames}
+            runningNames={runningModeNames}
             accent={accentColor}
             onSelect={(item) => {
               selection.selectItem(activeTab, item)

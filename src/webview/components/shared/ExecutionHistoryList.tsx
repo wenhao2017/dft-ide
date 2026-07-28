@@ -4,7 +4,7 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseCircleOutlined,
-  FullscreenOutlined,
+  EyeOutlined,
   RightOutlined,
 } from '@ant-design/icons';
 import { ExecutionHistoryRecord } from '../../utils/ipc';
@@ -21,6 +21,11 @@ interface Props {
 }
 
 const statusMeta = {
+  running: {
+    color: 'processing',
+    label: 'RUNNING',
+    icon: <ClockCircleOutlined style={{ fontSize: 24, color: '#1677ff' }} />,
+  },
   success: {
     color: 'success',
     label: 'SUCCESS',
@@ -80,21 +85,21 @@ const ExecutionHistoryList: React.FC<Props> = ({ open, onClose, history, onSelec
                     <Tag color={meta.color}>{meta.label}</Tag>
                   </div>
                   <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', color: '#888', fontSize: 12 }}>
-                    <ClockCircleOutlined style={{ marginRight: 4 }} /> 包含 {item.logs?.length || 0} 条日志
+                    <ClockCircleOutlined style={{ marginRight: 4 }} /> 包含 {item.nodes?.length || 0} 个 Node
                   </div>
                 </div>
-                {item.runtimeSnapshot && onOpenPipeline ? (
+                {(item.nodes?.length || item.runtimeSnapshot) && onOpenPipeline ? (
                   <Button
                     size="small"
                     type="text"
-                    icon={<FullscreenOutlined />}
+                    icon={<EyeOutlined />}
                     onClick={(event) => {
                       event.stopPropagation();
                       onOpenPipeline(item);
                       onClose();
                     }}
                   >
-                    打开流水线
+                    查看
                   </Button>
                 ) : null}
                 <RightOutlined style={{ color: '#888' }} />

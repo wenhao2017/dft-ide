@@ -10,7 +10,6 @@ export interface PipelineTask {
   duration?: string;
   attempts: number;
   description: string;
-  logs: string[];
 }
 
 export interface PipelineLink {

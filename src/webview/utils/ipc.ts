@@ -875,32 +875,45 @@ export function revealExecutionHistory(
 export function parseExecutionHistoryDiagnostics(
   flow: 'hibist' | 'sailor' | 'verification',
   runId?: string,
+  nodeName?: string,
 ): void {
-  vscode.postMessage({ command: 'parseExecutionHistoryDiagnostics', flow, runId })
+  vscode.postMessage({ command: 'parseExecutionHistoryDiagnostics', flow, runId, nodeName })
 }
 
 export interface ExecutionHistoryRecord {
   id: string
   flow: string
-  status: 'success' | 'error' | 'cancelled'
-  logs: string[]
+  status: 'running' | 'success' | 'error' | 'cancelled'
+  log_path?: string
   executedAt: number
   flowKey?: 'hibist' | 'sailor' | 'verification'
   moduleKey?: string
   flowLabel?: string
   runtimeSnapshot?: unknown
+  startedAt?: number
+  finishedAt?: number
+  module?: string
+  mode?: string
+  nodes?: unknown[]
+  logDirectory?: string
 }
 
 const executionHistoryRecordSchema = z.object({
   id: z.string(),
   flow: z.string(),
-  status: z.enum(['success', 'error', 'cancelled']),
-  logs: z.array(z.string()).default([]),
+  status: z.enum(['running', 'success', 'error', 'cancelled']),
+  log_path: z.string().optional(),
   executedAt: z.number(),
   flowKey: z.enum(['hibist', 'sailor', 'verification']).optional(),
   moduleKey: z.string().optional(),
   flowLabel: z.string().optional(),
   runtimeSnapshot: z.unknown().optional(),
+  startedAt: z.number().optional(),
+  finishedAt: z.number().optional(),
+  module: z.string().optional(),
+  mode: z.string().optional(),
+  nodes: z.array(z.unknown()).optional(),
+  logDirectory: z.string().optional(),
 })
 
 const executionHistoryResponseSchema = z.object({

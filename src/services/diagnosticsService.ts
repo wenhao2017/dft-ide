@@ -136,11 +136,12 @@ export async function parseDftExecutionLog(
 
 export async function parseDftExecutionLogDirectory(
   logDirectory: string,
-  options: DftDiagnosticParseOptions
+  options: DftDiagnosticParseOptions,
+  nodeName?: string
 ): Promise<DftDiagnosticParseResult> {
   dftDiagnostics.clear();
 
-  const logUris = await collectLogFiles(vscode.Uri.file(logDirectory));
+  const logUris = await collectLogFiles(vscode.Uri.file(logDirectory), nodeName);
   const diagnosticsByFile = new Map<string, { uri: vscode.Uri; diagnostics: vscode.Diagnostic[] }>();
   let errorCount = 0;
   let warningCount = 0;
@@ -202,19 +203,37 @@ export async function parseDftExecutionLogDirectory(
   };
 }
 
-async function collectLogFiles(directory: vscode.Uri): Promise<vscode.Uri[]> {
+async function collectLogFiles(directory: vscode.Uri, nodeName?: string): Promise<vscode.Uri[]> {
   const files: vscode.Uri[] = [];
   const entries = await vscode.workspace.fs.readDirectory(directory);
 
   for (const [name, type] of entries) {
     const child = vscode.Uri.joinPath(directory, name);
     if (type & vscode.FileType.Directory) {
-      files.push(...await collectLogFiles(child));
-    } else if (type & vscode.FileType.File) {
+      files.push(...await collectLogFiles(child, nodeName));
+    } else if (type & vscode.FileType.File && matchesNodeLogFile(name, nodeName)) {
       files.push(child);
     }
   }
   return files;
+}
+
+function matchesNodeLogFile(fileName: string, nodeName?: string): boolean {
+  if (!nodeName) {
+    return fileName.toLowerCase().endsWith('.log');
+  }
+
+  if (fileName === `${nodeName}.log`) {
+    return true;
+  }
+
+  const prefix = `${nodeName}__`;
+  if (!fileName.startsWith(prefix) || !fileName.endsWith('.log')) {
+    return false;
+  }
+
+  const suffixSegments = fileName.slice(prefix.length, -'.log'.length).split('__');
+  return suffixSegments.length === 3 && suffixSegments.every((segment) => segment.length > 0);
 }
 
 export function parseDftLogContent(content: string): ParsedDftLogIssue[] {

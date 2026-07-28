@@ -436,7 +436,6 @@ export async function fetchSingleUser(employeeId: string): Promise<UserInfo | nu
 export interface ExecutionData {
   flow: string;
   status: 'success' | 'error' | 'cancelled';
-  logs: string[];
   metrics?: Record<string, unknown>;
   executedAt: number;
 }

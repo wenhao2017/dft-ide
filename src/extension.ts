@@ -1030,8 +1030,9 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'parseExecutionHistoryDiagnostics': {
         const flow = msg.flow;
         const runId = typeof msg.runId === 'string' ? msg.runId : '';
+        const nodeName = typeof msg.nodeName === 'string' ? msg.nodeName.trim() : '';
         dftDiagnostics.clear();
-        if (!isPipelineFlowKey(flow) || !/^exec_\d+_\d+$/.test(runId)) {
+        if (!isPipelineFlowKey(flow) || !/^exec_\d+_\d+$/.test(runId) || !nodeName) {
           return;
         }
         const projectRoot = resolveProjectRoot();
@@ -1045,7 +1046,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           await parseDftExecutionLogDirectory(historyUri.fsPath, {
             flow,
             tool: flow === 'verification' ? 'lander' : flow,
-          });
+          }, nodeName);
         } catch (error) {
           console.warn(
             `Failed to parse execution diagnostics: ${error instanceof Error ? error.message : String(error)}`
@@ -2679,8 +2680,11 @@ async function downloadDomainEcoFiles(project: DftProject, domain: ProjectDomain
     throw new Error('Fetch project root failed.');
   }
 
+  const obsConfig = vscode.workspace.getConfiguration('dftIde.obs');
+  const scriptSpace = obsConfig.get<string>('scriptSpace', '').trim();
+  const ecoScr = obsConfig.get<string>('ecoScr', '').trim();
   const domainPath = path.join(projectRoot, domain.key);
-  const result = await obsTrackingService.downloadDirectory('ALC_IDE', `/ECOSCR/${domain.key}`, vscode.Uri.file(domainPath));
+  const result = await obsTrackingService.downloadDirectory(scriptSpace, `${ecoScr}/${domain.key}`, vscode.Uri.file(domainPath));
   if (result.failedFiles > 0) {
     throw new Error(`${result.failedFiles} OBS files failed to download.`);
   }

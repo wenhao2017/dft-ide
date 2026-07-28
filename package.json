@@ -262,6 +262,11 @@
           },
           "description": "Remote file paths of conversion scripts in the script space for each flow."
         },
+        "dftIde.obs.ecoScr": {
+          "type": "string",
+          "default": "/ECOSCR",
+          "description": "Remote file root path of domain eco scripts in the script space."
+        },
         "dftIde.obs.viewerUrlTemplate": {
           "type": "string",
           "default": "{obsPage}?spaceName={spaceName}&spaceToken={spaceToken}&w3id={w3id}",
@@ -398,4 +403,4 @@
     "typescript": "^5.3.3",
     "vitest": "^1.6.0"
   }
-}
+}

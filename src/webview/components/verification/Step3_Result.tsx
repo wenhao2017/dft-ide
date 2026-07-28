@@ -9,13 +9,11 @@ import {
   HistoryOutlined,
   CloudUploadOutlined,
 } from '@ant-design/icons';
-import ExecutionLogPanel from '../shared/ExecutionLogPanel';
 import ExecutionHistoryList from '../shared/ExecutionHistoryList';
 import { getExecutionHistory, ExecutionHistoryRecord } from '../../utils/ipc';
 import { uploadExecutionData } from '../../services/projectService';
 import useWizardStore from '../../store/wizardStore';
-import PipelineRuntimeView from '../shared/PipelineRuntimeView';
-import { PipelineRuntimeSnapshot } from '../../store/pipelineRuntimeStore';
+import ExecutionHistoryDetail from '../shared/ExecutionHistoryDetail';
 
 const { Link } = Typography;
 
@@ -29,7 +27,7 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRecords, setHistoryRecords] = useState<ExecutionHistoryRecord[]>([]);
   const [activeRecord, setActiveRecord] = useState<ExecutionHistoryRecord | null>(null);
-  const [historyRuntime, setHistoryRuntime] = useState<PipelineRuntimeSnapshot | null>(null);
+  const [historyDetail, setHistoryDetail] = useState<ExecutionHistoryRecord | null>(null);
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
@@ -52,13 +50,16 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
       message.warning('当前没有可提交的执行记录');
       return;
     }
+    if (activeRecord.status === 'running') {
+      message.warning('当前执行仍在运行，请等待结束后再提交');
+      return;
+    }
 
     setUploading(true);
     try {
       await uploadExecutionData(activeProject.id, {
         flow: 'verification',
         status: activeRecord.status,
-        logs: activeRecord.logs,
         executedAt: activeRecord.executedAt,
       });
       message.success('已成功同步执行数据到云端分析平台');
@@ -69,11 +70,8 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
     }
   };
 
-  const currentLogs = activeRecord?.logs ?? [];
-  const openPipelineRuntime = (record: ExecutionHistoryRecord) => {
-    if (isPipelineRuntimeSnapshot(record.runtimeSnapshot)) {
-      setHistoryRuntime(record.runtimeSnapshot);
-    }
+  const viewHistoryDetail = (record: ExecutionHistoryRecord) => {
+    setHistoryDetail(record);
   };
 
   return (
@@ -105,32 +103,18 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
         </Button>
       </div>
 
-      <ExecutionLogPanel
-        title={`日志分析 ${activeRecord ? `[${new Date(activeRecord.executedAt).toLocaleString()}]` : ''}`}
-        status={activeRecord?.status || 'idle'}
-        logs={currentLogs}
-        minHeight={300}
-      />
-
       <ExecutionHistoryList
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
         history={historyRecords}
         onSelect={(record) => setActiveRecord(record)}
-        onOpenPipeline={openPipelineRuntime}
+        onOpenPipeline={viewHistoryDetail}
       />
 
-      {historyRuntime && (
-        <PipelineRuntimeView
-          flowKey={historyRuntime.flowKey}
-          moduleKey={historyRuntime.moduleKey}
-          flowLabel={historyRuntime.flowLabel}
-          snapshot={historyRuntime}
-          readOnly
-          visible
-          onClose={() => setHistoryRuntime(null)}
-        />
-      )}
+      <ExecutionHistoryDetail
+        record={historyDetail}
+        onClose={() => setHistoryDetail(null)}
+      />
 
       <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 32 }}>
         <Button onClick={onPrev} icon={<LeftOutlined />}>
@@ -150,16 +134,5 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
     </div>
   );
 };
-
-function isPipelineRuntimeSnapshot(value: unknown): value is PipelineRuntimeSnapshot {
-  const candidate = value as Partial<PipelineRuntimeSnapshot> | undefined;
-  return !!candidate
-    && (candidate.flowKey === 'hibist' || candidate.flowKey === 'sailor' || candidate.flowKey === 'verification')
-    && typeof candidate.moduleKey === 'string'
-    && typeof candidate.flowLabel === 'string'
-    && Array.isArray(candidate.tasks)
-    && Array.isArray(candidate.links)
-    && Array.isArray(candidate.logs);
-}
 
 export default Step3Result;

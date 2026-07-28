@@ -118,6 +118,10 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
 
   const flowTasks = usePipelineRuntimeStore(
     useShallow((state) => {
+      const selectedRuntime = state.runtimes[`${flow}:${selectedKey}`];
+      if (selectedRuntime?.tasks.length) {
+        return selectedRuntime.tasks;
+      }
       for (const key in state.runtimes) {
         const runtime = state.runtimes[key];
         if (runtime.flowKey === flow && runtime.tasks.length > 0) {

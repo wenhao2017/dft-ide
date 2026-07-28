@@ -58,7 +58,6 @@ interface PipelineRunOverview {
   startedAt?: number;
   finishedAt?: number;
   updatedAt?: number;
-  logs: string[];
   tasks: PipelineTask[];
   links: PipelineLink[];
   cpu: number;
@@ -224,7 +223,6 @@ function summarizeRuntime(
     startedAt: runtime?.startedAt,
     finishedAt: runtime?.finishedAt,
     updatedAt: runtime?.updatedAt,
-    logs: runtime?.logs.length ? runtime.logs : [`${moduleKey} is queued and waiting to start.`],
     tasks,
     links,
     cpu,
@@ -356,7 +354,6 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
             ...task,
             status: 'pending' as const,
             attempts: 1,
-            logs: [],
           })),
           links: defaultTasks.slice(1).map((task, index) => ({
             source: defaultTasks[index].id,
@@ -375,9 +372,11 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
 
   const activeRunId = activeModuleData?.runId;
   const activeRunUpdatedAt = activeModuleData?.updatedAt;
+  const selectedTask = activeModuleData?.tasks.find((task) => task.id === selectedTaskId);
+  const selectedNodeName = selectedTask?.name || selectedTask?.id;
   useEffect(() => {
-    parseExecutionHistoryDiagnostics(flowKey, activeRunId);
-  }, [activeModuleKey, activeRunId, activeRunUpdatedAt, flowKey]);
+    parseExecutionHistoryDiagnostics(flowKey, activeRunId, selectedNodeName);
+  }, [activeModuleKey, activeRunId, activeRunUpdatedAt, flowKey, selectedNodeName]);
 
   const filteredRuns = useMemo(() => {
     const term = searchText.trim().toLowerCase();
