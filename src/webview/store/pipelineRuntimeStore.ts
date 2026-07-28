@@ -63,7 +63,6 @@ const taskStatusSchema = z.enum(['pending', 'running', 'success', 'failed', 'sto
 const pipelineEcoPhaseSchema = z.enum(['before', 'after']);
 const pipelineEcoHookSchema = z.object({
   phase: pipelineEcoPhaseSchema,
-  available: z.boolean(),
   scriptPath: z.string().optional(),
   status: taskStatusSchema,
   attempts: z.number(),

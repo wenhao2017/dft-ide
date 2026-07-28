@@ -512,11 +512,14 @@ async def run_submissions(step, submissions, make_lines, runtime_env, max_concur
 def run_eco(work_path, env, source_file, phase):
     stage = resolve_stage(env.get("DFT_IDE_STAGE") or env.get("stage"))
     eco_file = work_path / stage / "eco" / ECO_FILE
-    if not eco_file.is_file():
-        return 0
     run_id = env.get("DFT_IDE_HISTORY", "manual")
     marker_task_id = env.get("DFT_IDE_MARKER_TASK_ID") or env.get("DFT_IDE_STEP", "unknown")
     print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
+    if not eco_file.is_file():
+        status = 2
+        print(f"[DFT IDE] ECO 入口文件不存在: {eco_file}", file=sys.stderr, flush=True)
+        print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
+        return status
     eco_env = dict(env)
     eco_env["DFT_IDE_ECO_PHASE"] = phase
     lines = source_lines(source_file)

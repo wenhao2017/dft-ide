@@ -188,7 +188,13 @@ function getRunFlowScriptName(command: string): string | undefined {
   return /^run_flow_[A-Za-z0-9_-]+$/.test(scriptName) ? scriptName : undefined;
 }
 
+function getDefaultRunFlowScriptName(flowKey: PipelineFlowKey): string {
+  if (flowKey === 'verification') return 'run_flow_lander';
+  return `run_flow_${flowKey}`;
+}
+
 function getRunFlowStepName(task: PipelineTask): string {
+  if (!getRunFlowScriptName(task.command)) return task.id;
   const [, stepName] = task.command.trim().split(/\s+/, 2);
   return stepName || task.id;
 }
@@ -197,37 +203,34 @@ function resolveEcoScriptPath(
   flowKey: PipelineFlowKey,
   command: string,
   envConfig?: Record<string, unknown> | null,
-): { scriptName: string; scriptPath?: string; available: boolean } | undefined {
-  const runFlowScript = getRunFlowScriptName(command);
-  if (!runFlowScript) return undefined;
-
+): { scriptName: string; scriptPath?: string } {
+  const runFlowScript = getRunFlowScriptName(command) ?? getDefaultRunFlowScriptName(flowKey);
   const scriptName = `${runFlowScript}_eco`;
   const projectPath = resolveProjectPath(flowKey);
   if (!projectPath) {
-    return { scriptName, available: false };
+    return { scriptName };
   }
   const stage = flowKey === 'verification' ? firstNonEmptyString(envConfig?.stage) : '';
-  const scriptPath = flowKey === 'verification'
+  const candidateScriptPath = flowKey === 'verification'
     ? (stage ? path.join(projectPath, stage, 'eco', scriptName) : undefined)
     : path.join(projectPath, 'eco', scriptName);
   return {
     scriptName,
-    scriptPath,
-    available: Boolean(scriptPath && fs.existsSync(scriptPath)),
+    scriptPath: candidateScriptPath && fs.existsSync(candidateScriptPath)
+      ? candidateScriptPath
+      : undefined,
   };
 }
 
 function makeEcoHook(
   phase: PipelineEcoPhase,
-  available: boolean,
   scriptPath?: string,
   previous?: PipelineEcoHook,
 ): PipelineEcoHook {
   return {
     phase,
-    available,
     scriptPath,
-    status: previous?.status ?? (available ? 'pending' : 'skipped'),
+    status: previous?.status ?? 'pending',
     attempts: previous?.attempts ?? 0,
     startedAt: previous?.startedAt,
     finishedAt: previous?.finishedAt,
@@ -243,17 +246,13 @@ function attachEcoRuntime(
   envConfig?: Record<string, unknown> | null,
 ): PipelineTask {
   const resolved = resolveEcoScriptPath(flowKey, task.command, envConfig);
-  if (!resolved) {
-    const { eco: _eco, ...withoutEco } = task;
-    return withoutEco;
-  }
   return {
     ...task,
     eco: {
       scriptName: resolved.scriptName,
       scriptPath: resolved.scriptPath,
-      before: makeEcoHook('before', resolved.available, resolved.scriptPath, task.eco?.before),
-      after: makeEcoHook('after', resolved.available, resolved.scriptPath, task.eco?.after),
+      before: makeEcoHook('before', resolved.scriptPath, task.eco?.before),
+      after: makeEcoHook('after', resolved.scriptPath, task.eco?.after),
     },
   };
 }
@@ -985,8 +984,8 @@ export class PipelineRuntimeService {
     }
     const task = attachEcoRuntime(originalTask, flowKey, envConfig);
     const hook = task.eco?.[phase];
-    if (!hook?.available || !hook.scriptPath) {
-      throw new Error(`未找到 ${task.eco?.scriptName ?? 'ECO'} 脚本，无法单独运行。`);
+    if (!hook) {
+      throw new Error(`Step ${taskId} 缺少 ${phase} ECO 执行阶段。`);
     }
 
     const runId = `eco_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
@@ -1261,7 +1260,6 @@ export class PipelineRuntimeService {
       const runtimeTaskId = execution?.task.id ?? markerTaskId;
       this.patchEcoHook(key, runtimeTaskId, phaseText as PipelineEcoPhase, (hook) => ({
         ...hook,
-        available: true,
         status: 'running',
         attempts: hook.attempts + 1,
         startedAt: nowText(),
@@ -1282,7 +1280,6 @@ export class PipelineRuntimeService {
       const exitCode = Number(exitCodeText);
       this.patchEcoHook(key, runtimeTaskId, phaseText as PipelineEcoPhase, (hook) => ({
         ...hook,
-        available: true,
         status: exitCode === 0 ? (hook.status === 'failed' ? 'failed' : 'success') : 'failed',
         finishedAt: nowText(),
         exitCode,

@@ -4,7 +4,6 @@ export type PipelineEcoPhase = 'before' | 'after';
 
 export interface PipelineEcoHook {
   phase: PipelineEcoPhase;
-  available: boolean;
   scriptPath?: string;
   status: TaskStatus;
   attempts: number;

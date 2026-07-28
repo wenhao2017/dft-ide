@@ -752,8 +752,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
               const hasRunningEco = activeModuleData.tasks.some(
                 (item) => item.eco?.before.status === 'running' || item.eco?.after.status === 'running',
               );
-              const canRun = hook.available
-                && activeModuleData.runState !== 'running'
+              const canRun = activeModuleData.runState !== 'running'
                 && !hasRunningEco;
               return (
                 <div
@@ -764,7 +763,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
                     gap: 7,
                     padding: '6px 7px',
                     border: `1px solid ${themeStyles.borderLight}`,
-                    borderLeft: `3px solid ${hook.available ? hookColor : themeStyles.idle}`,
+                    borderLeft: `3px solid ${hookColor}`,
                     borderRadius: 4,
                     background: themeStyles.panelBg,
                   }}
@@ -784,7 +783,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
                     </div>
                     <Tooltip title={hook.scriptPath ?? task.eco!.scriptName}>
                       <div style={{ color: themeStyles.textSecondary, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
-                        {hook.available ? (hook.scriptPath ?? task.eco!.scriptName) : `${task.eco!.scriptName}（未配置）`}
+                        {hook.scriptPath ?? task.eco!.scriptName}
                       </div>
                     </Tooltip>
                     {(hook.startedAt || hook.finishedAt || hook.exitCode !== undefined) && (
@@ -795,10 +794,10 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
                       </div>
                     )}
                   </div>
-                  <Tag style={{ margin: 0, color: hook.available ? hookColor : themeStyles.idle, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontSize: 10 }}>
-                    {hook.available ? (statusText[hook.status] ?? hook.status) : '未配置'}
+                  <Tag style={{ margin: 0, color: hookColor, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontSize: 10 }}>
+                    {statusText[hook.status] ?? hook.status}
                   </Tag>
-                  {hook.available && hook.scriptPath && (
+                  {hook.scriptPath && (
                     <Tooltip title="打开 ECO 脚本">
                       <Button
                         size="small"
