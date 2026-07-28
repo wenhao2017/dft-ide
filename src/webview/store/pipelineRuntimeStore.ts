@@ -39,6 +39,7 @@ interface PipelineRuntimeStore {
     flowKey: PipelineFlowKey,
     moduleKey: string,
     flowLabel: string,
+    selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>,
   ) => Promise<PipelineRuntimeSnapshot | undefined>;
   startRuntime: (
     flowKey: PipelineFlowKey,
@@ -195,7 +196,7 @@ function applySnapshot(
 const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
   runtimes: {},
 
-  ensureRuntime: (flowKey, moduleKey, flowLabel) => {
+  ensureRuntime: (flowKey, moduleKey, flowLabel, selectedTasks) => {
     set((state) => {
       const key = getPipelineRuntimeKey(flowKey, moduleKey);
       if (state.runtimes[key]) {
@@ -208,7 +209,7 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
         },
       };
     });
-    return ensurePipelineRuntime({ flowKey, moduleKey, flowLabel }).then((res) => {
+    return ensurePipelineRuntime({ flowKey, moduleKey, flowLabel, selectedTasks }).then((res) => {
       const snapshot = res.success ? parseRuntimeSnapshot(res.snapshot) : null;
       if (snapshot) {
         set((state) => {

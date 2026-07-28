@@ -11,6 +11,7 @@ import type { DftProject, ProjectDomain } from '../services/projectService';
 import { z } from 'zod';
 import type { LanderStep } from '../../services/landerPipelineService';
 import type { CommonSyncArtifact } from '../../services/commonSyncArtifacts';
+import type { PipelineTask } from '../components/shared/pipelineMockData';
 
 let _reqId = 0;
 /** 等待响应的 Promise 回调池：key = `{command}Response:{requestId}` */
@@ -965,6 +966,7 @@ export async function ensurePipelineRuntime(options: {
   flowKey: 'hibist' | 'sailor' | 'verification'
   moduleKey: string
   flowLabel: string
+  selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>
 }): Promise<{ success: boolean; snapshot?: unknown; error?: string }> {
   const res = await ipcRequest('ensurePipelineRuntime', options)
   return res as { success: boolean; snapshot?: unknown; error?: string }

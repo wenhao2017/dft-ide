@@ -703,9 +703,15 @@ function createIdleRuntime(
   flowKey: PipelineFlowKey,
   moduleKey: string,
   flowLabel: string,
+  selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>,
 ): PipelineRuntimeSnapshot {
-  const config = pipelineFlowConfigs[flowKey];
-  const { tasks, links } = loadPipelineConfig(flowKey);
+  const loadedPipeline = loadPipelineConfig(flowKey);
+  const tasks = selectedTasks?.length
+    ? selectedTasks.map((task) => makeTask(task.id, task.name, task.command, task.description))
+    : loadedPipeline.tasks;
+  const links = selectedTasks?.length
+    ? tasks.slice(1).map((task, index) => ({ source: tasks[index].id, target: task.id }))
+    : loadedPipeline.links;
   return {
     flowKey,
     moduleKey,
@@ -739,17 +745,24 @@ export class PipelineRuntimeService {
     return Array.from(this.runtimes.values());
   }
 
-  ensureRuntime(flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string): PipelineRuntimeSnapshot {
+  ensureRuntime(
+    flowKey: PipelineFlowKey,
+    moduleKey: string,
+    flowLabel: string,
+    selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>,
+  ): PipelineRuntimeSnapshot {
     const key = getPipelineRuntimeKey(flowKey, moduleKey);
     const existing = this.runtimes.get(key);
     if (existing) {
-      const next = { ...existing, flowLabel, updatedAt: nowStamp() };
+      const next = existing.runState === 'idle' && selectedTasks?.length
+        ? createIdleRuntime(flowKey, moduleKey, flowLabel, selectedTasks)
+        : { ...existing, flowLabel, updatedAt: nowStamp() };
       this.runtimes.set(key, next);
       this.options.onUpdate(next);
       return next;
     }
 
-    const runtime = createIdleRuntime(flowKey, moduleKey, flowLabel);
+    const runtime = createIdleRuntime(flowKey, moduleKey, flowLabel, selectedTasks);
     this.runtimes.set(key, runtime);
     this.options.onUpdate(runtime);
     return runtime;

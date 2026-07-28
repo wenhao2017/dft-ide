@@ -611,7 +611,17 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
 
           let snapshot;
           if (msg.command === 'ensurePipelineRuntime') {
-            snapshot = pipelineRuntimeService.ensureRuntime(flowKey, moduleKey, flowLabel);
+            const selectedTasks = Array.isArray(msg.selectedTasks)
+              ? msg.selectedTasks.filter((task: unknown): task is { id: string; name: string; command: string; description: string } => {
+                if (!task || typeof task !== 'object') return false;
+                const value = task as Record<string, unknown>;
+                return typeof value.id === 'string'
+                  && typeof value.name === 'string'
+                  && typeof value.command === 'string'
+                  && typeof value.description === 'string';
+              })
+              : undefined;
+            snapshot = pipelineRuntimeService.ensureRuntime(flowKey, moduleKey, flowLabel, selectedTasks);
           } else if (msg.command === 'startPipelineRuntime') {
             const selectedTaskIds = Array.isArray(msg.selectedTaskIds) && msg.selectedTaskIds.length > 0 ? msg.selectedTaskIds : undefined;
             const selectedTasks = Array.isArray(msg.selectedTasks)

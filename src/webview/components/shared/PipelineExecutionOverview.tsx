@@ -32,7 +32,7 @@ import usePipelineRuntimeStore, {
   PipelineRuntimeSnapshot,
   getPipelineRuntimeKey,
 } from '../../store/pipelineRuntimeStore';
-import { PipelineEcoPhase, PipelineLink, PipelineTask } from './pipelineMockData';
+import { PipelineEcoPhase, PipelineEcoRuntime, PipelineLink, PipelineTask } from './pipelineMockData';
 import {
   openFileInEditor,
   openExecutionTerminal,
@@ -135,6 +135,25 @@ function getStatusColor(status?: string): string {
     return themeStyles.idle;
   }
   return themeStyles.idle;
+}
+
+function makePendingEcoRuntime(flowKey: PipelineFlowKey, task: Pick<PipelineTask, 'command'>): PipelineEcoRuntime {
+  const commandName = task.command.trim().split(/\s+/)[0];
+  const runFlowScript = /^run_flow_[A-Za-z0-9_-]+$/.test(commandName)
+    ? commandName
+    : flowKey === 'verification'
+      ? 'run_flow_lander'
+      : `run_flow_${flowKey}`;
+  const makeHook = (phase: PipelineEcoPhase) => ({
+    phase,
+    status: 'pending' as const,
+    attempts: 0,
+  });
+  return {
+    scriptName: `${runFlowScript}_eco`,
+    before: makeHook('before'),
+    after: makeHook('after'),
+  };
 }
 
 function formatStartTime(time?: number): string {
@@ -336,6 +355,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   const [activeModuleKey, setActiveModuleKey] = useState<string>();
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(() => new Set());
+  const [expandedEcoTaskKeys, setExpandedEcoTaskKeys] = useState<Set<string>>(() => new Set());
   const [peakMetrics, setPeakMetrics] = useState<Record<string, { maxCpu: number; maxMem: number }>>({});
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -347,14 +367,15 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
 
   useEffect(() => {
     selectedModuleKeys.forEach((moduleKey) => {
-      ensureRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
+      ensureRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), defaultTasksByModule?.[moduleKey]);
     });
-  }, [flowKey, selectedModuleKeys, ensureRuntime, getFlowLabel]);
+  }, [defaultTasksByModule, flowKey, selectedModuleKeys, ensureRuntime, getFlowLabel]);
 
   const visibleRuns = useMemo(() => (
     selectedModuleKeys.map((moduleKey) => {
       const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
       const defaultTasks = defaultTasksByModule?.[moduleKey];
+      const runtimeTasksById = new Map(runtime?.tasks.map((task) => [task.id, task]));
       const effectiveRuntime = runtime?.runState === 'idle' && defaultTasks?.length
         ? {
           ...runtime,
@@ -362,6 +383,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
             ...task,
             status: 'pending' as const,
             attempts: 1,
+            eco: runtimeTasksById.get(task.id)?.eco ?? makePendingEcoRuntime(flowKey, task),
           })),
           links: defaultTasks.slice(1).map((task, index) => ({
             source: defaultTasks[index].id,
@@ -520,6 +542,19 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     });
   }, []);
 
+  const toggleEcoExpanded = useCallback((moduleKey: string, taskId: string) => {
+    const key = `${moduleKey}:${taskId}`;
+    setExpandedEcoTaskKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     if (!activeModuleData) {
       setSelectedTaskId(undefined);
@@ -595,6 +630,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     const children = activeHierarchy.childrenByParent.get(task.id) ?? [];
     const hasChildren = children.length > 0;
     const expanded = expandedTaskIds.has(task.id);
+    const ecoExpanded = expandedEcoTaskKeys.has(`${activeModuleData.moduleKey}:${task.id}`);
     const isSelected = selectedTaskId === task.id;
     const isRunning = task.status === 'running';
     const isChild = depth > 0;
@@ -714,6 +750,68 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+            {task.eco && (
+              <Tooltip title={ecoExpanded ? '收起 Before/After ECO' : '展开 Before/After ECO'}>
+                <Button
+                  size="small"
+                  type="text"
+                  aria-expanded={ecoExpanded}
+                  icon={ecoExpanded
+                    ? <CaretDownOutlined style={{ fontSize: 9 }} />
+                    : <CaretRightOutlined style={{ fontSize: 9 }} />}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleEcoExpanded(activeModuleData.moduleKey, task.id);
+                  }}
+                  style={{
+                    height: 20,
+                    padding: '0 5px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    color: themeStyles.textSecondary,
+                    border: `1px solid ${themeStyles.borderLight}`,
+                    background: themeStyles.metricBg,
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                  }}
+                >
+                  <span>ECO</span>
+                  <span
+                    title={`Before ECO: ${statusText[task.eco.before.status] ?? task.eco.before.status}`}
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: 3,
+                      border: `1px solid ${getStatusColor(task.eco.before.status)}`,
+                      color: getStatusColor(task.eco.before.status),
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 9,
+                    }}
+                  >
+                    B
+                  </span>
+                  <span
+                    title={`After ECO: ${statusText[task.eco.after.status] ?? task.eco.after.status}`}
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: 3,
+                      border: `1px solid ${getStatusColor(task.eco.after.status)}`,
+                      color: getStatusColor(task.eco.after.status),
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 9,
+                    }}
+                  >
+                    A
+                  </span>
+                </Button>
+              </Tooltip>
+            )}
             {relationLabel && (
               <Tag style={{ margin: 0, color: themeStyles.textSecondary, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontFamily: 'monospace', fontSize: 10, padding: '0 2px', height: 16, lineHeight: '14px' }}>
                 {relationLabel}
@@ -729,7 +827,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
             </Tag>
           </div>
         </div>
-        {isSelected && task.eco && (
+        {ecoExpanded && task.eco && (
           <div
             style={{
               marginTop: 5,
@@ -857,11 +955,13 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   }, [
     activeHierarchy,
     activeModuleData,
+    expandedEcoTaskKeys,
     expandedTaskIds,
     selectStep,
     selectedTaskId,
     runEcoHook,
     stopEcoHook,
+    toggleEcoExpanded,
     toggleExpanded,
   ]);
 
