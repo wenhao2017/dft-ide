@@ -701,6 +701,37 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
+            {task.eco ? (
+              <Tooltip title={ecoExpanded ? '收起 ECO' : '展开 ECO'}>
+                <Button
+                  size="small"
+                  type="text"
+                  aria-label={ecoExpanded ? '收起 ECO' : '展开 ECO'}
+                  aria-expanded={ecoExpanded}
+                  icon={ecoExpanded
+                    ? <CaretDownOutlined style={{ fontSize: 10 }} />
+                    : <CaretRightOutlined style={{ fontSize: 10 }} />}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleEcoExpanded(activeModuleData.moduleKey, task.id);
+                  }}
+                  style={{
+                    color: isSelected ? themeStyles.selectedFg : themeStyles.textSecondary,
+                    width: 14,
+                    height: 18,
+                    padding: 0,
+                    border: 0,
+                    background: 'transparent',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flex: '0 0 14px',
+                  }}
+                />
+              </Tooltip>
+            ) : (
+              <span style={{ width: 14, flex: '0 0 14px' }} />
+            )}
             {hasChildren ? (
               <Button
                 size="small"
@@ -750,68 +781,6 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-            {task.eco && (
-              <Tooltip title={ecoExpanded ? '收起 Before/After ECO' : '展开 Before/After ECO'}>
-                <Button
-                  size="small"
-                  type="text"
-                  aria-expanded={ecoExpanded}
-                  icon={ecoExpanded
-                    ? <CaretDownOutlined style={{ fontSize: 9 }} />
-                    : <CaretRightOutlined style={{ fontSize: 9 }} />}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    toggleEcoExpanded(activeModuleData.moduleKey, task.id);
-                  }}
-                  style={{
-                    height: 20,
-                    padding: '0 5px',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    color: themeStyles.textSecondary,
-                    border: `1px solid ${themeStyles.borderLight}`,
-                    background: themeStyles.metricBg,
-                    fontSize: 10,
-                    fontFamily: 'monospace',
-                  }}
-                >
-                  <span>ECO</span>
-                  <span
-                    title={`Before ECO: ${statusText[task.eco.before.status] ?? task.eco.before.status}`}
-                    style={{
-                      width: 14,
-                      height: 14,
-                      borderRadius: 3,
-                      border: `1px solid ${getStatusColor(task.eco.before.status)}`,
-                      color: getStatusColor(task.eco.before.status),
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 9,
-                    }}
-                  >
-                    B
-                  </span>
-                  <span
-                    title={`After ECO: ${statusText[task.eco.after.status] ?? task.eco.after.status}`}
-                    style={{
-                      width: 14,
-                      height: 14,
-                      borderRadius: 3,
-                      border: `1px solid ${getStatusColor(task.eco.after.status)}`,
-                      color: getStatusColor(task.eco.after.status),
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 9,
-                    }}
-                  >
-                    A
-                  </span>
-                </Button>
-              </Tooltip>
-            )}
             {relationLabel && (
               <Tag style={{ margin: 0, color: themeStyles.textSecondary, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontFamily: 'monospace', fontSize: 10, padding: '0 2px', height: 16, lineHeight: '14px' }}>
                 {relationLabel}
@@ -830,19 +799,19 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
         {ecoExpanded && task.eco && (
           <div
             style={{
-              marginTop: 5,
-              marginLeft: isChild ? 10 : 0,
-              padding: '7px 8px',
-              border: `1px solid ${themeStyles.borderLight}`,
-              borderRadius: 4,
-              background: themeStyles.metricBg,
-              display: 'grid',
-              gap: 6,
+              marginTop: 2,
+              marginLeft: isChild ? 28 : 20,
+              padding: '3px 0 3px 8px',
+              borderLeft: `2px solid ${themeStyles.borderLight}`,
+              display: 'flex',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 5,
             }}
           >
-            <div style={{ color: themeStyles.textSecondary, fontSize: 11, fontWeight: 700 }}>
-              ECO 执行阶段
-            </div>
+            <span style={{ color: themeStyles.textMuted, fontSize: 10, fontWeight: 700, fontFamily: 'monospace' }}>
+              ECO
+            </span>
             {(['before', 'after'] as const).map((phase) => {
               const hook = task.eco![phase];
               const hookColor = getStatusColor(hook.status);
@@ -852,47 +821,41 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
               );
               const canRun = activeModuleData.runState !== 'running'
                 && !hasRunningEco;
+              const hookDetails = [
+                hook.scriptPath ?? task.eco!.scriptName,
+                hook.lastRunSource === 'manual' ? '手动执行' : hook.lastRunSource === 'pipeline' ? '流水线执行' : '',
+                hook.finishedAt ?? hook.startedAt ?? '',
+                hook.exitCode !== undefined ? `exit ${hook.exitCode}` : '',
+              ].filter(Boolean).join(' · ');
               return (
                 <div
                   key={phase}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 7,
-                    padding: '6px 7px',
+                    gap: 4,
+                    minHeight: 22,
+                    padding: '1px 4px',
                     border: `1px solid ${themeStyles.borderLight}`,
-                    borderLeft: `3px solid ${hookColor}`,
-                    borderRadius: 4,
+                    borderRadius: 3,
                     background: themeStyles.panelBg,
                   }}
                 >
                   {running ? (
-                    <SyncOutlined spin style={{ color: hookColor }} />
+                    <SyncOutlined spin style={{ color: hookColor, fontSize: 11 }} />
                   ) : hook.status === 'success' ? (
-                    <CheckCircleOutlined style={{ color: hookColor }} />
+                    <CheckCircleOutlined style={{ color: hookColor, fontSize: 11 }} />
                   ) : hook.status === 'failed' || hook.status === 'stopped' ? (
-                    <CloseCircleOutlined style={{ color: hookColor }} />
+                    <CloseCircleOutlined style={{ color: hookColor, fontSize: 11 }} />
                   ) : (
-                    <ClockCircleOutlined style={{ color: themeStyles.idle }} />
+                    <ClockCircleOutlined style={{ color: themeStyles.idle, fontSize: 11 }} />
                   )}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ color: themeStyles.textPrimary, fontSize: 12, fontWeight: 700 }}>
+                  <Tooltip title={hookDetails}>
+                    <span style={{ color: themeStyles.textPrimary, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
                       {phase === 'before' ? 'Before ECO' : 'After ECO'}
-                    </div>
-                    <Tooltip title={hook.scriptPath ?? task.eco!.scriptName}>
-                      <div style={{ color: themeStyles.textSecondary, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
-                        {hook.scriptPath ?? task.eco!.scriptName}
-                      </div>
-                    </Tooltip>
-                    {(hook.startedAt || hook.finishedAt || hook.exitCode !== undefined) && (
-                      <div style={{ color: themeStyles.textMuted, fontSize: 10, marginTop: 2 }}>
-                        {hook.lastRunSource === 'manual' ? '手动' : '流水线'}
-                        {hook.finishedAt ? ` · ${hook.finishedAt}` : hook.startedAt ? ` · ${hook.startedAt}` : ''}
-                        {hook.exitCode !== undefined ? ` · exit ${hook.exitCode}` : ''}
-                      </div>
-                    )}
-                  </div>
-                  <Tag style={{ margin: 0, color: hookColor, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontSize: 10 }}>
+                    </span>
+                  </Tooltip>
+                  <Tag style={{ margin: 0, color: hookColor, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontSize: 9, padding: '0 2px', height: 16, lineHeight: '14px' }}>
                     {statusText[hook.status] ?? hook.status}
                   </Tag>
                   {hook.scriptPath && (
@@ -905,6 +868,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
                           event.stopPropagation();
                           openFileInEditor(hook.scriptPath!);
                         }}
+                        style={{ width: 20, height: 20, padding: 0 }}
                       />
                     </Tooltip>
                   )}
@@ -918,6 +882,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
                           event.stopPropagation();
                           void stopEcoHook(task, phase);
                         }}
+                        style={{ width: 20, height: 20, padding: 0 }}
                       />
                     </Tooltip>
                   ) : (
@@ -931,6 +896,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
                           event.stopPropagation();
                           void runEcoHook(task, phase);
                         }}
+                        style={{ width: 20, height: 20, padding: 0 }}
                       />
                     </Tooltip>
                   )}
