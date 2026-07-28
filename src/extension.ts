@@ -595,7 +595,9 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'stopPipelineRuntime':
       case 'selectPipelineTask':
       case 'stopPipelineTask':
-      case 'rerunPipelineTask': {
+      case 'rerunPipelineTask':
+      case 'runPipelineTaskEcoHook':
+      case 'stopPipelineTaskEcoHook': {
         const requestId: string | undefined = msg.requestId;
         try {
           const flowKey = msg.flowKey;
@@ -642,6 +644,35 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             pipelineRuntimeService.stopTask(flowKey, moduleKey, taskId, flowLabel);
           } else if (msg.command === 'rerunPipelineTask') {
             pipelineRuntimeService.rerunTask(flowKey, moduleKey, taskId);
+          } else if (msg.command === 'runPipelineTaskEcoHook') {
+            const phase = msg.phase === 'before' || msg.phase === 'after' ? msg.phase : undefined;
+            if (!taskId || !phase) {
+              throw new Error('Invalid pipeline ECO hook payload');
+            }
+            const envConfig = await readConfig(flowKey);
+            const verificationStage = flowKey === 'verification'
+              && typeof envConfig?.stage === 'string'
+                ? envConfig.stage
+                : undefined;
+            const taskConfigKey = verificationStage
+              ? `${flowKey}/${verificationStage}/${moduleKey}/config`
+              : `${flowKey}/${moduleKey}/config`;
+            const taskConfig = await readConfig(taskConfigKey);
+            const cwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
+            const stepStatus = Number.isFinite(msg.stepStatus) ? Number(msg.stepStatus) : 0;
+            snapshot = pipelineRuntimeService.runTaskEcoHook(
+              flowKey,
+              moduleKey,
+              taskId,
+              phase,
+              envConfig,
+              taskConfig,
+              undefined,
+              cwd,
+              stepStatus,
+            );
+          } else if (msg.command === 'stopPipelineTaskEcoHook') {
+            pipelineRuntimeService.stopTaskEcoHook(flowKey, moduleKey);
           }
 
           if (requestId) {

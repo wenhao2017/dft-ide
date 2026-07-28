@@ -6,6 +6,7 @@ import {
   Empty,
   Input,
   List,
+  message,
   Pagination,
   Row,
   Space,
@@ -18,7 +19,11 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseCircleOutlined,
+  FileTextOutlined,
   FilterOutlined,
+  PauseCircleOutlined,
+  PlayCircleOutlined,
+  ReloadOutlined,
   SearchOutlined,
   SyncOutlined,
 } from '@ant-design/icons';
@@ -27,11 +32,14 @@ import usePipelineRuntimeStore, {
   PipelineRuntimeSnapshot,
   getPipelineRuntimeKey,
 } from '../../store/pipelineRuntimeStore';
-import { PipelineLink, PipelineTask } from './pipelineMockData';
+import { PipelineEcoPhase, PipelineLink, PipelineTask } from './pipelineMockData';
 import {
+  openFileInEditor,
   openExecutionTerminal,
   parseExecutionHistoryDiagnostics,
   revealExecutionHistory,
+  runPipelineTaskEcoHook,
+  stopPipelineTaskEcoHook,
 } from '../../utils/ipc';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -552,6 +560,34 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     }
   }, [activeHierarchy, activeModuleData]);
 
+  const runEcoHook = useCallback(async (task: PipelineTask, phase: PipelineEcoPhase) => {
+    if (!activeModuleData) return;
+    const result = await runPipelineTaskEcoHook({
+      flowKey,
+      moduleKey: activeModuleData.moduleKey,
+      taskId: task.id,
+      phase,
+      cwd: moduleWorkDirs?.[activeModuleData.moduleKey],
+      stepStatus: task.status === 'failed' ? 1 : 0,
+    });
+    if (!result.success) {
+      message.error(result.error ?? 'ECO Hook 启动失败');
+    }
+  }, [activeModuleData, flowKey, moduleWorkDirs]);
+
+  const stopEcoHook = useCallback(async (task: PipelineTask, phase: PipelineEcoPhase) => {
+    if (!activeModuleData) return;
+    const result = await stopPipelineTaskEcoHook({
+      flowKey,
+      moduleKey: activeModuleData.moduleKey,
+      taskId: task.id,
+      phase,
+    });
+    if (!result.success) {
+      message.error(result.error ?? 'ECO Hook 停止失败');
+    }
+  }, [activeModuleData, flowKey]);
+
   const renderTaskDetail = useCallback((task: PipelineTask, depth = 0): React.ReactNode => {
     if (!activeModuleData || !activeHierarchy) {
       return null;
@@ -693,6 +729,119 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
             </Tag>
           </div>
         </div>
+        {isSelected && task.eco && (
+          <div
+            style={{
+              marginTop: 5,
+              marginLeft: isChild ? 10 : 0,
+              padding: '7px 8px',
+              border: `1px solid ${themeStyles.borderLight}`,
+              borderRadius: 4,
+              background: themeStyles.metricBg,
+              display: 'grid',
+              gap: 6,
+            }}
+          >
+            <div style={{ color: themeStyles.textSecondary, fontSize: 11, fontWeight: 700 }}>
+              ECO 执行阶段
+            </div>
+            {(['before', 'after'] as const).map((phase) => {
+              const hook = task.eco![phase];
+              const hookColor = getStatusColor(hook.status);
+              const running = hook.status === 'running';
+              const hasRunningEco = activeModuleData.tasks.some(
+                (item) => item.eco?.before.status === 'running' || item.eco?.after.status === 'running',
+              );
+              const canRun = hook.available
+                && activeModuleData.runState !== 'running'
+                && !hasRunningEco;
+              return (
+                <div
+                  key={phase}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 7,
+                    padding: '6px 7px',
+                    border: `1px solid ${themeStyles.borderLight}`,
+                    borderLeft: `3px solid ${hook.available ? hookColor : themeStyles.idle}`,
+                    borderRadius: 4,
+                    background: themeStyles.panelBg,
+                  }}
+                >
+                  {running ? (
+                    <SyncOutlined spin style={{ color: hookColor }} />
+                  ) : hook.status === 'success' ? (
+                    <CheckCircleOutlined style={{ color: hookColor }} />
+                  ) : hook.status === 'failed' || hook.status === 'stopped' ? (
+                    <CloseCircleOutlined style={{ color: hookColor }} />
+                  ) : (
+                    <ClockCircleOutlined style={{ color: themeStyles.idle }} />
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: themeStyles.textPrimary, fontSize: 12, fontWeight: 700 }}>
+                      {phase === 'before' ? 'Before ECO' : 'After ECO'}
+                    </div>
+                    <Tooltip title={hook.scriptPath ?? task.eco!.scriptName}>
+                      <div style={{ color: themeStyles.textSecondary, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
+                        {hook.available ? (hook.scriptPath ?? task.eco!.scriptName) : `${task.eco!.scriptName}（未配置）`}
+                      </div>
+                    </Tooltip>
+                    {(hook.startedAt || hook.finishedAt || hook.exitCode !== undefined) && (
+                      <div style={{ color: themeStyles.textMuted, fontSize: 10, marginTop: 2 }}>
+                        {hook.lastRunSource === 'manual' ? '手动' : '流水线'}
+                        {hook.finishedAt ? ` · ${hook.finishedAt}` : hook.startedAt ? ` · ${hook.startedAt}` : ''}
+                        {hook.exitCode !== undefined ? ` · exit ${hook.exitCode}` : ''}
+                      </div>
+                    )}
+                  </div>
+                  <Tag style={{ margin: 0, color: hook.available ? hookColor : themeStyles.idle, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontSize: 10 }}>
+                    {hook.available ? (statusText[hook.status] ?? hook.status) : '未配置'}
+                  </Tag>
+                  {hook.available && hook.scriptPath && (
+                    <Tooltip title="打开 ECO 脚本">
+                      <Button
+                        size="small"
+                        type="text"
+                        icon={<FileTextOutlined />}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openFileInEditor(hook.scriptPath!);
+                        }}
+                      />
+                    </Tooltip>
+                  )}
+                  {running ? (
+                    <Tooltip title="停止 ECO Hook">
+                      <Button
+                        size="small"
+                        danger
+                        icon={<PauseCircleOutlined />}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void stopEcoHook(task, phase);
+                        }}
+                      />
+                    </Tooltip>
+                  ) : (
+                    <Tooltip title={hook.attempts > 0 ? '重跑 ECO Hook' : '单独运行 ECO Hook'}>
+                      <Button
+                        size="small"
+                        type={hook.status === 'failed' ? 'primary' : 'default'}
+                        icon={hook.attempts > 0 ? <ReloadOutlined /> : <PlayCircleOutlined />}
+                        disabled={!canRun}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void runEcoHook(task, phase);
+                        }}
+                      />
+                    </Tooltip>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
         {hasChildren && expanded && (
           <div
             style={{
@@ -712,6 +861,8 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     expandedTaskIds,
     selectStep,
     selectedTaskId,
+    runEcoHook,
+    stopEcoHook,
     toggleExpanded,
   ]);
 

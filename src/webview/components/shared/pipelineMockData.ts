@@ -1,5 +1,27 @@
 export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'stopped' | 'skipped';
 
+export type PipelineEcoPhase = 'before' | 'after';
+
+export interface PipelineEcoHook {
+  phase: PipelineEcoPhase;
+  available: boolean;
+  scriptPath?: string;
+  status: TaskStatus;
+  attempts: number;
+  startedAt?: string;
+  finishedAt?: string;
+  duration?: string;
+  exitCode?: number;
+  lastRunSource?: 'pipeline' | 'manual';
+}
+
+export interface PipelineEcoRuntime {
+  scriptName: string;
+  scriptPath?: string;
+  before: PipelineEcoHook;
+  after: PipelineEcoHook;
+}
+
 export interface PipelineTask {
   id: string;
   name: string;
@@ -10,6 +32,7 @@ export interface PipelineTask {
   duration?: string;
   attempts: number;
   description: string;
+  eco?: PipelineEcoRuntime;
 }
 
 export interface PipelineLink {

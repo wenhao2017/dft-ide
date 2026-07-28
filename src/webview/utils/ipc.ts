@@ -1025,6 +1025,28 @@ export async function rerunPipelineTask(options: {
   return res as { success: boolean; error?: string }
 }
 
+export async function runPipelineTaskEcoHook(options: {
+  flowKey: 'hibist' | 'sailor' | 'verification'
+  moduleKey: string
+  taskId: string
+  phase: 'before' | 'after'
+  cwd?: string
+  stepStatus?: number
+}): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('runPipelineTaskEcoHook', options)
+  return res as { success: boolean; error?: string }
+}
+
+export async function stopPipelineTaskEcoHook(options: {
+  flowKey: 'hibist' | 'sailor' | 'verification'
+  moduleKey: string
+  taskId: string
+  phase: 'before' | 'after'
+}): Promise<{ success: boolean; error?: string }> {
+  const res = await ipcRequest('stopPipelineTaskEcoHook', options)
+  return res as { success: boolean; error?: string }
+}
+
 /**
  * 打开 GitLab 仓库主页。
  */

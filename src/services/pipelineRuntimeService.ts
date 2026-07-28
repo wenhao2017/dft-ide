@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import {
+  PipelineEcoHook,
+  PipelineEcoPhase,
   PipelineLink,
   PipelineTask,
   TaskStatus,
@@ -77,8 +79,26 @@ interface PipelineExecutionSession {
   buffer: string;
   seenStarts: Set<string>;
   seenEnds: Set<string>;
+  seenPhaseStarts: Set<string>;
+  seenPhaseEnds: Set<string>;
   monitor?: vscode.Disposable;
   stopped: boolean;
+}
+
+interface PipelineEcoExecutionSession {
+  runId: string;
+  taskId: string;
+  phase: PipelineEcoPhase;
+  terminalTitle: string;
+  buffer: string;
+  monitor?: vscode.Disposable;
+}
+
+interface PipelineRuntimeContext {
+  cwd?: string;
+  envConfig?: Record<string, unknown> | null;
+  taskConfig?: Record<string, unknown> | null;
+  runParameters?: unknown;
 }
 
 const timers = new Map<string, ReturnType<typeof setTimeout>[]>();
@@ -147,17 +167,95 @@ function mergeToolConfigs(projectTools: unknown, rowTools: unknown): RuntimeTool
 }
 
 function buildPipelineStepExecutionCommand(projectPath: string | undefined, stepCommand: string): string {
-  let scriptPath = '';
   const scriptName = stepCommand.split(' ')[0];
-  if (projectPath) {
-    scriptPath = path.join(path.dirname(projectPath), ".dft-ide", "local-state", "scripts", scriptName);
-  }
-  if (!scriptPath || !fs.existsSync(scriptPath)) {
-    scriptPath = path.resolve(__dirname, '../scripts', scriptName);
-  }
+  const scriptPath = resolvePipelineScriptPath(projectPath, scriptName);
   const stepArguments = stepCommand.substring(scriptName.length).trim();
   const argumentsSuffix = stepArguments ? ` ${stepArguments}` : '';
   return `ma ${PIPELINE_PYTHON_MODULE} && python3 ${quoteCshArgument(scriptPath)}${argumentsSuffix}`;
+}
+
+function resolvePipelineScriptPath(projectPath: string | undefined, scriptName: string): string {
+  const projectScriptPath = projectPath
+    ? path.join(path.dirname(projectPath), '.dft-ide', 'local-state', 'scripts', scriptName)
+    : '';
+  return projectScriptPath && fs.existsSync(projectScriptPath)
+    ? projectScriptPath
+    : path.resolve(__dirname, '../scripts', scriptName);
+}
+
+function getRunFlowScriptName(command: string): string | undefined {
+  const scriptName = command.trim().split(/\s+/)[0];
+  return /^run_flow_[A-Za-z0-9_-]+$/.test(scriptName) ? scriptName : undefined;
+}
+
+function getRunFlowStepName(task: PipelineTask): string {
+  const [, stepName] = task.command.trim().split(/\s+/, 2);
+  return stepName || task.id;
+}
+
+function resolveEcoScriptPath(
+  flowKey: PipelineFlowKey,
+  command: string,
+  envConfig?: Record<string, unknown> | null,
+): { scriptName: string; scriptPath?: string; available: boolean } | undefined {
+  const runFlowScript = getRunFlowScriptName(command);
+  if (!runFlowScript) return undefined;
+
+  const scriptName = `${runFlowScript}_eco`;
+  const projectPath = resolveProjectPath(flowKey);
+  if (!projectPath) {
+    return { scriptName, available: false };
+  }
+  const stage = flowKey === 'verification' ? firstNonEmptyString(envConfig?.stage) : '';
+  const scriptPath = flowKey === 'verification'
+    ? (stage ? path.join(projectPath, stage, 'eco', scriptName) : undefined)
+    : path.join(projectPath, 'eco', scriptName);
+  return {
+    scriptName,
+    scriptPath,
+    available: Boolean(scriptPath && fs.existsSync(scriptPath)),
+  };
+}
+
+function makeEcoHook(
+  phase: PipelineEcoPhase,
+  available: boolean,
+  scriptPath?: string,
+  previous?: PipelineEcoHook,
+): PipelineEcoHook {
+  return {
+    phase,
+    available,
+    scriptPath,
+    status: previous?.status ?? (available ? 'pending' : 'skipped'),
+    attempts: previous?.attempts ?? 0,
+    startedAt: previous?.startedAt,
+    finishedAt: previous?.finishedAt,
+    duration: previous?.duration,
+    exitCode: previous?.exitCode,
+    lastRunSource: previous?.lastRunSource,
+  };
+}
+
+function attachEcoRuntime(
+  task: PipelineTask,
+  flowKey: PipelineFlowKey,
+  envConfig?: Record<string, unknown> | null,
+): PipelineTask {
+  const resolved = resolveEcoScriptPath(flowKey, task.command, envConfig);
+  if (!resolved) {
+    const { eco: _eco, ...withoutEco } = task;
+    return withoutEco;
+  }
+  return {
+    ...task,
+    eco: {
+      scriptName: resolved.scriptName,
+      scriptPath: resolved.scriptPath,
+      before: makeEcoHook('before', resolved.available, resolved.scriptPath, task.eco?.before),
+      after: makeEcoHook('after', resolved.available, resolved.scriptPath, task.eco?.after),
+    },
+  };
 }
 
 function stripAnsi(value: string): string {
@@ -288,6 +386,7 @@ function buildStepCommands(
   const commands: string[] = [];
   const projectPath = resolveProjectPath(flowKey);
   commands.push(`setenv DFT_IDE_HISTORY ${quoteCshArgument(runId)}`);
+  commands.push(`setenv DFT_IDE_MARKER_TASK_ID ${quoteCshArgument(markerTaskId)}`);
 
   if (index === 0) {
     const [oriModuleKey, version] = getVersionFromModuleName(moduleKey);
@@ -612,7 +711,7 @@ function createIdleRuntime(
     flowKey,
     moduleKey,
     flowLabel,
-    tasks: tasks.map((t) => ({ ...t, status: 'pending' })),
+    tasks: tasks.map((t) => attachEcoRuntime({ ...t, status: 'pending' }, flowKey)),
     links,
     runState: 'idle',
     updatedAt: nowStamp(),
@@ -632,6 +731,8 @@ function scheduleRuntime(key: string, delay: number, action: () => void) {
 export class PipelineRuntimeService {
   private runtimes = new Map<string, PipelineRuntimeSnapshot>();
   private executionSessions = new Map<string, PipelineExecutionSession>();
+  private ecoExecutionSessions = new Map<string, PipelineEcoExecutionSession>();
+  private runtimeContexts = new Map<string, PipelineRuntimeContext>();
 
   constructor(private readonly options: PipelineRuntimeServiceOptions) {}
 
@@ -674,6 +775,7 @@ export class PipelineRuntimeService {
     if (existing?.runState === 'running') {
       return existing;
     }
+    this.runtimeContexts.set(key, { cwd, envConfig, taskConfig, runParameters });
 
     const projectRoot = resolveProjectRoot();
     if (projectRoot) {
@@ -729,7 +831,7 @@ export class PipelineRuntimeService {
           : idx === 0
       );
       return {
-        ...t,
+        ...attachEcoRuntime(t, flowKey, envConfig),
         status: isSelected
           ? (isFirstSelected ? 'running' as TaskStatus : 'pending' as TaskStatus)
           : 'skipped' as TaskStatus,
@@ -791,6 +893,8 @@ export class PipelineRuntimeService {
       buffer: '',
       seenStarts: new Set<string>(),
       seenEnds: new Set<string>(),
+      seenPhaseStarts: new Set<string>(),
+      seenPhaseEnds: new Set<string>(),
       stopped: false,
     });
     this.startNextSessionTask(key);
@@ -845,6 +949,183 @@ export class PipelineRuntimeService {
         duration: '1.2s',
       });
     });
+  }
+
+  runTaskEcoHook(
+    flowKey: PipelineFlowKey,
+    moduleKey: string,
+    taskId: string,
+    phase: PipelineEcoPhase,
+    envConfig?: Record<string, unknown> | null,
+    taskConfig?: Record<string, unknown> | null,
+    runParameters?: unknown,
+    cwd?: string,
+    stepStatus = 0,
+  ): PipelineRuntimeSnapshot {
+    const key = getPipelineRuntimeKey(flowKey, moduleKey);
+    const previousContext = this.runtimeContexts.get(key);
+    envConfig ??= previousContext?.envConfig;
+    taskConfig ??= previousContext?.taskConfig;
+    runParameters ??= previousContext?.runParameters;
+    cwd ??= previousContext?.cwd;
+    const runtime = this.runtimes.get(key);
+    if (!runtime) {
+      throw new Error('流水线运行态不存在，请先加载流水线。');
+    }
+    if (runtime.runState === 'running') {
+      throw new Error('流水线正在运行，不能并行调试 ECO。请先停止或等待流水线结束。');
+    }
+    if (this.ecoExecutionSessions.has(key)) {
+      throw new Error('当前模块已有 ECO Hook 正在运行。');
+    }
+
+    const originalTask = runtime.tasks.find((item) => item.id === taskId);
+    if (!originalTask) {
+      throw new Error(`找不到流水线 Step: ${taskId}`);
+    }
+    const task = attachEcoRuntime(originalTask, flowKey, envConfig);
+    const hook = task.eco?.[phase];
+    if (!hook?.available || !hook.scriptPath) {
+      throw new Error(`未找到 ${task.eco?.scriptName ?? 'ECO'} 脚本，无法单独运行。`);
+    }
+
+    const runId = `eco_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const terminalTitle = `${runtime.flowLabel} / ${moduleKey} / ECO`;
+    const commands = this.buildEcoHookCommands(
+      runId,
+      task,
+      phase,
+      flowKey,
+      moduleKey,
+      envConfig,
+      taskConfig,
+      runParameters,
+      stepStatus,
+    );
+    const session: PipelineEcoExecutionSession = {
+      runId,
+      taskId,
+      phase,
+      terminalTitle,
+      buffer: '',
+    };
+    session.monitor = registerExecutionTerminalMonitor(terminalTitle, {
+      onData: (data) => this.handleEcoTerminalData(key, data),
+      onClose: () => this.finishManualEcoHook(key, 'stopped'),
+    });
+    this.ecoExecutionSessions.set(key, session);
+    this.patchTask(key, taskId, {
+      eco: {
+        ...task.eco!,
+        [phase]: {
+          ...hook,
+          status: 'running',
+          attempts: hook.attempts + 1,
+          startedAt: nowText(),
+          finishedAt: undefined,
+          exitCode: undefined,
+          lastRunSource: 'manual',
+        },
+      },
+    });
+
+    void Promise.resolve(
+      this.options.openTerminal(
+        terminalTitle,
+        commands,
+        cwd,
+        this.options.getPipelineShellPath?.() ?? 'csh',
+      ),
+    ).catch(() => {
+      this.finishManualEcoHook(key, 'failed', -1);
+    });
+    return this.runtimes.get(key)!;
+  }
+
+  stopTaskEcoHook(flowKey: PipelineFlowKey, moduleKey: string): void {
+    const key = getPipelineRuntimeKey(flowKey, moduleKey);
+    const session = this.ecoExecutionSessions.get(key);
+    if (!session) return;
+    stopExecutionTerminal(session.terminalTitle);
+    this.finishManualEcoHook(key, 'stopped', 130);
+  }
+
+  private buildEcoHookCommands(
+    runId: string,
+    task: PipelineTask,
+    phase: PipelineEcoPhase,
+    flowKey: PipelineFlowKey,
+    moduleKey: string,
+    envConfig?: Record<string, unknown> | null,
+    taskConfig?: Record<string, unknown> | null,
+    runParameters?: unknown,
+    stepStatus = 0,
+  ): string[] {
+    const commands: string[] = [
+      `setenv DFT_IDE_HISTORY ${quoteCshArgument(runId)}`,
+      `setenv DFT_IDE_MARKER_TASK_ID ${quoteCshArgument(task.id)}`,
+    ];
+    const [oriModuleKey, version] = getVersionFromModuleName(moduleKey);
+    if (version) {
+      commands.push(`setenv DFT_IDE_MODULE_ORI ${quoteCshArgument(oriModuleKey)}`);
+      commands.push(`setenv DFT_IDE_VERSION ${quoteCshArgument(version)}`);
+    }
+    commands.push(`setenv ${flowKey === 'verification' ? 'DFT_IDE_MODE' : 'DFT_IDE_MODULE'} ${quoteCshArgument(moduleKey)}`);
+    const projectPath = resolveProjectPath(flowKey);
+    if (projectPath) {
+      commands.push(`setenv DFT_IDE_WORK_PATH ${quoteCshArgument(projectPath)}`);
+    }
+    const stage = flowKey === 'verification' ? firstNonEmptyString(envConfig?.stage) : '';
+    if (stage) {
+      commands.push(`setenv DFT_IDE_STAGE ${quoteCshArgument(stage)}`);
+    }
+
+    const source = taskConfig?.step2 as Record<string, unknown> | undefined;
+    const customConfig = source?.step2Task as Record<string, unknown> | undefined;
+    const parameterRow = Array.isArray(runParameters) && runParameters[0] && typeof runParameters[0] === 'object'
+      ? runParameters[0] as Record<string, unknown>
+      : undefined;
+    if (customConfig) {
+      appendToolCommands(commands, mergeToolConfigs(customConfig.tools, parameterRow?.tools));
+      const parameterDonau = parameterRow?.donau && typeof parameterRow.donau === 'object'
+        ? parameterRow.donau as Record<string, unknown>
+        : undefined;
+      const clusterGroup = firstNonEmptyString(parameterDonau?.group, customConfig.clusterGroup);
+      const clusterQueue = firstNonEmptyString(parameterDonau?.queue, customConfig.clusterQueue);
+      const cpu = firstNonEmptyString(parameterDonau?.cpu, customConfig.cpu);
+      const memory = firstNonEmptyString(parameterDonau?.mem, customConfig.memory);
+      const clusterExtra = firstNonEmptyString(customConfig.clusterExtra);
+      if (clusterGroup) {
+        commands.push(`setenv DONAU_GROUP ${quoteCshArgument(clusterGroup)}`);
+        const queue = clusterQueue ? `-q ${clusterQueue}` : '';
+        const resources = [
+          cpu ? `cpu=${cpu}` : '',
+          memory ? `mem=${memory}` : '',
+        ].filter(Boolean);
+        const resource = resources.length ? `-R '${resources.join(';')}'` : '';
+        const dsubArgs = ['-A', clusterGroup, queue, resource, clusterExtra].filter(Boolean).join(' ');
+        commands.push(`setenv DFT_IDE_DSUBRUN_I ${quoteCshArgument(`dsub -I ${dsubArgs}`)}`);
+      }
+    }
+    if (flowKey === 'verification') {
+      appendVerificationParameterCommands(commands, task, runParameters);
+    }
+
+    const scriptName = getRunFlowScriptName(task.command);
+    if (!scriptName) {
+      throw new Error(`Step ${task.id} 不是 run_flow 命令，无法运行 ECO。`);
+    }
+    const scriptPath = resolvePipelineScriptPath(projectPath, scriptName);
+    const stepName = getRunFlowStepName(task);
+    commands.push(`echo "=== [DFT IDE] ${phase === 'before' ? 'Before' : 'After'} ECO: ${task.name || task.id} ==="`);
+    commands.push(`echo "__DFT_IDE_ECO_START__|${runId}|${task.id}|${phase}"`);
+    commands.push('set dft_ide_eco_status = 0');
+    commands.push(
+      `ma ${PIPELINE_PYTHON_MODULE} && python3 ${quoteCshArgument(scriptPath)} run --eco-phase ${phase} --step-status ${Math.trunc(stepStatus)} ${quoteCshArgument(stepName)}`,
+    );
+    commands.push('set dft_ide_eco_status = $status');
+    commands.push(`echo "__DFT_IDE_ECO_END__|${runId}|${task.id}|${phase}|$dft_ide_eco_status"`);
+    return commands;
   }
 
   private registerExecutionSession(key: string, session: PipelineExecutionSession): void {
@@ -969,6 +1250,81 @@ export class PipelineRuntimeService {
       session.seenEnds.add(taskId);
       this.handleStepEnd(key, taskId, Number(exitCodeText));
     }
+
+    const phaseStartRegex = /__DFT_IDE_ECO_START__\|([^|\s]+)\|([^|\r\n]+)\|(before|after)/g;
+    for (const match of session.buffer.matchAll(phaseStartRegex)) {
+      const [, runId, markerTaskId, phaseText] = match;
+      const markerKey = `${markerTaskId}:${phaseText}`;
+      if (runId !== session.runId || session.seenPhaseStarts.has(markerKey)) continue;
+      session.seenPhaseStarts.add(markerKey);
+      const execution = session.executionPlan.find((item) => item.markerTaskId === markerTaskId);
+      const runtimeTaskId = execution?.task.id ?? markerTaskId;
+      this.patchEcoHook(key, runtimeTaskId, phaseText as PipelineEcoPhase, (hook) => ({
+        ...hook,
+        available: true,
+        status: 'running',
+        attempts: hook.attempts + 1,
+        startedAt: nowText(),
+        finishedAt: undefined,
+        exitCode: undefined,
+        lastRunSource: 'pipeline',
+      }));
+    }
+
+    const phaseEndRegex = /__DFT_IDE_ECO_END__\|([^|\s]+)\|([^|\r\n]+)\|(before|after)\|(-?\d+)/g;
+    for (const match of session.buffer.matchAll(phaseEndRegex)) {
+      const [, runId, markerTaskId, phaseText, exitCodeText] = match;
+      const markerKey = `${markerTaskId}:${phaseText}`;
+      if (runId !== session.runId || session.seenPhaseEnds.has(markerKey)) continue;
+      session.seenPhaseEnds.add(markerKey);
+      const execution = session.executionPlan.find((item) => item.markerTaskId === markerTaskId);
+      const runtimeTaskId = execution?.task.id ?? markerTaskId;
+      const exitCode = Number(exitCodeText);
+      this.patchEcoHook(key, runtimeTaskId, phaseText as PipelineEcoPhase, (hook) => ({
+        ...hook,
+        available: true,
+        status: exitCode === 0 ? (hook.status === 'failed' ? 'failed' : 'success') : 'failed',
+        finishedAt: nowText(),
+        exitCode,
+        lastRunSource: 'pipeline',
+      }));
+    }
+  }
+
+  private handleEcoTerminalData(key: string, data: string): void {
+    const session = this.ecoExecutionSessions.get(key);
+    if (!session) return;
+    if (isInterruptOutput(data)) {
+      this.finishManualEcoHook(key, 'stopped', 130);
+      return;
+    }
+    session.buffer = stripAnsi(`${session.buffer}${data}`).slice(-30000);
+    const endRegex = /__DFT_IDE_ECO_END__\|([^|\s]+)\|([^|\r\n]+)\|(before|after)\|(-?\d+)/g;
+    for (const match of session.buffer.matchAll(endRegex)) {
+      const [, runId, taskId, phaseText, exitCodeText] = match;
+      if (runId !== session.runId || taskId !== session.taskId || phaseText !== session.phase) continue;
+      const exitCode = Number(exitCodeText);
+      this.finishManualEcoHook(key, exitCode === 0 ? 'success' : 'failed', exitCode);
+      return;
+    }
+  }
+
+  private finishManualEcoHook(
+    key: string,
+    status: Extract<TaskStatus, 'success' | 'failed' | 'stopped'>,
+    exitCode?: number,
+  ): void {
+    const session = this.ecoExecutionSessions.get(key);
+    if (!session) return;
+    session.monitor?.dispose();
+    this.ecoExecutionSessions.delete(key);
+    this.patchEcoHook(key, session.taskId, session.phase, (hook) => ({
+      ...hook,
+      status,
+      finishedAt: nowText(),
+      exitCode,
+      lastRunSource: 'manual',
+    }));
   }
 
   private handleTerminalShellEnd(key: string, exitCode: number | undefined): void {
@@ -1123,6 +1479,27 @@ export class PipelineRuntimeService {
         return {
           ...task,
           ...nextPatch,
+        };
+      }),
+    }));
+  }
+
+  private patchEcoHook(
+    key: string,
+    taskId: string,
+    phase: PipelineEcoPhase,
+    patch: (hook: PipelineEcoHook) => PipelineEcoHook,
+  ): void {
+    this.updateRuntime(key, (runtime) => ({
+      ...runtime,
+      tasks: runtime.tasks.map((task) => {
+        if (task.id !== taskId || !task.eco) return task;
+        return {
+          ...task,
+          eco: {
+            ...task.eco,
+            [phase]: patch(task.eco[phase]),
+          },
         };
       }),
     }));

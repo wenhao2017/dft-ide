@@ -391,11 +391,16 @@ def run_eco(work_path, env, source_file, phase):
     eco_file = work_path / "eco" / ECO_FILE
     if not eco_file.is_file():
         return 0
+    run_id = env.get("DFT_IDE_HISTORY", "manual")
+    marker_task_id = env.get("DFT_IDE_MARKER_TASK_ID") or env.get("DFT_IDE_STEP", "unknown")
+    print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
     eco_env = dict(env)
     eco_env["DFT_IDE_ECO_PHASE"] = phase
     lines = source_lines(source_file)
     lines.extend((f"source {csh_quote(str(eco_file))}", "exit $status"))
-    return run_csh(lines, eco_env)
+    status = run_csh(lines, eco_env)
+    print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
+    return status
 
 
 def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=None, source=None, no_eco=False):
@@ -416,7 +421,8 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
         "DFT_IDE_FLOW": FLOW, "DFT_IDE_STEP": step,
         "DFT_IDE_PROJECT_NAME": project_name,
         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODULE": module_name,
-        "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
+        "DFT_IDE_PROJECT_ROOT": str(work_path.parent),
+        "DFT_IDE_STEP_STATUS": runtime_env.get("DFT_IDE_STEP_STATUS", "0"),
     })
     source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
     source_file = Path(source_value).expanduser().resolve() if source_value else None
@@ -424,6 +430,9 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
         source_file = work_path / "project.cshrc"
     if source_file is not None and not source_file.is_file():
         fail(f"环境初始化文件不存在: {source_file}")
+    eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
+    if eco_only_phase:
+        return run_eco(work_path, runtime_env, source_file, eco_only_phase)
     cfg_file = Path(cfg).expanduser().resolve() if cfg else work_path / "hibist" / "cfg" / module_name / f"{module_name}.sailor.cfg"
     log_folder = resolve_history_folder(work_path, runtime_env)
     dsubrun_prefix = read_dsubrun_prefix(runtime_env)
@@ -516,7 +525,12 @@ def main(argv):
         parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
         parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
         parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
+        parser.add_argument("--eco-phase", choices=("before", "after"))
+        parser.add_argument("--step-status", type=int, default=0)
         args, step_args = parser.parse_known_args(argv[1:])
+        if args.eco_phase:
+            os.environ["DFT_IDE_ECO_ONLY_PHASE"] = args.eco_phase
+            os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
         if step_args[:1] == ["--"]:
             step_args = step_args[1:]
         return run_step(args.step, step_args, args.work_path, args.module, args.cfg, args.env_file, args.source, args.no_eco)

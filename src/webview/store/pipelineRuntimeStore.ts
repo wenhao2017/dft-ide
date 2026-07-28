@@ -60,6 +60,25 @@ interface PipelineRuntimeStore {
 let subscribed = false;
 
 const taskStatusSchema = z.enum(['pending', 'running', 'success', 'failed', 'stopped', 'skipped']);
+const pipelineEcoPhaseSchema = z.enum(['before', 'after']);
+const pipelineEcoHookSchema = z.object({
+  phase: pipelineEcoPhaseSchema,
+  available: z.boolean(),
+  scriptPath: z.string().optional(),
+  status: taskStatusSchema,
+  attempts: z.number(),
+  startedAt: z.string().optional(),
+  finishedAt: z.string().optional(),
+  duration: z.string().optional(),
+  exitCode: z.number().optional(),
+  lastRunSource: z.enum(['pipeline', 'manual']).optional(),
+});
+const pipelineEcoRuntimeSchema = z.object({
+  scriptName: z.string(),
+  scriptPath: z.string().optional(),
+  before: pipelineEcoHookSchema,
+  after: pipelineEcoHookSchema,
+});
 const pipelineFlowKeySchema = z.enum(['hibist', 'sailor', 'verification']);
 const pipelineRunStateSchema = z.enum(['idle', 'running', 'completed', 'failed', 'stopped']);
 const pipelineTaskSchema = z.object({
@@ -72,6 +91,7 @@ const pipelineTaskSchema = z.object({
   duration: z.string().optional(),
   attempts: z.number(),
   description: z.string(),
+  eco: pipelineEcoRuntimeSchema.optional(),
 });
 const pipelineLinkSchema = z.object({
   source: z.string(),

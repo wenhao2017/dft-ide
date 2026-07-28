@@ -514,11 +514,16 @@ def run_eco(work_path, env, source_file, phase):
     eco_file = work_path / stage / "eco" / ECO_FILE
     if not eco_file.is_file():
         return 0
+    run_id = env.get("DFT_IDE_HISTORY", "manual")
+    marker_task_id = env.get("DFT_IDE_MARKER_TASK_ID") or env.get("DFT_IDE_STEP", "unknown")
+    print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
     eco_env = dict(env)
     eco_env["DFT_IDE_ECO_PHASE"] = phase
     lines = source_lines(source_file)
     lines.extend((f"source {csh_quote(str(eco_file))}", "exit $status"))
-    return run_csh(lines, eco_env)
+    status = run_csh(lines, eco_env)
+    print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
+    return status
 
 
 def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None, source=None, stage=None, no_eco=False):
@@ -541,19 +546,23 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
         "DFT_IDE_PROJECT_NAME": project_name,
         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODE": mode_name,
         "DFT_IDE_STAGE": stage_name,
-        "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
+        "DFT_IDE_PROJECT_ROOT": str(work_path.parent),
+        "DFT_IDE_STEP_STATUS": runtime_env.get("DFT_IDE_STEP_STATUS", "0"),
         "DFT_IDE_LANDER_MODE": "jtag",
     })
     step_args, explicit_matrix = pop_matrix_options(list(step_args))
     submissions = build_submissions(explicit_matrix, runtime_env)
     log_folder = resolve_history_folder(work_path, runtime_env)
-    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
     source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
     source_file = Path(source_value).expanduser().resolve() if source_value else None
     if source_file is None and (work_path / "project.cshrc").is_file():
         source_file = work_path / "project.cshrc"
     if source_file is not None and not source_file.is_file():
         fail(f"环境初始化文件不存在: {source_file}")
+    eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
+    if eco_only_phase:
+        return run_eco(work_path, runtime_env, source_file, eco_only_phase)
+    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
     cfg_file = (
         Path(cfg).expanduser().resolve()
         if cfg
@@ -665,7 +674,12 @@ def main(argv):
         parser.add_argument("--groups", help="Comma-separated ATPG groups")
         parser.add_argument("--tcs", help="Comma-separated ATPG testcases")
         parser.add_argument("--subattrs", help="Comma-separated ATPG subattrs")
+        parser.add_argument("--eco-phase", choices=("before", "after"))
+        parser.add_argument("--step-status", type=int, default=0)
         args, step_args = parser.parse_known_args(argv[1:])
+        if args.eco_phase:
+            os.environ["DFT_IDE_ECO_ONLY_PHASE"] = args.eco_phase
+            os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
         if step_args[:1] == ["--"]:
             step_args = step_args[1:]
         for option in ("groups", "tcs", "subattrs"):
