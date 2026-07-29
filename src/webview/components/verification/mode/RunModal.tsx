@@ -38,6 +38,7 @@ const createRunParamRow = (): RunParamRow => ({
   groupNames: [],
   tcNames: [],
   subattrNames: [],
+  extraArg: '',
   tools: [],
   donau: {},
 })
@@ -48,6 +49,7 @@ const cloneRows = (rows: RunParamRow[]): RunParamRow[] => {
     groupNames: [...row.groupNames],
     tcNames: [...row.tcNames],
     subattrNames: [...row.subattrNames],
+    extraArg: row.extraArg ?? '',
     tools: row.tools.map((tool) => ({
       ...tool,
     })),

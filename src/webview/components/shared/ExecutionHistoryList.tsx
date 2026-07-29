@@ -1,115 +1,150 @@
-import React from 'react';
-import { Button, Drawer, Empty, Tag, Typography } from 'antd';
+import React, { useMemo } from 'react';
+import { Button, Input, Table, Tag } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseCircleOutlined,
   EyeOutlined,
-  RightOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { ExecutionHistoryRecord } from '../../utils/ipc';
-import VirtualList from './VirtualList';
-
-const { Text } = Typography;
 
 interface Props {
-  open: boolean;
-  onClose: () => void;
   history: ExecutionHistoryRecord[];
-  onSelect: (record: ExecutionHistoryRecord) => void;
-  onOpenPipeline?: (record: ExecutionHistoryRecord) => void;
+  onOpenPipeline: (record: ExecutionHistoryRecord) => void;
 }
 
 const statusMeta = {
   running: {
     color: 'processing',
     label: 'RUNNING',
-    icon: <ClockCircleOutlined style={{ fontSize: 24, color: '#1677ff' }} />,
+    icon: <ClockCircleOutlined />,
   },
   success: {
     color: 'success',
     label: 'SUCCESS',
-    icon: <CheckCircleOutlined style={{ fontSize: 24, color: '#4ade80' }} />,
+    icon: <CheckCircleOutlined />,
   },
   error: {
     color: 'error',
     label: 'ERROR',
-    icon: <CloseCircleOutlined style={{ fontSize: 24, color: '#ff4d4f' }} />,
+    icon: <CloseCircleOutlined />,
   },
   cancelled: {
     color: 'warning',
     label: 'CANCELLED',
-    icon: <CloseCircleOutlined style={{ fontSize: 24, color: '#faad14' }} />,
+    icon: <CloseCircleOutlined />,
   },
 } as const;
 
-const ExecutionHistoryList: React.FC<Props> = ({ open, onClose, history, onSelect, onOpenPipeline }) => (
-  <Drawer
-    title="历史执行记录"
-    placement="right"
-    onClose={onClose}
-    open={open}
-    width={400}
-    styles={{ body: { padding: 0 } }}
-  >
-    {history.length === 0 ? (
-      <Empty description="暂无历史执行记录" style={{ marginTop: 60 }} />
-    ) : (
-      <VirtualList
-        items={history}
-        estimateSize={94}
-        height="100%"
-        getKey={(item) => item.id}
-        renderItem={(item) => {
-          const meta = statusMeta[item.status] ?? statusMeta.error;
-          return (
-            <div
-              style={{
-                borderBottom: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
-                cursor: 'pointer',
-                padding: '16px 24px',
-                transition: 'background 0.2s',
-              }}
-              onMouseEnter={(event) => (event.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
-              onMouseLeave={(event) => (event.currentTarget.style.background = 'transparent')}
-              onClick={() => {
-                onSelect(item);
-                onClose();
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ flex: '0 0 auto' }}>{meta.icon}</div>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                    <Text strong>{new Date(item.executedAt).toLocaleString()}</Text>
-                    <Tag color={meta.color}>{meta.label}</Tag>
-                  </div>
-                  <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', color: '#888', fontSize: 12 }}>
-                    <ClockCircleOutlined style={{ marginRight: 4 }} /> 包含 {item.nodes?.length || 0} 个 Node
-                  </div>
-                </div>
-                {(item.nodes?.length || item.runtimeSnapshot) && onOpenPipeline ? (
-                  <Button
-                    size="small"
-                    type="text"
-                    icon={<EyeOutlined />}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onOpenPipeline(item);
-                      onClose();
-                    }}
-                  >
-                    查看
-                  </Button>
-                ) : null}
-                <RightOutlined style={{ color: '#888' }} />
-              </div>
-            </div>
-          );
-        }}
-      />
-    )}
-  </Drawer>
+const getStartedAt = (record: ExecutionHistoryRecord) => record.startedAt ?? record.executedAt;
+const getConfigTarget = (record: ExecutionHistoryRecord) => (
+  record.mode || record.module || record.moduleKey || '-'
 );
+
+const ExecutionHistoryList: React.FC<Props> = ({ history, onOpenPipeline }) => {
+  const dataSource = useMemo(
+    () => [...history].sort((a, b) => getStartedAt(b) - getStartedAt(a)),
+    [history],
+  );
+
+  const columns: ColumnsType<ExecutionHistoryRecord> = [
+    {
+      title: '配置',
+      key: 'configTarget',
+      width: 220,
+      ellipsis: true,
+      render: (_, record) => getConfigTarget(record),
+      filterDropdown: ({ setSelectedKeys, selectedKeys, confirm }) => (
+        <div style={{ padding: 8 }}>
+          <Input.Search
+            allowClear
+            autoFocus
+            size='small'
+            placeholder='搜索配置'
+            value={selectedKeys[0] ?? ''}
+            onChange={(event) => {
+              const value = event.target.value;
+              setSelectedKeys(value ? [value] : []);
+              if (!value) {
+                confirm();
+              }
+            }}
+            onPressEnter={() => confirm()}
+            onSearch={() => confirm()}
+            style={{ width: 200 }}
+          />
+        </div>
+      ),
+      filterIcon: (filtered) => (
+        <SearchOutlined style={{ color: filtered ? '#1677ff' : undefined }} />
+      ),
+      onFilter: (value, record) => getConfigTarget(record)
+        .toLocaleLowerCase()
+        .includes(String(value).trim().toLocaleLowerCase()),
+    },
+    {
+      title: '执行 ID',
+      dataIndex: 'id',
+      width: 220,
+      ellipsis: true,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 130,
+      render: (status: ExecutionHistoryRecord['status']) => {
+        const meta = statusMeta[status] ?? statusMeta.error;
+        return <Tag color={meta.color} icon={meta.icon}>{meta.label}</Tag>;
+      },
+    },
+    {
+      title: '节点数',
+      key: 'nodeCount',
+      width: 100,
+      render: (_, record) => record.nodes?.length ?? 0,
+    },
+    {
+      title: '开始时间',
+      key: 'startedAt',
+      width: 240,
+      render: (_, record) => new Date(getStartedAt(record)).toLocaleString(),
+    },
+    {
+      title: '查看',
+      key: 'action',
+      width: 100,
+      align: 'center',
+      render: (_, record) => (
+        <Button
+          type="link"
+          size="small"
+          icon={<EyeOutlined />}
+          onClick={() => onOpenPipeline(record)}
+        >
+          详细
+        </Button>
+      ),
+    },
+  ];
+
+  return (
+    <Table
+      rowKey="id"
+      columns={columns}
+      dataSource={dataSource}
+      pagination={{
+        pageSize: 10,
+        showSizeChanger: true,
+        pageSizeOptions: [10, 20, 50],
+        showTotal: (total) => `共 ${total} 条`,
+      }}
+      locale={{ emptyText: '暂无历史执行记录' }}
+      scroll={{ x: 1010 }}
+      size="middle"
+    />
+  );
+};
 
 export default ExecutionHistoryList;

@@ -118,8 +118,10 @@ const VerificationFlow: React.FC = () => {
       sidebar={
         currentStep !== 0 ? (
           <ModePanel
+            key={currentStep}
             accent="#059669"
             initialTab="mode"
+            initialCollapsed={currentStep >= 2}
             title="模式与参数配置"
             onSelect={handleSelect}
             onCheckedChange={handleCheckedChange}

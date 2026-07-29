@@ -274,7 +274,7 @@ export async function openExecutionTerminal(options: {
   cwd?: string
   flow?: string
   shellPath?: string
-}): Promise<vscode.Terminal> {
+}, show: boolean = true): Promise<vscode.Terminal> {
   const title =
     typeof options.title === 'string' && options.title.trim()
       ? options.title.trim()
@@ -311,7 +311,9 @@ export async function openExecutionTerminal(options: {
     })
   }
 
-  terminal!.show()
+  if (show) {
+    terminal!.show()
+  }
 
   if (isNew) {
     await waitForNewTerminalReady(terminal!)

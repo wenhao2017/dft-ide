@@ -172,6 +172,7 @@ function getApiBase(): string | null {
 export async function createProject(currentUser: string, project: {
   name: string;
   domain: string;
+  root: string;
   description: string;
 }): Promise<boolean> {
   const apiBase = getApiBase();
@@ -188,6 +189,7 @@ export async function createProject(currentUser: string, project: {
       user_id: currentUser,
       project_name: project.name,
       domain: project.domain,
+      root: project.root,
       description: project.description,
     }),
   });
@@ -197,7 +199,13 @@ export async function createProject(currentUser: string, project: {
   return true;
 }
 
-export async function initProject(currentUser: string, project: DftProject): Promise<boolean> {
+export async function initProject(currentUser: string, project: {
+  name: string;
+  ctmp_id: number;
+  domain: string;
+  root: string;
+  description: string;
+}): Promise<boolean> {
   const apiBase = getApiBase();
   if (!apiBase) {
     return false;
@@ -212,6 +220,9 @@ export async function initProject(currentUser: string, project: DftProject): Pro
       user_id: currentUser,
       project_name: project.name,
       ctmp_id: project.ctmp_id,
+      domain: project.domain,
+      root: project.root,
+      description: project.description,
     }),
   });
 

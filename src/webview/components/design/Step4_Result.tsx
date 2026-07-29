@@ -1,12 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Alert, Space, Typography, message } from 'antd';
+import { Button, Empty, Tabs, message } from 'antd';
 import {
   LeftOutlined,
   RightOutlined,
-  CheckCircleOutlined,
-  WarningOutlined,
-  FileTextOutlined,
-  HistoryOutlined,
+  FileSearchOutlined,
   CloudUploadOutlined,
 } from '@ant-design/icons';
 import ExecutionHistoryList from '../shared/ExecutionHistoryList';
@@ -14,8 +11,6 @@ import { getExecutionHistory, ExecutionHistoryRecord } from '../../utils/ipc';
 import { uploadExecutionData } from '../../services/projectService';
 import useWizardStore from '../../store/wizardStore';
 import ExecutionHistoryDetail from '../shared/ExecutionHistoryDetail';
-
-const { Link } = Typography;
 
 interface Props {
   onNext: () => void;
@@ -26,7 +21,6 @@ interface Props {
 const Step4Result: React.FC<Props> = ({ onNext, onPrev, category }) => {
   const flowKey = category.toLowerCase();
   const activeProject = useWizardStore((s) => s.activeProject);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRecords, setHistoryRecords] = useState<ExecutionHistoryRecord[]>([]);
   const [activeRecord, setActiveRecord] = useState<ExecutionHistoryRecord | null>(null);
   const [historyDetail, setHistoryDetail] = useState<ExecutionHistoryRecord | null>(null);
@@ -78,39 +72,30 @@ const Step4Result: React.FC<Props> = ({ onNext, onPrev, category }) => {
 
   return (
     <div style={{ padding: '16px 0' }}>
-      <Alert
-        message="状态检查"
-        description="执行结果来自已保存的日志或历史记录；真实任务请在 VS Code 终端中运行。"
-        type={activeRecord?.status === 'success' ? 'success' : 'warning'}
-        showIcon
-        icon={activeRecord?.status === 'success' ? <CheckCircleOutlined /> : <WarningOutlined />}
-        style={{ marginBottom: 16 }}
-      />
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Space size="large">
-          <Link>
-            <FileTextOutlined /> {flowKey}/synth.log
-          </Link>
-          <Link>
-            <FileTextOutlined /> {flowKey}/opt.log
-          </Link>
-        </Space>
-
-        <Button
-          icon={<HistoryOutlined />}
-          onClick={() => setHistoryOpen(true)}
-        >
-          查看历史记录 ({historyRecords.length})
-        </Button>
-      </div>
-
-      <ExecutionHistoryList
-        open={historyOpen}
-        onClose={() => setHistoryOpen(false)}
-        history={historyRecords}
-        onSelect={(record) => setActiveRecord(record)}
-        onOpenPipeline={viewHistoryDetail}
+      <Tabs
+        defaultActiveKey={'history'}
+        items={[
+          {
+            key: 'history',
+            label: '执行历史',
+            children: (
+              <ExecutionHistoryList
+                history={historyRecords}
+                onOpenPipeline={viewHistoryDetail}
+              />
+            ),
+          },
+          {
+            key: 'otherLogs',
+            label: '其它 Log 文件',
+            children: (
+              <Empty
+                image={<FileSearchOutlined style={{ fontSize: 48 }} />}
+                description={'功能预留，后续支持查看其它 Log 文件'}
+              />
+            ),
+          },
+        ]}
       />
 
       <ExecutionHistoryDetail

@@ -483,9 +483,14 @@ const ProjectMembers: React.FC<Props> = ({ project, isDark = true }) => {
                     {user.name}
                   </>
                 ),
-                value: user.username
+                value: user.username,
+                name: user.name
               }))}
               onChange={handleChange}
+              filterOption={(input, option) =>
+                (option?.name ?? '').toLowerCase().includes(input.toLowerCase()) ||
+                (option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+              }
             />
           </Form.Item>
           <Form.Item label="角色" name="role" rules={[{ required: true, message: '请选择角色' }]}>

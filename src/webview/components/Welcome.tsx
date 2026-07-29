@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Col, Input, Progress, Row, Select, Spin, Tag, Tooltip, message, Form, Modal } from "antd";
+import { Alert, Button, Col, Input, Progress, Row, Select, Spin, Tag, Tooltip, message, Form, Modal, Dropdown, Menu } from "antd";
 import Card from "antd/es/card";
 import Empty from "antd/es/empty";
 import List from "antd/es/list";
@@ -22,6 +22,8 @@ import {
   StarOutlined,
   StarFilled,
   PartitionOutlined,
+  SyncOutlined,
+  DownOutlined,
 } from '@ant-design/icons';
 import {
   getCurrentUser,
@@ -36,6 +38,7 @@ import {
   WorkspaceProjectInfo,
   openExternalUrl,
   downloadDomainEcoFromObs,
+  validatePath,
 } from '../utils/ipc';
 import useWizardStore from '../store/wizardStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -182,7 +185,9 @@ function repoTagColor(status: ProjectRepoStatus['status']): string {
 type ProjectFormValue = {
   name: string;
   domainKey: string;
+  rootPath: string;
   description: string;
+  project?: DftProject;
 };
 
 const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, onManageDomains }) => {
@@ -213,7 +218,6 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
   const [domainProject, setDomainProject] = useState<DftProject | null>(null);
   const [selectedDomain, setSelectedDomain] = useState<ProjectDomain | undefined>();
   const [domainSaving, setDomainSaving] = useState(false);
-  const [isInitDomain, setIsInitDomain] = useState(false);
   const [showStarProject, setShowStarProject] = useState(false);
   const [domains, setDomains] = useState<ProjectDomain[]>([]);
 
@@ -362,11 +366,11 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
           domain: project.domain,
         });
         setDashboard((prev) => prev ? { ...prev, currentProjectId: project.id } : prev);
-        if (onNavigate) {
-          onNavigate('Common');
-        } else {
-          setFlowContext({ category: 'Common', projectId: project.id });
-        }
+        // if (onNavigate) {
+        //   onNavigate('Common');
+        // } else {
+        //   setFlowContext({ category: 'Common', projectId: project.id });
+        // }
         message.success('进入项目成功');
       } else {
         message.error(result.error ?? '进入项目失败');
@@ -381,12 +385,12 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     setProjects((prevProjects) => prevProjects?.map(item =>
       (item.id === project.id && item.ctmp_id === project.ctmp_id) ? { ...item, rootPath: porjectRootPath } : item
     ));
-    // 请求后端保存项目目录数据
+    // 请求后端保存本地工作区路径
     try {
       await updateProjectRootPath(project.id, currentUser ,porjectRootPath);
       return { success: true, projectPath: porjectRootPath };
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '项目目录保存失败');
+      message.error(err instanceof Error ? err.message : '本地工作区路径保存失败');
       return { success: false };
     }
   }, [currentUser]);
@@ -411,7 +415,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     }
   }, [currentUser]);
 
-  const canManageDomains = () =>
+  const isAdmin = () =>
     // currentUser === 'y00519437';
     true;
 
@@ -447,18 +451,16 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     return '配置或修改项目领域'
   }
 
-  const openDomainModal = (project: DftProject, isInit: boolean = false) => {
+  const openDomainModal = (project: DftProject) => {
     loadDomains();
     setDomainProject(project);
     setSelectedDomain(project.domain);
-    setIsInitDomain(isInit);
   };
 
   const closeDomainModal = () => {
     if (domainSaving) return;
     setDomainProject(null);
     setSelectedDomain(undefined);
-    setIsInitDomain(false);
   };
 
   const loadDomains = async () => {
@@ -479,7 +481,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
         if (!result?.success || !result.projectPath) return;
         domainProject.rootPath = result.projectPath;
       }
-      const result = await downloadDomainEcoFromObs(domainProject, selectedDomain, isInitDomain);
+      const result = await downloadDomainEcoFromObs(domainProject, selectedDomain, false);
       if (result.success) {
         await updateProjectDomain(domainProject.id, selectedDomain);
         const updateDomain = (project: DftProject) =>
@@ -491,15 +493,14 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
         if (activeProject?.id === domainProject.id) {
           setActiveProjectDomain(selectedDomain);
         }
-        message.success(`项目领域已设置为“${getProjectDomainLabel(selectedDomain)}”`);
+        message.success(`项目领域已更新为“${getProjectDomainLabel(selectedDomain)}”`);
         setDomainProject(null);
         setSelectedDomain(undefined);
-        setIsInitDomain(false);
       } else {
         message.error(result.error ?? '拉取领域 ECO 脚本失败');
       }
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '项目领域设置失败');
+      message.error(error instanceof Error ? error.message : '项目领域更新失败');
     } finally {
       setDomainSaving(false);
     }
@@ -510,63 +511,42 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     return '进入项目，首次本地初始化'
   }
 
-  const initializeProject = useCallback(async (project: DftProject) => {
+  const initializeCtmpProject = useCallback(async (project: {
+    name: string;
+    ctmp_id: number;
+    domain: string;
+    root: string;
+    description: string;
+  }) => {
     setInitializingProjectId(project.ctmp_id?.toString() ?? '');
     try {
       await initProject(currentUser, project);
-      const projects = await fetchProjectData();
-      const initedProject = projects?.find(d => d.name === project.name);
-      if (initedProject) {
-        openDomainModal(initedProject, true);
-      }
-      message.success('项目初始化成功');
+      message.success('CTMP 项目初始化成功');
+      return true;
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '项目初始化失败');
+      message.error(err instanceof Error ? err.message : 'CTMP 项目初始化失败');
     } finally {
       setInitializingProjectId(null);
     }
-  }, [fetchProjectData]);
+  }, [currentUser]);
 
-  const initializeProject2 = useCallback(async (project: DftProject) => {
-    if (isProjectInitialized(project)) return;
-
-    setInitializingProjectId(project.id);
-    setInitializingProgress(8);
-    const timer = window.setInterval(() => {
-      setInitializingProgress((value) => Math.min(value + 9, 88));
-    }, 180);
-
+  const createCustomProject = useCallback(async (project: {
+    name: string;
+    domain: string;
+    root: string;
+    description: string;
+  }) => {
+    setProjectSaving(true);
     try {
-      const result = await prepareProjectWorkspace(project.name, project.id);
-      if (!result.success || !result.rootPath) {
-        message.error(result.error ?? '项目准备失败');
-        return;
-      }
-      setInitializingProgress(100);
-      setDashboard((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          projects: prev.projects.map((item) =>
-            item.id === project.id
-              ? {
-                  ...item,
-                  rootPath: result.rootPath ?? item.rootPath,
-                  repos: item.repos.map((repo) => ({ ...repo, status: 'ready' as const })),
-                }
-              : item
-          ),
-        };
-      });
-      message.success('项目初始化完成');
+      await createProject(currentUser, project);
+      message.success('创建自定义项目成功');
+      return true;
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '创建自定义项目失败');
     } finally {
-      window.clearInterval(timer);
-      window.setTimeout(() => {
-        setInitializingProjectId(null);
-        setInitializingProgress(0);
-      }, 450);
+      setProjectSaving(false);
     }
-  }, []);
+  }, [currentUser]);
 
   const openGitlabProjectPage = async (repoUrl: string | undefined) => {
     if (repoUrl) {
@@ -609,9 +589,11 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
 
   chooseProjectsRootRef.current = chooseProjectsRoot;
 
-  const openProjectModal = useCallback(() => {
+  const getCtmpProjectFromForm = () => projectForm.getFieldValue('project');
+
+  const openProjectModal = useCallback((project?: DftProject) => {
     loadDomains();
-    projectForm.setFieldsValue({ name: '', domainKey: 'Kirin', description: '' });
+    projectForm.setFieldsValue({ name: project?.name, domainKey: 'Kirin', description: '', project: project });
     setProjectModalOpen(true);
   }, [projectForm]);
 
@@ -633,8 +615,8 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     }
 
     message.info('开始初始化项目领域');
-    message.info('请选择项目目录');
     if (!project.rootPath) {
+      message.info('请选择本地工作区路径');
       const result = await chooseProjectsRootRef.current?.(project, false);
       if (!result?.success || !result.projectPath) return;
       project.rootPath = result.projectPath;
@@ -657,26 +639,30 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
 
   const saveProject = useCallback(async () => {
     const value = await projectForm.validateFields();
-    setProjectSaving(true);
-    try {
-      const projectName = value.name.trim();
-      await createProject(currentUser, {
-        name: projectName,
-        domain: value.domainKey,
-        description: value.description.trim(),
-      });
-      message.success('创建自定义项目成功');
-      closeProjectModal();
-      if (value.domainKey) {
-        const projects = await fetchProjectData();
-        initProjectDomain(projects ?? [], projectName, value.domainKey);
-      } else {
-        fetchProjectData();
-      }
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : '创建自定义项目失败');
-    } finally {
-      setProjectSaving(false);
+    const projectName = value.name.trim();
+    const formValue = {
+      name: projectName,
+      domain: value.domainKey,
+      root: value.rootPath,
+      description: value.description.trim(),
+      ctmp_id: 0,
+    }
+
+    const ctmpProject = getCtmpProjectFromForm();
+    if (ctmpProject) {
+      formValue.ctmp_id = ctmpProject.ctmp_id;
+      const success = await initializeCtmpProject(formValue);
+      if (!success) return;
+    } else {
+      const success = await createCustomProject(formValue);
+      if (!success) return;
+    }
+    closeProjectModal();
+    if (value.domainKey) {
+      const projects = await fetchProjectData();
+      initProjectDomain(projects ?? [], projectName, value.domainKey);
+    } else {
+      fetchProjectData();
     }
   }, [projectForm, currentUser, closeProjectModal, fetchProjectData, initProjectDomain]);
 
@@ -773,24 +759,43 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
               >
                 创建自定义项目
               </Button>
-              {canManageDomains() && <Button
-                size="large"
-                icon={<PartitionOutlined />}
-                onClick={() => onManageDomains?.()}
-                style={{
-                  color: 'rgba(9, 110, 243, 1)',
-                  borderColor: 'rgba(9, 110, 243, 1)'
-                }}
-              >
-                项目领域配置
-              </Button>}
+              {isAdmin() && (
+                <Dropdown
+                  menu={{
+                    items: [
+                      {
+                        key: 'domain-config',
+                        label: '项目领域配置',
+                        icon: <PartitionOutlined />,
+                        onClick: () => onManageDomains?.(),
+                      },
+                      {
+                        key: 'ctmp-sync',
+                        label: 'CTMP 数据同步',
+                        icon: <SyncOutlined />,
+                        // onClick: () => onSyncCtmp?.(),
+                      },
+                    ],
+                  }}
+                >
+                  <Button
+                    size="large"
+                    style={{
+                      color: 'rgba(9, 110, 243, 1)',
+                      borderColor: 'rgba(9, 110, 243, 1)',
+                    }}
+                  >
+                    <SettingOutlined /> 管理员配置 <DownOutlined />
+                  </Button>
+                </Dropdown>
+              )}
             </Space>
           </Space>
         </div>
       </div>
 
       <Modal
-        title="创建自定义项目"
+        title={getCtmpProjectFromForm() ? "创建 CTMP 项目" : "创建自定义项目"}
         open={projectModalOpen}
         onCancel={closeProjectModal}
         onOk={saveProject}
@@ -806,7 +811,10 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
               { required: true, message: '请输入项目名称' },
             ]}
           >
-            <Input placeholder="请输入项目名称" />
+            <Input
+              placeholder="请输入项目名称"
+              disabled={getCtmpProjectFromForm()}
+            />
           </Form.Item>
 
           <Form.Item
@@ -823,6 +831,36 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
                 label: domain.name,
                 value: domain.key
               }))}
+            />
+          </Form.Item>
+
+          <Form.Item
+            label="本地工作区"
+            name="rootPath"
+            rules={[
+              { required: true, message: '请选择本地工作区' },
+              {
+                validator: async (_, value) => {
+                  if (value) {
+                    const result = await validatePath(value);
+                    if (!result.exists) {
+                      return Promise.reject('路径不存在');
+                    }
+                  }
+                  return Promise.resolve();
+                }
+              }
+            ]}
+          >
+            <Input
+              placeholder="例如 data/DFT/projects"
+              suffix={<FolderOpenOutlined onClick={async () => {
+                const selected = await selectPath('folder');
+                if (selected) {
+                  projectForm.setFieldsValue({ rootPath: selected });
+                }
+              }} />}
+              allowClear
             />
           </Form.Item>
 
@@ -955,7 +993,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
                               type="primary"
                               disabled={isProjectInitializeDisable(project)}
                               loading={initializingProjectId === project.ctmp_id?.toString()}
-                              onClick={() => initializeProject(project)}
+                              onClick={() => openProjectModal(project)}
                               style={{ flex: 1 }}
                             >
                               初始化
@@ -1001,7 +1039,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
                         </Tooltip>
                       </div>
                       <Form layout="horizontal" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
-                        <Form.Item label="项目目录" style={{ marginBottom: 16 }}>
+                        <Form.Item label="本地工作区" style={{ marginBottom: 16 }}>
                           <Input
                             value={project.rootPath}
                             onChange={(event) => setProjectRoot(project, event.target.value)}
@@ -1056,7 +1094,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
                             </Tag>
                           ))}
                         </Space>
-                        {initializingProjectId === project.id && (
+                        {initializingProjectId === project.ctmp_id?.toString() && (
                           <Progress percent={initializingProgress} size="small" status="active" style={{ maxWidth: 420 }} />
                         )}
                       </Space>

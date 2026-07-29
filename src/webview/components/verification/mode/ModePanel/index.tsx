@@ -42,6 +42,7 @@ export default function ModePanel({
   accent,
   initialTab = 'mode',
   title,
+  initialCollapsed = false,
   onSelect,
   onCheckedChange,
   onDefaultStepsChange,
@@ -58,7 +59,7 @@ export default function ModePanel({
 
   const [activeTab, setActiveTab] = useState<ModePanelTab>(initialTab)
 
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(initialCollapsed)
 
   const [batchCheckedNamesByTab, setBatchCheckedNamesByTab] = useState<
     Record<ModePanelTab, string[]>

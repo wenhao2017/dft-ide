@@ -408,7 +408,7 @@ def run_eco(work_path, env, source_file, phase):
     return status
 
 
-def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=None, source=None, no_eco=False):
+def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=None, source=None, no_eco=False, extra_arg=None):
     if step not in STEPS:
         fail(f"未知的 {FLOW_LABEL} Step: {step}")
     work_path = resolve_work_path(work_path)
@@ -417,6 +417,11 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
     managed = load_managed_env(resolve_env_file(work_path, env_file))
     runtime_env = dict(os.environ)
     runtime_env.update(managed)
+    extra_arg_value = extra_arg if extra_arg is not None else runtime_env.get("DFT_IDE_TOOL_EXTRA_ARG", "")
+    try:
+        tool_extra_args = shlex.split(extra_arg_value) if extra_arg_value.strip() else []
+    except ValueError as error:
+        fail(f"Invalid tool extra argument: {error}")
     runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
     module_name = module or runtime_env.get("DFT_IDE_MODULE") or runtime_env.get("module")
     if not module_name:
@@ -449,7 +454,7 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
             return before_status
 
     lines = source_lines(source_file)
-    command = dsubrun_prefix + [TOOL, step, "-cfg", str(cfg_file)] + list(step_args)
+    command = dsubrun_prefix + [TOOL, step, "-cfg", str(cfg_file)] + tool_extra_args + list(step_args)
     rendered = " ".join(csh_quote(item) for item in command)
     rendered += " |& tee " + csh_quote(str(log_folder / f"{step}.log"))
     lines.append(rendered)
@@ -529,6 +534,7 @@ def main(argv):
         parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
         parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
         parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
+        parser.add_argument("--extra-arg", help="Optional arguments inserted after the step CFG")
         parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
         parser.add_argument("--eco-phase", choices=("before", "after"))
         parser.add_argument("--step-status", type=int, default=0)
@@ -538,7 +544,7 @@ def main(argv):
             os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
         if step_args[:1] == ["--"]:
             step_args = step_args[1:]
-        return run_step(args.step, step_args, args.work_path, args.module, args.cfg, args.env_file, args.source, args.no_eco)
+        return run_step(args.step, step_args, args.work_path, args.module, args.cfg, args.env_file, args.source, args.no_eco, args.extra_arg)
     return run_step(command, argv[1:])
 
 

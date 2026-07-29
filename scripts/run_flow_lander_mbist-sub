@@ -530,7 +530,7 @@ def run_eco(work_path, env, source_file, phase):
     return status
 
 
-def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None, source=None, stage=None, no_eco=False):
+def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None, source=None, stage=None, no_eco=False, extra_arg=None):
     if step not in STEPS:
         fail(f"未知的 {FLOW_LABEL} Step: {step}")
     work_path = resolve_work_path(work_path)
@@ -539,6 +539,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
     managed = load_managed_env(resolve_env_file(work_path, env_file))
     runtime_env = dict(os.environ)
     runtime_env.update(managed)
+    extra_arg_value = extra_arg if extra_arg is not None else runtime_env.get("DFT_IDE_TOOL_EXTRA_ARG", "")
+    try:
+        tool_extra_args = shlex.split(extra_arg_value) if extra_arg_value.strip() else []
+    except ValueError as error:
+        fail(f"Invalid tool extra argument: {error}")
     runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
     mode_name = mode or runtime_env.get("DFT_IDE_MODE") or runtime_env.get("mode")
     if not mode_name:
@@ -570,7 +575,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
     cfg_file = (
         Path(cfg).expanduser().resolve()
         if cfg
-        else work_path / stage_name / "verification" / "cfg" / f"{mode_name}.cfg"
+        else work_path / stage_name / "lander_env" / "lander_cfg" / f"{mode_name}.cfg"
     )
     if not no_eco:
         before_status = run_eco(work_path, runtime_env, source_file, "before")
@@ -580,7 +585,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
 
     def make_lines(labels, parameters):
         lines = source_lines(source_file)
-        command = dsubrun_prefix + [TOOL, step, "-cfg", str(cfg_file)] + list(step_args)
+        command = dsubrun_prefix + [TOOL, step, "-cfg", str(cfg_file)] + tool_extra_args + list(step_args)
         for _, _, flag in MATRIX_PARAMETERS:
             if flag in parameters:
                 command.extend((flag, parameters[flag]))
@@ -674,6 +679,7 @@ def main(argv):
         parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
         parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
         parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
+        parser.add_argument("--extra-arg", help="Optional arguments inserted after the step CFG")
         parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
         parser.add_argument("--groups", help="Comma-separated ATPG groups")
         parser.add_argument("--tcs", help="Comma-separated ATPG testcases")
@@ -690,7 +696,7 @@ def main(argv):
             value = getattr(args, option)
             if value is not None:
                 step_args.extend((f"--{option}", value))
-        return run_step(args.step, step_args, args.work_path, args.mode, args.cfg, args.env_file, args.source, args.stage, args.no_eco)
+        return run_step(args.step, step_args, args.work_path, args.mode, args.cfg, args.env_file, args.source, args.stage, args.no_eco, args.extra_arg)
     return run_step(command, argv[1:])
 
 

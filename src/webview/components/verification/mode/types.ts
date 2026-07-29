@@ -51,6 +51,7 @@ export interface RunParamRow {
   subattrNames: string[]
 
   tools: ToolConfig[]
+  extraArg: string
   donau: DonauConfig
 }
 
@@ -116,6 +117,8 @@ export interface ModePanelProps {
   initialTab?: ModePanelTab
 
   title?: string
+
+  initialCollapsed?: boolean
 
   onSelect?: (tab: ModePanelTab, item?: ModePanelItem) => void
 

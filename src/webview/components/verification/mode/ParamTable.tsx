@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { Button, Space, Table } from 'antd'
+import { Button, Input, Space, Table } from 'antd'
 
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
 
@@ -27,6 +27,7 @@ const createRunParamRow = (): RunParamRow => ({
   groupNames: [],
   tcNames: [],
   subattrNames: [],
+  extraArg: '',
   tools: [],
   donau: {},
 })
@@ -154,6 +155,19 @@ export default function ParamTable({
       ),
     },
 
+    {
+      title: 'Extra Arg',
+      dataIndex: 'extraArg',
+      width: 180,
+      render: (_, row) => (
+        <Input
+          allowClear
+          placeholder="??????"
+          value={row.extraArg}
+          onChange={(event) => updateRow(row.id, { extraArg: event.target.value })}
+        />
+      ),
+    },
     {
       title: 'Tools',
       dataIndex: 'tools',

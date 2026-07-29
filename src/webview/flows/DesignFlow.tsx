@@ -95,10 +95,12 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
       sidebar={
         currentStep !== 0 ? (
           <DesignTreePanel
+            key={currentStep}
             accent={accent}
             flow={repo}
             flowLabel={category}
             enableRun={currentStep === 1}
+            initialCollapsed={currentStep >= 2}
             selectedKey={selectedModule}
             onSelect={setSelectedModule}
             onExecutionSelectionChange={setExecutionModuleKeys}

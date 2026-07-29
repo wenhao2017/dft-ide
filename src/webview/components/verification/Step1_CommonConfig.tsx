@@ -30,6 +30,8 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey }) => {
   const { savedData, loading, saving, handleSave } =
     useFlowConfig(moduleKey ? `${flowKey}/${moduleKey}/config` : flowKey);
 
+  const activeProject = useWizardStore((s) => s.activeProject);
+
   useEffect(() => {
     getGitInfo(flowKey as RepoKey)
       .then((res) => {
@@ -90,12 +92,18 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey }) => {
       message.warning('请选择 LANDER_ASSISTANT.json。');
       return;
     }
+    const domainKey = activeProject?.domain?.key;
+    if (!domainKey) {
+      message.warning('请在首页为项目配置领域。');
+      return;
+    }
     setGenerating(true);
     try {
-      const result = await generateLanderConfigs(stage, landerAssistant.value);
+      const result = await generateLanderConfigs(domainKey, stage, landerAssistant.value);
       if (!result.success) {
         throw new Error(result.error ?? 'Verification 配置转换失败');
       }
+      message.success('Verification 配置转换完成。');
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
     } finally {

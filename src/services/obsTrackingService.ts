@@ -326,6 +326,7 @@ export class ObsTrackingService implements vscode.Disposable {
           remoteEtag: item.etag || item.md5 || options.remoteEtag,
           remoteUpdatedAt: item.updatedAt || options.remoteUpdatedAt,
         });
+        await fs.promises.chmod(result.localDestUri.fsPath, 0o755);
         downloadedItems.push(result);
       } catch (error) {
         errors.push({

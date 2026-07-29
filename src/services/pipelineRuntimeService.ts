@@ -30,9 +30,9 @@ export interface PipelineRuntimeSnapshot {
   updatedAt: number;
 }
 
-export type PipelineHistoryTask = PipelineTask;
+export type PipelineHistoryTask = Omit<PipelineTask, 'attempts'>;
 
-export interface PipelineRuntimeHistorySnapshot extends PipelineRuntimeSnapshot {
+export interface PipelineRuntimeHistorySnapshot extends Omit<PipelineRuntimeSnapshot, 'tasks'> {
   tasks: PipelineHistoryTask[];
 }
 
@@ -48,7 +48,7 @@ export interface PipelineRuntimeHistoryRecord {
 interface PipelineRuntimeServiceOptions {
   onUpdate: (snapshot: PipelineRuntimeSnapshot) => void;
   onHistory: (record: PipelineRuntimeHistoryRecord) => void;
-  openTerminal: (title: string, command: string | string[], cwd?: string, shellPath?: string) => Promise<void> | void;
+  openTerminal: (title: string, command: string | string[], show: boolean, cwd?: string, shellPath?: string) => Promise<void> | void;
   getPipelineShellPath?: () => string | undefined;
 }
 
@@ -370,6 +370,10 @@ function appendVerificationParameterCommands(
   append(parameterTask.enableGroup, 'groupNames', 'DFT_IDE_GROUPS');
   append(parameterTask.enableTC, 'tcNames', 'DFT_IDE_TCS');
   append(parameterTask.enableSubAttr, 'subattrNames', 'DFT_IDE_SUBATTRS');
+  const extraArg = firstNonEmptyString(row.extraArg);
+  if (extraArg) {
+    commands.push(`setenv DFT_IDE_TOOL_EXTRA_ARG ${quoteCshArgument(extraArg)}`);
+  }
 }
 function buildStepCommands(
   runId: string,
@@ -866,50 +870,66 @@ export class PipelineRuntimeService {
     this.runtimes.set(key, runtime);
     this.notify(key);
 
-    const selectedTasksToRun = initialTasks.filter((t) => t.status !== 'skipped');
-    const resolvedRunParameters = flowKey === 'verification'
-      ? resolveVerificationRunParameters(runParameters, taskConfig)
-      : runParameters;
-    const executionPlan = selectedTasksToRun.flatMap((task, taskIndex) => {
-      const parameterSets = flowKey === 'verification'
-        ? getApplicableVerificationParameterSets(task, resolvedRunParameters)
-        : [];
-      const taskRuns: Array<Record<string, unknown> | undefined> = parameterSets.length > 0
-        ? parameterSets
-        : [undefined];
-      return taskRuns.map((parameters, parameterIndex) => ({
-        task,
-        parameters,
-        markerTaskId: `${task.id}__params_${parameterIndex + 1}`,
-        isLastTaskRun: parameterIndex === taskRuns.length - 1,
-        taskIndex,
-        continueOnFailure: parameterSets.length > 0,
-      }));
-    });
+    try {
+      const selectedTasksToRun = initialTasks.filter((t) => t.status !== 'skipped');
+      const resolvedRunParameters = flowKey === 'verification'
+        ? resolveVerificationRunParameters(runParameters, taskConfig)
+        : runParameters;
+      const executionPlan = selectedTasksToRun.flatMap((task, taskIndex) => {
+        const parameterSets = flowKey === 'verification'
+          ? getApplicableVerificationParameterSets(task, resolvedRunParameters)
+          : [];
+        const taskRuns: Array<Record<string, unknown> | undefined> = parameterSets.length > 0
+          ? parameterSets
+          : [undefined];
+        return taskRuns.map((parameters, parameterIndex) => ({
+          task,
+          parameters,
+          markerTaskId: `${task.id}__params_${parameterIndex + 1}`,
+          isLastTaskRun: parameterIndex === taskRuns.length - 1,
+          taskIndex,
+          continueOnFailure: parameterSets.length > 0,
+        }));
+      });
 
-    this.registerExecutionSession(key, {
-      runId,
-      flowKey,
-      moduleKey,
-      flowLabel,
-      logPrefix: config.logPrefix,
-      terminalTitle: getPipelineTerminalTitle(flowLabel, moduleKey),
-      tasks: selectedTasksToRun,
-      executionPlan,
-      nextIndex: 0,
-      cwd,
-      envConfig,
-      taskConfig,
-      runParameters: resolvedRunParameters,
-      shellPath: this.options.getPipelineShellPath?.() ?? 'csh',
-      buffer: '',
-      seenStarts: new Set<string>(),
-      seenEnds: new Set<string>(),
-      seenPhaseStarts: new Set<string>(),
-      seenPhaseEnds: new Set<string>(),
-      stopped: false,
-    });
-    this.startNextSessionTask(key);
+      this.registerExecutionSession(key, {
+        runId,
+        flowKey,
+        moduleKey,
+        flowLabel,
+        logPrefix: config.logPrefix,
+        terminalTitle: getPipelineTerminalTitle(flowLabel, moduleKey),
+        tasks: selectedTasksToRun,
+        executionPlan,
+        nextIndex: 0,
+        cwd,
+        envConfig,
+        taskConfig,
+        runParameters: resolvedRunParameters,
+        shellPath: this.options.getPipelineShellPath?.() ?? 'csh',
+        buffer: '',
+        seenStarts: new Set<string>(),
+        seenEnds: new Set<string>(),
+        seenPhaseStarts: new Set<string>(),
+        seenPhaseEnds: new Set<string>(),
+        stopped: false,
+      });
+      this.startNextSessionTask(key);
+    } catch (error) {
+      const failedTaskId = runtime.tasks.find((task) => task.status === 'running')?.id
+        ?? runtime.tasks[0]?.id;
+      if (failedTaskId) {
+        const detail = error instanceof Error ? error.message : String(error);
+        this.finishRuntimeWithFailure(
+          key,
+          config.logPrefix,
+          failedTaskId,
+          -1,
+          `Pipeline failed to start: ${detail}`,
+        );
+      }
+      throw error;
+    }
 
     return runtime;
   }
@@ -951,7 +971,7 @@ export class PipelineRuntimeService {
       commands.push(flowKey === 'verification'
         ? stepCommand
         : buildPipelineStepExecutionCommand(resolveProjectPath(flowKey), stepCommand));
-      this.options.openTerminal(getPipelineTerminalTitle(runtime.flowLabel, moduleKey), commands);
+      this.options.openTerminal(getPipelineTerminalTitle(runtime.flowLabel, moduleKey), commands, true);
     }
 
     scheduleRuntime(key, 1200, () => {
@@ -1045,6 +1065,7 @@ export class PipelineRuntimeService {
       this.options.openTerminal(
         terminalTitle,
         commands,
+        true,
         cwd,
         this.options.getPipelineShellPath?.() ?? 'csh',
       ),
@@ -1211,6 +1232,7 @@ export class PipelineRuntimeService {
     console.log('groups:', runParameterRows.map((row) => row.groupNames ?? []));
     console.log('tcs:', runParameterRows.map((row) => row.tcNames ?? []));
     console.log('subattrs:', runParameterRows.map((row) => row.subattrNames ?? []));
+    console.log('extraArg:', runParameterRows.map((row) => row.extraArg ?? ''));
     console.log('tools:', runParameterRows.map((row) => row.tools ?? []));
     console.log('Donau:', runParameterRows.map((row) => row.donau ?? {}));
     console.log('parameter rows:', runParameterRows);
@@ -1218,7 +1240,7 @@ export class PipelineRuntimeService {
     this.patchTask(key, task.id, (current) => ({
     }));
     void Promise.resolve(
-      this.options.openTerminal(session.terminalTitle, commands, session.cwd, session.shellPath),
+      this.options.openTerminal(session.terminalTitle, commands, execution.taskIndex === 0, session.cwd, session.shellPath),
     ).catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
       this.finishRuntimeWithFailure(key, session.logPrefix, task.id, -1, `Terminal 启动失败：${message}`);
@@ -1346,6 +1368,33 @@ export class PipelineRuntimeService {
     if (exitCode === 130 || exitCode === 143) {
       this.markRuntimeStopped(key, session.logPrefix, 'Terminal 收到 Ctrl+C，中断已同步到流水线。', false);
     }
+
+    if (exitCode !== 0 && session.currentTaskId) {
+      const runId = session.runId;
+      const taskId = session.currentTaskId;
+      const markerTaskId = session.currentMarkerTaskId;
+      scheduleRuntime(key, 100, () => {
+        const currentSession = this.executionSessions.get(key);
+        if (
+          !currentSession ||
+          currentSession.stopped ||
+          currentSession.runId !== runId ||
+          currentSession.currentTaskId !== taskId ||
+          currentSession.currentMarkerTaskId !== markerTaskId ||
+          (markerTaskId && currentSession.seenEnds.has(markerTaskId))
+        ) {
+          return;
+        }
+
+        this.finishRuntimeWithFailure(
+          key,
+          currentSession.logPrefix,
+          taskId,
+          exitCode,
+          `Terminal command exited with code ${exitCode} before its task-end marker was received.`,
+        );
+      });
+    }
   }
 
   private handleStepEnd(key: string, taskId: string, exitCode: number): void {
@@ -1395,6 +1444,7 @@ export class PipelineRuntimeService {
     clearRuntimeTimers(key);
     this.disposeExecutionSession(key);
     if (message) {
+      console.error(`[DFT IDE] ${message}`);
     }
     this.updateRuntime(key, (runtime) => ({
       ...runtime,
@@ -1553,7 +1603,7 @@ export class PipelineRuntimeService {
         : 'success';
 
     const { tasks, ...historySnapshot } = runtime;
-    const historyTasks = tasks.map((task) => ({ ...task }));
+    const historyTasks = tasks.map(({ attempts: _attempts, ...task }) => task);
     this.options.onHistory({
       flow: runtime.flowKey,
       flowKey: runtime.flowKey,

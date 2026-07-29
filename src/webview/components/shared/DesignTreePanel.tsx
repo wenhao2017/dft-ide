@@ -56,6 +56,7 @@ interface DesignTreePanelProps {
   flowLabel: string;
   selectedKey: string;
   enableRun?: boolean;
+  initialCollapsed?: boolean;
   onSelect: (key: string) => void;
   onExecutionSelectionChange?: (keys: string[]) => void;
   onModuleWorkDirsChange?: (workDirs: Record<string, string>) => void;
@@ -71,6 +72,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   flowLabel,
   selectedKey,
   enableRun,
+  initialCollapsed = false,
   onSelect,
   onExecutionSelectionChange,
   onModuleWorkDirsChange,
@@ -102,7 +104,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
   const [configsLoaded, setConfigsLoaded] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [createOpen, setCreateOpen] = useState(false);
   const [createValue, setCreateValue] = useState('');
   const [taskModalOpen, setTaskModalOpen] = useState(false);

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { z } from 'zod';
+import { message } from 'antd';
 import {
   ensurePipelineRuntime,
   getPipelineRuntimes,
@@ -228,6 +229,8 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
   },
 
   startRuntime: (flowKey, moduleKey, flowLabel, selectedTaskIds, cwd, selectedTasks, runParameters) => {
+    const key = getPipelineRuntimeKey(flowKey, moduleKey);
+    let previousRuntime: PipelineRuntimeSnapshot | undefined;
     const normalizedSelectedTaskIds = selectedTaskIds?.length ? selectedTaskIds : undefined;
     const optimisticTasks: PipelineTask[] = (selectedTasks ?? []).map((task, index) => {
       const isSelected = !normalizedSelectedTaskIds || normalizedSelectedTaskIds.includes(task.id);
@@ -240,23 +243,59 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
         attempts: 1,
       };
     });
-    set((state) => ({
-      runtimes: applySnapshot(
-        state.runtimes,
-        {
-          ...makeInitialRuntime(flowKey, moduleKey, flowLabel),
-          tasks: optimisticTasks,
-          links: optimisticTasks.slice(1).map((task, index) => ({
-            source: optimisticTasks[index].id,
-            target: task.id,
-          })),
-          selectedTaskId: optimisticTasks.find((task) => task.status === 'running')?.id
-            ?? optimisticTasks[0]?.id,
-          runState: 'running',
-        },
-      ),
-    }));
-    void startPipelineRuntime({ flowKey, moduleKey, flowLabel, selectedTaskIds, selectedTasks, cwd, runParameters });
+    const optimisticRuntime: PipelineRuntimeSnapshot = {
+      ...makeInitialRuntime(flowKey, moduleKey, flowLabel),
+      tasks: optimisticTasks,
+      links: optimisticTasks.slice(1).map((task, index) => ({
+        source: optimisticTasks[index].id,
+        target: task.id,
+      })),
+      selectedTaskId: optimisticTasks.find((task) => task.status === 'running')?.id
+        ?? optimisticTasks[0]?.id,
+      runState: 'running',
+    };
+    set((state) => {
+      previousRuntime = state.runtimes[key];
+      return { runtimes: applySnapshot(state.runtimes, optimisticRuntime) };
+    });
+
+    const rollbackOptimisticRuntime = (error?: string) => {
+      set((state) => {
+        const current = state.runtimes[key];
+        if (
+          current?.runId ||
+          current?.updatedAt !== optimisticRuntime.updatedAt ||
+          current.runState !== 'running'
+        ) {
+          return state;
+        }
+
+        const runtimes = { ...state.runtimes };
+        if (previousRuntime) {
+          runtimes[key] = previousRuntime;
+        } else {
+          delete runtimes[key];
+        }
+        return { runtimes };
+      });
+      message.error(error || '???????');
+    };
+
+    void startPipelineRuntime({
+      flowKey,
+      moduleKey,
+      flowLabel,
+      selectedTaskIds,
+      selectedTasks,
+      cwd,
+      runParameters,
+    }).then((result) => {
+      if (!result.success) {
+        rollbackOptimisticRuntime(result.error);
+      }
+    }).catch((error) => {
+      rollbackOptimisticRuntime(error instanceof Error ? error.message : String(error));
+    });
   },
 
   stopRuntime: (flowKey, moduleKey, flowLabel) => {

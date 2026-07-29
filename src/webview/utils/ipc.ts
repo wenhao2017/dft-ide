@@ -653,18 +653,20 @@ export async function deleteFlowConfigFile(
 }
 
 export async function generateDefaultFlowConfigs(
-  flow: 'hibist' | 'sailor', module: string, isAllSelected?: boolean, stage?: string
+  flow: 'hibist' | 'sailor', domain: string, module: string, isAllSelected?: boolean
 ): Promise<TransformResponse> {
-  const res = await ipcRequest('generateDefaultFlowConfigs', { flow, module, isAllSelected, stage });
+  const res = await ipcRequest('generateDefaultFlowConfigs', { flow, domain, module, isAllSelected });
   return res as unknown as TransformResponse;
 }
 
 export async function generateLanderConfigs(
+  domain: string,
   stage: string,
   landerAssistant: string
 ): Promise<TransformResponse> {
   const res = await ipcRequest('generateLanderConfigs', {
     flow: 'verification',
+    domain,
     stage,
     landerAssistant,
   });

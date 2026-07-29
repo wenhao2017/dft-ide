@@ -143,8 +143,8 @@ const pipelineRuntimeService = new PipelineRuntimeService({
       console.error('Failed to persist pipeline execution history', error);
     });
   },
-  openTerminal: (title, command, cwd, shellPath) => {
-    return openExecutionTerminal({ title, command, cwd, shellPath }).then(() => undefined);
+  openTerminal: (title, command, show, cwd, shellPath) => {
+    return openExecutionTerminal({ title, command, cwd, shellPath }, show).then(() => undefined);
   },
   getPipelineShellPath: () => {
     const configured = vscode.workspace.getConfiguration('dftIde').get<string>('pipeline.shellPath', 'csh');
@@ -1965,9 +1965,10 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'generateDefaultFlowConfigs': {
         const requestId: string = msg.requestId;
         const flow = normalizeConfigFlow(msg.flow);
+        const domain = msg.domain;
         const module = typeof msg.module === 'string' ? msg.module.trim() : '';
         const isAllSelected = msg.isAllSelected;
-        const stage = typeof msg.stage === 'string' ? msg.stage.trim() : undefined;
+
         try {
           if (!flow || flow === 'verification') {
             throw new Error('Unsupported flow for config files.');
@@ -1980,7 +1981,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           const designTree = files.designTree;
           const normTable = files.normTable;
           // 从obs获取python脚本
-          const [configPath, scriptPath] = await downLoadObsScripts(context, flow, stage);
+          const [configPath, scriptPath] = await downLoadObsScripts(context, flow, domain);
           if (!configPath || !scriptPath) {
             currentPanel?.webview.postMessage({
               command: 'generateDefaultFlowConfigsResponse', requestId, success: false, error: '从obs获取py脚本失败'
@@ -1990,16 +1991,16 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           const transformLog = await doConfigTransform({
             requestId,
             flow,
+            domain,
             scriptPath,
             configPath,
             designTree,
             normTable,
             module,
-            stage,
             isAllSelected,
           });
           if (transformLog.finished) {
-            const result = await saveTransformLogs(transformLog, stage);
+            const result = await saveTransformLogs(transformLog);
             currentPanel?.webview.postMessage({
               command: 'generateDefaultFlowConfigsResponse',
               requestId,
@@ -2021,6 +2022,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'generateLanderConfigs': {
         const requestId: string = msg.requestId;
         const flow = normalizeConfigFlow(msg.flow);
+        const domain = msg.domain;
         const landerAssistant = typeof msg.landerAssistant === 'string' ? msg.landerAssistant.trim() : '';
         try {
           if (flow !== 'verification') {
@@ -2031,7 +2033,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             throw new Error('请选择 LANDER_ASSISTANT.json。');
           }
           // 从obs获取python脚本
-          const [configPath, scriptPath] = await downLoadObsScripts(context, flow, stage);
+          const [configPath, scriptPath] = await downLoadObsScripts(context, flow, domain, stage);
           if (!configPath || !scriptPath) {
             currentPanel?.webview.postMessage({
               command: 'generateLanderConfigsResponse', requestId, success: false, error: '从obs获取py脚本失败'
@@ -2041,13 +2043,14 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           const transformLog = await doConfigTransform({
             requestId,
             flow,
+            domain,
             scriptPath,
             configPath,
             stage,
             landerAssistant,
           });
           if (transformLog.finished) {
-            const result = await saveTransformLogs(transformLog, stage);
+            const result = await saveTransformLogs(transformLog);
             currentPanel?.webview.postMessage({
               command: 'generateLanderConfigsResponse',
               requestId,

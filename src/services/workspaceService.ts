@@ -186,7 +186,7 @@ export async function openProjectWorkspace(rootPath: string): Promise<{ opened: 
     };
   }
 
-  await vscode.commands.executeCommand('vscode.openFolder', targetUri, false);
+  await vscode.commands.executeCommand('vscode.openFolder', targetUri);
   return {
     opened: true,
     targetPath: targetUri.fsPath,
@@ -902,6 +902,7 @@ const defaultConfigTimeoutMs = 60 * 60 * 1000;
 export interface TransformLog {
   requestId?: string;
   flow: 'hibist' | 'sailor' | 'verification';
+  domain: string;
   scriptPath: string;
   configPath: string;
   designTree?: string;

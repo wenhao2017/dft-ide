@@ -37,6 +37,8 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
   const { savedData, loading, saving, handleSave } =
     useFlowConfig(moduleKey ? `${flowKey}/${moduleKey}/config` : flowKey);
 
+  const activeProject = useWizardStore((s) => s.activeProject);
+
   useEffect(() => {
     getGitInfo(flowKey as RepoKey)
       .then((res) => {
@@ -114,13 +116,19 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
       message.warning('请至少选择一个 module。');
       return;
     }
+    const domainKey = activeProject?.domain?.key;
+    if (!domainKey) {
+      message.warning('请在首页为项目配置领域。');
+      return;
+    }
     setGenerating(true);
     try {
       const isAllSelected = moduleOptions.every(val => selectedModules.includes(val.value));
-      const result = await generateDefaultFlowConfigs(flowKey, selectedModules.join('; '), isAllSelected);
+      const result = await generateDefaultFlowConfigs(flowKey, domainKey, selectedModules.join('; '), isAllSelected);
       if (!result.success) {
         throw new Error(result.error ?? '转换失败');
       }
+      message.success(`${flowKey} 配置转换完成。`);
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
     } finally {

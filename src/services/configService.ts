@@ -169,108 +169,104 @@ export async function deleteFlowConfigFile(
   );
 }
 
-interface ObsScriptEntrance {
-  dir: string;
+interface ObsScriptFile {
   fileName: string;
+  fileType: number;
 }
 
 interface ObsScriptPathConfig {
-  dir?: string;
-  files?: unknown[];
-  entrance?: ObsScriptEntrance;
+  scriptSpace: string;
+  remoteScriptPath: string;
+  remoteScriptFiles: ObsScriptFile[];
+}
+
+export async function getObsScriptConfig(
+  flow: 'hibist' | 'sailor' | 'verification',
+  domain: string
+): Promise<ObsScriptPathConfig> {
+  const scriptSpace = 'DFT_IDE';
+  const remoteScriptPath = domain ? `EXCEL2CFG/${domain}` : 'EXCEL2CFG/Network';
+  const remoteScriptFiles = [{ fileName: flow == 'verification' ? 'lander_env' : 'sailor_env', fileType: 2 }];
+  return { scriptSpace, remoteScriptPath, remoteScriptFiles };
 }
 
 export async function downLoadObsScripts(
   context: vscode.ExtensionContext,
   flow: 'hibist' | 'sailor' | 'verification',
+  domain: string,
   stage?: string,
 ): Promise<[configPath: string, scriptPath: string] | []> {
   const configsDir = await getFlowConfigsDirectory(flow, stage);
   await ensureLocalConfigDirectory(configsDir);
 
-  // 1. 去特定空间下载转换脚本（具体空间与路径在 package.json 预留，可留空后填）
-  const obsConfig = vscode.workspace.getConfiguration('dftIde.obs');
-  const scriptSpace = obsConfig.get<string>('scriptSpace', '').trim();
-  const scriptPaths = obsConfig.get<Record<string, ObsScriptPathConfig>>('scriptPaths', {});
-  const flowConfig = scriptPaths[flow];
-  const remoteScriptPath = flowConfig?.dir?.trim() as string;
-  const remoteScriptFiles = flowConfig?.files as [{fileName: string, type: number}];
-  const entrance = flowConfig?.entrance ?? {
+  const obsScriptConfig: ObsScriptPathConfig = await getObsScriptConfig(flow, domain);
+  const entrance = {
     dir: 'scripts/transform',
     fileName: flow === 'verification' ? 'run_gen_lander_cfg' : 'run_gen_cfg',
   };
 
-  if (scriptSpace && remoteScriptPath) {
-    try {
-      if (!entrance?.dir?.trim() || !entrance.fileName?.trim()) {
-        throw new Error(`Missing scriptPaths.${flow}.entrance configuration.`);
-      }
-      if (path.basename(entrance.fileName) !== entrance.fileName) {
-        throw new Error(`Invalid transform entrance file name: ${entrance.fileName}`);
-      }
-      const extensionRoot = path.resolve(context.extensionPath);
-      const sourceScript = path.resolve(extensionRoot, entrance.dir, entrance.fileName);
-      const sourceRelativePath = path.relative(extensionRoot, sourceScript);
-      if (sourceRelativePath.startsWith('..') || path.isAbsolute(sourceRelativePath)) {
-        throw new Error(`Transform entrance must stay inside the extension: ${sourceScript}`);
-      }
-      const targetPath = path.join(configsDir, entrance.fileName);
-      await copyFileLF(sourceScript, targetPath);
-      try {
-        await fs.promises.chmod(targetPath, 0o755);
-      } catch (error) {
-        console.warn(`[DFT IDE] Transform entrance copied but chmod failed: ${targetPath}`, error);
-      }
-
-      for (const file of remoteScriptFiles) {
-        const filename: string = file.fileName;
-        const type = file.type;
-        if (typeof filename !== 'string' || path.basename(filename) !== filename) {
-          throw new Error(`Invalid OBS script file name: ${String(filename)}`);
-        }
-        const localScriptPath = path.join(configsDir, filename);
-        const remoteFilePath = path.posix.join(remoteScriptPath.replace(/\\/g, '/'), filename);
-        if (type == 1) {
-          await obsTrackingService.downloadFile(scriptSpace, remoteFilePath, vscode.Uri.file(localScriptPath), {
-            overwriteUntracked: true,
-          });
-        } else {
-          await obsTrackingService.downloadDirectory(scriptSpace, remoteFilePath, vscode.Uri.file(localScriptPath), {
-            overwriteUntracked: true,
-          });
-        }
-        try {
-          await fs.promises.chmod(localScriptPath, 0o755);
-        } catch (error) {
-          console.warn(`[DFT IDE] OBS script downloaded but chmod failed: ${localScriptPath}`, error);
-        }
-      }
-      return [configsDir, targetPath];
-    } catch (err) {
-      console.warn(`[DFT IDE] 从 OBS 空间 [${scriptSpace}] 下载转换脚本失败:`, err);
-      return [];
+  try {
+    const extensionRoot = path.resolve(context.extensionPath);
+    const sourceScript = path.resolve(extensionRoot, entrance.dir, entrance.fileName);
+    const sourceRelativePath = path.relative(extensionRoot, sourceScript);
+    if (sourceRelativePath.startsWith('..') || path.isAbsolute(sourceRelativePath)) {
+      throw new Error(`Transform entrance must stay inside the extension: ${sourceScript}`);
     }
-  } else {
-    console.info(`[DFT IDE] 尚未配置 dftIde.obs.scriptSpace 或 scriptPaths.${flow}，预留空项待填`);
+    const targetPath = path.join(configsDir, entrance.fileName);
+    await copyFileLF(sourceScript, targetPath);
+    try {
+      await fs.promises.chmod(targetPath, 0o755);
+    } catch (error) {
+      console.warn(`[DFT IDE] Transform entrance copied but chmod failed: ${targetPath}`, error);
+    }
+
+    for (const file of obsScriptConfig.remoteScriptFiles) {
+      const filename: string = file.fileName;
+      const fileType = file.fileType;
+
+      const localScriptPath = flow === 'verification' ? path.join(configsDir, filename) : configsDir;
+      if (typeof filename !== 'string' || path.basename(filename) !== filename) {
+        throw new Error(`Invalid OBS script file name: ${String(filename)}`);
+      }
+      const remoteFilePath = path.posix.join(obsScriptConfig.remoteScriptPath.replace(/\\/g, '/'), filename);
+      if (fileType == 1) {
+        await obsTrackingService.downloadFile(obsScriptConfig.scriptSpace, remoteFilePath, vscode.Uri.file(localScriptPath), {
+          overwriteUntracked: true,
+        });
+      } else {
+        await obsTrackingService.downloadDirectory(obsScriptConfig.scriptSpace, remoteFilePath, vscode.Uri.file(localScriptPath), {
+          overwriteUntracked: true,
+        });
+      }
+      try {
+        await fs.promises.chmod(localScriptPath, 0o755);
+      } catch (error) {
+        console.warn(`[DFT IDE] OBS script downloaded but chmod failed: ${configsDir}`, error);
+      }
+    }
+    return [configsDir, targetPath];
+  } catch (err) {
+    console.warn(`[DFT IDE] 从 OBS 空间 [${obsScriptConfig.scriptSpace}] 下载转换脚本失败:`, err);
     return [];
   }
 }
 
-export async function removeExecutedScripts(
-  flow: 'hibist' | 'sailor' | 'verification',
-  stage?: string,
-) {
-  const configsDir = await getFlowConfigsDirectory(flow, stage);
-  
-  const obsConfig = vscode.workspace.getConfiguration('dftIde.obs');
-  const scriptPaths = obsConfig.get<Record<string, ObsScriptPathConfig>>('scriptPaths', {});
-  const flowConfig = scriptPaths[flow];
-  const files = flowConfig?.files as [{fileName: string, type: number}];
-
-  for (const file of files) {
-    const filename: string = file.fileName;
-    const type: number = file.type;
-    if (type === 1) await vscode.workspace.fs.delete(vscode.Uri.file(path.join(configsDir, filename)), { recursive: false });
+export async function removeExecutedScripts(dirUri: vscode.Uri): Promise<void> {
+  try {
+    const entries = await vscode.workspace.fs.readDirectory(dirUri);
+    for (const [name, type] of entries) {
+      const childUri = vscode.Uri.joinPath(dirUri, name);
+      if (type === vscode.FileType.File) {
+        if (name.endsWith('.obs.json')) {
+          const scriptName = name.replace(/^\.(.+)\.obs\.json$/, '$1');
+          await vscode.workspace.fs.delete(vscode.Uri.joinPath(dirUri, scriptName), { recursive: false });
+        }
+      } else if (type === vscode.FileType.Directory) {
+        await removeExecutedScripts(childUri);
+      }
+    }
+  } catch (error) {
+    console.error(`读取目录失败: ${dirUri.fsPath}`, error);
   }
 }
 
@@ -416,7 +412,7 @@ export function collectModuleNames(value: unknown, modules: Set<string>): void {
   });
 }
 
-export async function saveTransformLogs(transformLog: TransformLog, stage?: string): Promise<TransformLog> {
+export async function saveTransformLogs(transformLog: TransformLog): Promise<TransformLog> {
   const localStateDir = resolveLocalConfigDirectory() as string;
   const targetPath = path.join(localStateDir, 'transform_history', transformLog.flow);
   const savedLog: TransformLog = {
@@ -449,7 +445,7 @@ export async function saveTransformLogs(transformLog: TransformLog, stage?: stri
   }
   const content = retained.map((item) => JSON.stringify(item)).join('\n');
   await vscode.workspace.fs.writeFile(vscode.Uri.file(hisotryJson), Buffer.from(content, 'utf-8'));
-  await removeExecutedScripts(transformLog.flow, transformLog.stage);
+  if (transformLog.flow !== 'verification') await removeExecutedScripts(vscode.Uri.file(transformLog.configPath));
   return savedLog;
 }
 
@@ -457,7 +453,7 @@ export async function moveTransformFile(transformLog: TransformLog, sourceFile: 
   try {
     const { name, extension } = getFileNameAndExtension(sourceFile);
     const fullName = path.join(targetPath, `${name}_${transformLog.timemilles}${extension ? `.${extension}` : ''}`);
-    if (type==1) {
+    if (type == 1) {
       // copy
       await vscode.workspace.fs.copy(vscode.Uri.file(sourceFile), vscode.Uri.file(fullName));
     } else {
@@ -518,12 +514,12 @@ async function readTransformLogFile(filePath: string): Promise<TransformLog[]> {
     try {
       const parsed: unknown = JSON.parse(text);
       if (isRecord(parsed) && typeof parsed.flow === 'string' && typeof parsed.scriptPath === 'string') {
-        logs.push({...parsed, success: parsed.logFile ? await checkTransformStatus(parsed.logFile as string) : false} as unknown as TransformLog);
+        logs.push({ ...parsed, success: parsed.logFile ? await checkTransformStatus(parsed.logFile as string) : false } as unknown as TransformLog);
       }
     } catch {
       const legacy = parseLegacyTransformLog(text);
       if (legacy) {
-        logs.push({...legacy, success: legacy.logFile ? await checkTransformStatus(legacy.logFile as string) : false} as unknown as TransformLog);
+        logs.push({ ...legacy, success: legacy.logFile ? await checkTransformStatus(legacy.logFile as string) : false } as unknown as TransformLog);
       }
     }
   }
