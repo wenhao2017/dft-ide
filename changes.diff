@@ -1,0 +1,263 @@
+diff --git a/src/extension.ts b/src/extension.ts
+index 453aa11..33a0708 100644
+--- a/src/extension.ts
++++ b/src/extension.ts
+@@ -18,6 +18,7 @@ import { SpreadsheetProvider } from "./spreadsheet"
+ import {
+   handleGetLanderModePipelines,
+ } from './ipc/landerPipelineIpc';
++import { parsePreModeFromModeCfg } from './services/modeCfgService';
+ // Import constants
+ import {
+   VIEW_TYPE,
+@@ -894,11 +895,14 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+           if (path.resolve(path.dirname(selectedPath)).toLowerCase() !== path.resolve(cfgRoot).toLowerCase()) {
+             throw new Error(`导入文件必须位于 ${cfgRoot} 目录中。`);
+           }
++          const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(selectedPath));
++          const preMode = parsePreModeFromModeCfg(Buffer.from(bytes).toString('utf8')) ?? '';
+           currentPanel?.webview.postMessage({
+             command: 'selectVerificationModeCfgResponse', requestId,
+             path: selectedPath,
+             fileName: path.basename(selectedPath),
+             modeName: path.basename(selectedPath, path.extname(selectedPath)),
++            preMode,
+           });
+         } catch (err) {
+           currentPanel?.webview.postMessage({
+@@ -1968,7 +1972,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+         const domain = msg.domain;
+         const module = typeof msg.module === 'string' ? msg.module.trim() : '';
+         const isAllSelected = msg.isAllSelected;
+-        
++
+         try {
+           if (!flow || flow === 'verification') {
+             throw new Error('Unsupported flow for config files.');
+@@ -2676,13 +2680,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+           const modes = await Promise.all(entries.filter(([name, type]) => type === vscode.FileType.File && name.toLowerCase().endsWith('.cfg')).sort(([a], [b]) => a.localeCompare(b)).map(async ([fileName]) => {
+             const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(path.join(cfgRoot, fileName)));
+             const text = Buffer.from(bytes).toString('utf8');
+-            const assignment = text.match(/(?:^|[\r\n])\s*(?:preMode|pre_mode|PRE_MODE)\s*(?:=|:)\s*["']?([A-Za-z0-9_-]+)["']?/m);
+-            const pipeline = text.match(/lander_([A-Za-z0-9_-]+)\.ya?ml/i);
+-            void assignment;
+-            void pipeline;
+-            const mockPreModes = ['ip', 'atpg', 'fml', 'jtag', 'mbist-top'];
+-            const stableIndex = Array.from(fileName).reduce((sum, char) => sum + char.charCodeAt(0), 0) % mockPreModes.length;
+-            const preMode = mockPreModes[stableIndex];
++            const preMode = parsePreModeFromModeCfg(text) ?? '';
+             return { name: path.basename(fileName, path.extname(fileName)), preMode };
+           }));
+           currentPanel?.webview.postMessage({ command: 'syncVerificationModesResponse', requestId, modes });
+diff --git a/src/services/modeCfgService.ts b/src/services/modeCfgService.ts
+new file mode 100644
+index 0000000..11a87a7
+--- /dev/null
++++ b/src/services/modeCfgService.ts
+@@ -0,0 +1,20 @@
++/**
++ * Extracts the `-mode` option from a Tcl-style `define_project_info` command.
++ */
++export function parsePreModeFromModeCfg(contents: string): string | undefined {
++  const normalized = contents.replace(/\\[ \t]*(?:\r\n|\r|\n)/g, ' ')
++  const command = normalized.match(
++    /(?:^|[\r\n;])\s*define_project_info\b([^\r\n;]*)/m,
++  )
++
++  if (!command) {
++    return undefined
++  }
++
++  const modeOption = command[1].match(
++    /(?:^|\s)-mode(?:\s+|=\s*)(?:\{([^{}]*)\}|"([^"]*)"|'([^']*)'|([^\s\\;]+))/,
++  )
++  const preMode = modeOption?.slice(1).find((value) => value !== undefined)?.trim()
++
++  return preMode || undefined
++}
+diff --git a/src/services/pipelineRuntimeService.ts b/src/services/pipelineRuntimeService.ts
+index 2b9d6d1..157bde7 100644
+--- a/src/services/pipelineRuntimeService.ts
++++ b/src/services/pipelineRuntimeService.ts
+@@ -1232,7 +1232,7 @@ export class PipelineRuntimeService {
+     console.log('groups:', runParameterRows.map((row) => row.groupNames ?? []));
+     console.log('tcs:', runParameterRows.map((row) => row.tcNames ?? []));
+     console.log('subattrs:', runParameterRows.map((row) => row.subattrNames ?? []));
+-    console.log('extraArg:', runParameterRows.map((row) => row.extraArg ?? ''));
++    console.log('extraArg:', runParameterRows.map((row) => row.extraArg ?? ''));
+     console.log('tools:', runParameterRows.map((row) => row.tools ?? []));
+     console.log('Donau:', runParameterRows.map((row) => row.donau ?? {}));
+     console.log('parameter rows:', runParameterRows);
+diff --git a/src/webview/components/design/Step1_CommonConfig.tsx b/src/webview/components/design/Step1_CommonConfig.tsx
+index b9eb532..b3d23c1 100644
+--- a/src/webview/components/design/Step1_CommonConfig.tsx
++++ b/src/webview/components/design/Step1_CommonConfig.tsx
+@@ -116,14 +116,15 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+       message.warning('请至少选择一个 module。');
+       return;
+     }
+-    if (!activeProject?.domain.key) {
++    const domainKey = activeProject?.domain?.key;
++    if (!domainKey) {
+       message.warning('请在首页为项目配置领域。');
+       return;
+     }
+     setGenerating(true);
+     try {
+       const isAllSelected = moduleOptions.every(val => selectedModules.includes(val.value));
+-      const result = await generateDefaultFlowConfigs(flowKey, activeProject?.domain.key, selectedModules.join('; '), isAllSelected);
++      const result = await generateDefaultFlowConfigs(flowKey, domainKey, selectedModules.join('; '), isAllSelected);
+       if (!result.success) {
+         throw new Error(result.error ?? '转换失败');
+       }
+diff --git a/src/webview/components/verification/Step1_CommonConfig.tsx b/src/webview/components/verification/Step1_CommonConfig.tsx
+index 3650842..9a37289 100644
+--- a/src/webview/components/verification/Step1_CommonConfig.tsx
++++ b/src/webview/components/verification/Step1_CommonConfig.tsx
+@@ -92,13 +92,14 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey }) => {
+       message.warning('请选择 LANDER_ASSISTANT.json。');
+       return;
+     }
+-    if (!activeProject?.domain.key) {
++    const domainKey = activeProject?.domain?.key;
++    if (!domainKey) {
+       message.warning('请在首页为项目配置领域。');
+       return;
+     }
+     setGenerating(true);
+     try {
+-      const result = await generateLanderConfigs(activeProject?.domain.key, stage, landerAssistant.value);
++      const result = await generateLanderConfigs(domainKey, stage, landerAssistant.value);
+       if (!result.success) {
+         throw new Error(result.error ?? 'Verification 配置转换失败');
+       }
+diff --git a/src/webview/components/verification/mode/ModePanel/index.tsx b/src/webview/components/verification/mode/ModePanel/index.tsx
+index 4542336..2970200 100644
+--- a/src/webview/components/verification/mode/ModePanel/index.tsx
++++ b/src/webview/components/verification/mode/ModePanel/index.tsx
+@@ -23,7 +23,7 @@ import { useModeSelection } from './hooks/useModeSelection'
+ import { useModeCrud } from './hooks/useModeCrud'
+ import { useModeRun } from './hooks/useModeRun'
+ 
+-import { createCopyName, parseImportedModeCfg, sameName } from './utils'
++import { createCopyName, sameName } from './utils'
+ import { readSavedParams, updateSavedParamReferences } from '../savedParamUtils'
+ 
+ import {
+@@ -253,7 +253,11 @@ export default function ModePanel({
+     setCfgResult(undefined)
+ 
+     try {
+-      const result = await parseImportedModeCfg(selected.path)
++      const preMode = selected.preMode.trim()
++      const result: ParsedCfgResult = {
++        extractedCandidate: preMode || undefined,
++        preMode: preMode || undefined,
++      }
+ 
+       setCfgResult(result)
+       return selected.modeName
+diff --git a/src/webview/components/verification/mode/ModePanel/utils.ts b/src/webview/components/verification/mode/ModePanel/utils.ts
+index 6fe251b..4d542f6 100644
+--- a/src/webview/components/verification/mode/ModePanel/utils.ts
++++ b/src/webview/components/verification/mode/ModePanel/utils.ts
+@@ -1,4 +1,4 @@
+-import type { ModeConfigItem, ModePanelItem, ParsedCfgResult } from '../types'
++import type { ModeConfigItem, ModePanelItem } from '../types'
+ 
+ /**
+  * 判断当前资源是否为 Mode
+@@ -73,27 +73,3 @@ export const createCopyName = (
+ export const sameName = (left: string, right: string): boolean => {
+   return left.trim().toLowerCase() === right.trim().toLowerCase()
+ }
+-
+-const MOCK_PRE_MODES = ['ip', 'atpg', 'fml', 'jtag', 'mbist-top'] as const
+-
+-const pickMockPreMode = (): string => {
+-  const index = Math.floor(Math.random() * MOCK_PRE_MODES.length)
+-  return MOCK_PRE_MODES[index]
+-}
+-
+-export async function parseImportedModeCfg(
+-  file: File | string,
+-): Promise<ParsedCfgResult> {
+-  void file
+-  return parseModeCfgText('')
+-}
+-
+-export function parseModeCfgText(text: string): ParsedCfgResult {
+-  void text
+-  const preMode = pickMockPreMode()
+-
+-  return {
+-    extractedCandidate: preMode,
+-    preMode,
+-  }
+-}
+diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
+index a06210c..a512ed9 100644
+--- a/src/webview/utils/ipc.ts
++++ b/src/webview/utils/ipc.ts
+@@ -175,11 +175,19 @@ export async function getMavToolVersions(toolName: string): Promise<string[]> {
+ 
+ export async function selectVerificationModeCfg(
+   stage: string,
+-): Promise<{ path: string; fileName: string; modeName: string } | null> {
++): Promise<{ path: string; fileName: string; modeName: string; preMode: string } | null> {
+   const res = await ipcRequest('selectVerificationModeCfg', { stage })
+   if (typeof res.error === 'string') throw new Error(res.error)
+-  return typeof res.path === 'string' && typeof res.fileName === 'string' && typeof res.modeName === 'string'
+-    ? { path: res.path, fileName: res.fileName, modeName: res.modeName }
++  return typeof res.path === 'string'
++    && typeof res.fileName === 'string'
++    && typeof res.modeName === 'string'
++    && typeof res.preMode === 'string'
++    ? {
++        path: res.path,
++        fileName: res.fileName,
++        modeName: res.modeName,
++        preMode: res.preMode,
++      }
+     : null
+ }
+ 
+diff --git a/tests/modeCfgService.spec.ts b/tests/modeCfgService.spec.ts
+new file mode 100644
+index 0000000..ef06570
+--- /dev/null
++++ b/tests/modeCfgService.spec.ts
+@@ -0,0 +1,33 @@
++import { describe, expect, it } from 'vitest'
++import { parsePreModeFromModeCfg } from '../src/services/modeCfgService'
++
++describe('parsePreModeFromModeCfg', () => {
++  it('parses preMode from a continued define_project_info command', () => {
++    const contents = [
++      'define_project_info \\',
++      '  -name xxx \\',
++      '  -mode {preMode} \\',
++      '  -owner dft',
++    ].join('\n')
++
++    expect(parsePreModeFromModeCfg(contents)).toBe('preMode')
++  })
++
++  it('supports CRLF and quoted or unquoted mode values', () => {
++    expect(parsePreModeFromModeCfg(
++      'define_project_info \\\r\n-name xxx \\\r\n-mode "mbist-top"',
++    )).toBe('mbist-top')
++    expect(parsePreModeFromModeCfg(
++      'define_project_info -name xxx -mode atpg',
++    )).toBe('atpg')
++  })
++
++  it('does not parse mode options from another command', () => {
++    const contents = [
++      'set_other_info -mode {wrong}',
++      'define_project_info -name xxx',
++    ].join('\n')
++
++    expect(parsePreModeFromModeCfg(contents)).toBeUndefined()
++  })
++})
