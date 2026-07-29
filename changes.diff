@@ -1,9 +1,132 @@
+diff --git a/package.json b/package.json
+index 4b2c1bd..866247c 100644
+--- a/package.json
++++ b/package.json
+@@ -169,99 +169,6 @@
+           "default": "DFT_IDE",
+           "description": "OBS space name where conversion scripts are stored (leave empty to configure later)."
+         },
+-        "dftIde.obs.scriptPaths": {
+-          "type": "object",
+-          "default": {
+-            "hibist": {
+-              "dir": "EXCEL2CFG/Network",
+-              "files": [
+-                {
+-                  "fileName": "gen_cfg.py",
+-                  "type": 1
+-                },
+-                {
+-                  "fileName": "gen_design_tree_xls2flow.py",
+-                  "type": 1
+-                },
+-                {
+-                  "fileName": "gen_dft_sig_xls2flow.py",
+-                  "type": 1
+-                },
+-                {
+-                  "fileName": "Pre_check.py",
+-                  "type": 1
+-                },
+-                {
+-                  "fileName": "XFlow_read_xls.py",
+-                  "type": 1
+-                },
+-                {
+-                  "fileName": "eco_table.py",
+-                  "type": 1
+-                },
+-                {
+-                  "fileName": "sailor_cfg_demo.json",
+-                  "type": 1
+-                }
+-              ],
+-              "entrance": {
+-                "dir": "scripts/transform",
+-                "fileName": "run_gen_cfg"
+-              }
+-            },
+-            "sailor": {
+-              "dir": "EXCEL2CFG/Network",
+-              "files": [
+-                {
+-                  "fileName": "gen_cfg.py",
+-                  "type": 1
+-                },
+-                {
+-                  "fileName": "gen_design_tree_xls2flow.py",
+-                  "type": 1
+-                },
+-                {
+-                  "fileName": "gen_dft_sig_xls2flow.py",
+-                  "type": 1
+-                },
+-                {
+-                  "fileName": "Pre_check.py",
+-                  "type": 1
+-                },
+-                {
+-                  "fileName": "XFlow_read_xls.py",
+-                  "type": 1
+-                },
+-                {
+-                  "fileName": "eco_table.py",
+-                  "type": 1
+-                },
+-                {
+-                  "fileName": "sailor_cfg_demo.json",
+-                  "type": 1
+-                }
+-              ],
+-              "entrance": {
+-                "dir": "scripts/transform",
+-                "fileName": "run_gen_cfg"
+-              }
+-            },
+-            "verification": {
+-              "dir": "EXCEL2CFG/Network",
+-              "files": [
+-                {
+-                  "fileName": "lander_env",
+-                  "type": 2
+-                }
+-              ],
+-              "entrance": {
+-                "dir": "scripts/transform",
+-                "fileName": "run_gen_lander_cfg"
+-              }
+-            }
+-          },
+-          "description": "Remote file paths of conversion scripts in the script space for each flow."
+-        },
+         "dftIde.obs.ecoScr": {
+           "type": "string",
+           "default": "/ECOSCR",
 diff --git a/scripts/run_flow_hibist b/scripts/run_flow_hibist
-index 3f8238e..81d137d 100644
+index f0fd73b..81d137d 100644
 --- a/scripts/run_flow_hibist
 +++ b/scripts/run_flow_hibist
-@@ -406,7 +406,7 @@ def run_eco(work_path, env, source_file, phase):
-     return status
+@@ -389,16 +389,24 @@ def resolve_history_folder(work_path, env):
+ 
+ def run_eco(work_path, env, source_file, phase):
+     eco_file = work_path / "eco" / ECO_FILE
++    run_id = env.get("DFT_IDE_HISTORY", "manual")
++    marker_task_id = env.get("DFT_IDE_MARKER_TASK_ID") or env.get("DFT_IDE_STEP", "unknown")
++    print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
+     if not eco_file.is_file():
+-        return 0
++        status = 2
++        print(f"[DFT IDE] ECO 入口文件不存在: {eco_file}", file=sys.stderr, flush=True)
++        print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++        return status
+     eco_env = dict(env)
+     eco_env["DFT_IDE_ECO_PHASE"] = phase
+     lines = source_lines(source_file)
+     lines.extend((f"source {csh_quote(str(eco_file))}", "exit $status"))
+-    return run_csh(lines, eco_env)
++    status = run_csh(lines, eco_env)
++    print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++    return status
  
  
 -def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=None, source=None, no_eco=False):
@@ -11,7 +134,7 @@ index 3f8238e..81d137d 100644
      if step not in STEPS:
          fail(f"未知的 {FLOW_LABEL} Step: {step}")
      work_path = resolve_work_path(work_path)
-@@ -415,6 +415,11 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
+@@ -407,6 +415,11 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
      managed = load_managed_env(resolve_env_file(work_path, env_file))
      runtime_env = dict(os.environ)
      runtime_env.update(managed)
@@ -23,7 +146,27 @@ index 3f8238e..81d137d 100644
      runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
      module_name = module or runtime_env.get("DFT_IDE_MODULE") or runtime_env.get("module")
      if not module_name:
-@@ -447,7 +452,7 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
+@@ -416,7 +429,8 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
+         "DFT_IDE_FLOW": FLOW, "DFT_IDE_STEP": step,
+         "DFT_IDE_PROJECT_NAME": project_name,
+         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODULE": module_name,
+-        "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
++        "DFT_IDE_PROJECT_ROOT": str(work_path.parent),
++        "DFT_IDE_STEP_STATUS": runtime_env.get("DFT_IDE_STEP_STATUS", "0"),
+     })
+     source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
+     source_file = Path(source_value).expanduser().resolve() if source_value else None
+@@ -424,6 +438,9 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
+         source_file = work_path / "project.cshrc"
+     if source_file is not None and not source_file.is_file():
+         fail(f"环境初始化文件不存在: {source_file}")
++    eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
++    if eco_only_phase:
++        return run_eco(work_path, runtime_env, source_file, eco_only_phase)
+     cfg_file = Path(cfg).expanduser().resolve() if cfg else work_path / "hibist" / "cfg" / module_name / f"{module_name}.sailor.cfg"
+     log_folder = resolve_history_folder(work_path, runtime_env)
+     dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+@@ -435,7 +452,7 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
              return before_status
  
      lines = source_lines(source_file)
@@ -32,16 +175,18 @@ index 3f8238e..81d137d 100644
      rendered = " ".join(csh_quote(item) for item in command)
      rendered += " |& tee " + csh_quote(str(log_folder / f"{step}.log"))
      lines.append(rendered)
-@@ -527,6 +532,7 @@ def main(argv):
+@@ -515,11 +532,17 @@ def main(argv):
          parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
          parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
          parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
 +        parser.add_argument("--extra-arg", help="Optional arguments inserted after the step CFG")
          parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
-         parser.add_argument("--eco-phase", choices=("before", "after"))
-         parser.add_argument("--step-status", type=int, default=0)
-@@ -536,7 +542,7 @@ def main(argv):
-             os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
++        parser.add_argument("--eco-phase", choices=("before", "after"))
++        parser.add_argument("--step-status", type=int, default=0)
+         args, step_args = parser.parse_known_args(argv[1:])
++        if args.eco_phase:
++            os.environ["DFT_IDE_ECO_ONLY_PHASE"] = args.eco_phase
++            os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
          if step_args[:1] == ["--"]:
              step_args = step_args[1:]
 -        return run_step(args.step, step_args, args.work_path, args.module, args.cfg, args.env_file, args.source, args.no_eco)
@@ -50,11 +195,30 @@ index 3f8238e..81d137d 100644
  
  
 diff --git a/scripts/run_flow_lander b/scripts/run_flow_lander
-index 0233824..79dc92a 100644
+index 9acb6e0..79dc92a 100644
 --- a/scripts/run_flow_lander
 +++ b/scripts/run_flow_lander
-@@ -528,7 +528,7 @@ def run_eco(work_path, env, source_file, phase):
-     return status
+@@ -511,16 +511,24 @@ async def run_submissions(step, submissions, make_lines, runtime_env, max_concur
+ def run_eco(work_path, env, source_file, phase):
+     stage = resolve_stage(env.get("DFT_IDE_STAGE") or env.get("stage"))
+     eco_file = work_path / stage / "eco" / ECO_FILE
++    run_id = env.get("DFT_IDE_HISTORY", "manual")
++    marker_task_id = env.get("DFT_IDE_MARKER_TASK_ID") or env.get("DFT_IDE_STEP", "unknown")
++    print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
+     if not eco_file.is_file():
+-        return 0
++        status = 2
++        print(f"[DFT IDE] ECO 入口文件不存在: {eco_file}", file=sys.stderr, flush=True)
++        print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++        return status
+     eco_env = dict(env)
+     eco_env["DFT_IDE_ECO_PHASE"] = phase
+     lines = source_lines(source_file)
+     lines.extend((f"source {csh_quote(str(eco_file))}", "exit $status"))
+-    return run_csh(lines, eco_env)
++    status = run_csh(lines, eco_env)
++    print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++    return status
  
  
 -def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None, source=None, stage=None, no_eco=False):
@@ -62,7 +226,7 @@ index 0233824..79dc92a 100644
      if step not in STEPS:
          fail(f"未知的 {FLOW_LABEL} Step: {step}")
      work_path = resolve_work_path(work_path)
-@@ -537,6 +537,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -529,6 +537,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
      managed = load_managed_env(resolve_env_file(work_path, env_file))
      runtime_env = dict(os.environ)
      runtime_env.update(managed)
@@ -74,7 +238,38 @@ index 0233824..79dc92a 100644
      runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
      mode_name = mode or runtime_env.get("DFT_IDE_MODE") or runtime_env.get("mode")
      if not mode_name:
-@@ -578,7 +583,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -540,23 +553,27 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+         "DFT_IDE_PROJECT_NAME": project_name,
+         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODE": mode_name,
+         "DFT_IDE_STAGE": stage_name,
+-        "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
++        "DFT_IDE_PROJECT_ROOT": str(work_path.parent),
++        "DFT_IDE_STEP_STATUS": runtime_env.get("DFT_IDE_STEP_STATUS", "0"),
+         "DFT_IDE_LANDER_MODE": "lander",
+     })
+     step_args, explicit_matrix = pop_matrix_options(list(step_args))
+     submissions = build_submissions(explicit_matrix, runtime_env)
+     log_folder = resolve_history_folder(work_path, runtime_env)
+-    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
+     source_file = Path(source_value).expanduser().resolve() if source_value else None
+     if source_file is None and (work_path / "project.cshrc").is_file():
+         source_file = work_path / "project.cshrc"
+     if source_file is not None and not source_file.is_file():
+         fail(f"环境初始化文件不存在: {source_file}")
++    eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
++    if eco_only_phase:
++        return run_eco(work_path, runtime_env, source_file, eco_only_phase)
++    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     cfg_file = (
+         Path(cfg).expanduser().resolve()
+         if cfg
+-        else work_path / stage_name / "verification" / "cfg" / f"{mode_name}.cfg"
++        else work_path / stage_name / "lander_env" / "lander_cfg" / f"{mode_name}.cfg"
+     )
+     if not no_eco:
+         before_status = run_eco(work_path, runtime_env, source_file, "before")
+@@ -566,7 +583,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
  
      def make_lines(labels, parameters):
          lines = source_lines(source_file)
@@ -83,7 +278,7 @@ index 0233824..79dc92a 100644
          for _, _, flag in MATRIX_PARAMETERS:
              if flag in parameters:
                  command.extend((flag, parameters[flag]))
-@@ -672,6 +677,7 @@ def main(argv):
+@@ -660,18 +677,24 @@ def main(argv):
          parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
          parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
          parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
@@ -91,7 +286,16 @@ index 0233824..79dc92a 100644
          parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
          parser.add_argument("--groups", help="Comma-separated ATPG groups")
          parser.add_argument("--tcs", help="Comma-separated ATPG testcases")
-@@ -688,7 +694,7 @@ def main(argv):
+         parser.add_argument("--subattrs", help="Comma-separated ATPG subattrs")
++        parser.add_argument("--eco-phase", choices=("before", "after"))
++        parser.add_argument("--step-status", type=int, default=0)
+         args, step_args = parser.parse_known_args(argv[1:])
++        if args.eco_phase:
++            os.environ["DFT_IDE_ECO_ONLY_PHASE"] = args.eco_phase
++            os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
+         if step_args[:1] == ["--"]:
+             step_args = step_args[1:]
+         for option in ("groups", "tcs", "subattrs"):
              value = getattr(args, option)
              if value is not None:
                  step_args.extend((f"--{option}", value))
@@ -101,11 +305,30 @@ index 0233824..79dc92a 100644
  
  
 diff --git a/scripts/run_flow_lander_atpg b/scripts/run_flow_lander_atpg
-index b94291f..270d6b9 100644
+index c305930..270d6b9 100644
 --- a/scripts/run_flow_lander_atpg
 +++ b/scripts/run_flow_lander_atpg
-@@ -530,7 +530,7 @@ def run_eco(work_path, env, source_file, phase):
-     return status
+@@ -513,16 +513,24 @@ async def run_submissions(step, submissions, make_lines, runtime_env, max_concur
+ def run_eco(work_path, env, source_file, phase):
+     stage = resolve_stage(env.get("DFT_IDE_STAGE") or env.get("stage"))
+     eco_file = work_path / stage / "eco" / ECO_FILE
++    run_id = env.get("DFT_IDE_HISTORY", "manual")
++    marker_task_id = env.get("DFT_IDE_MARKER_TASK_ID") or env.get("DFT_IDE_STEP", "unknown")
++    print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
+     if not eco_file.is_file():
+-        return 0
++        status = 2
++        print(f"[DFT IDE] ECO 入口文件不存在: {eco_file}", file=sys.stderr, flush=True)
++        print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++        return status
+     eco_env = dict(env)
+     eco_env["DFT_IDE_ECO_PHASE"] = phase
+     lines = source_lines(source_file)
+     lines.extend((f"source {csh_quote(str(eco_file))}", "exit $status"))
+-    return run_csh(lines, eco_env)
++    status = run_csh(lines, eco_env)
++    print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++    return status
  
  
 -def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None, source=None, stage=None, no_eco=False):
@@ -113,7 +336,7 @@ index b94291f..270d6b9 100644
      if step not in STEPS:
          fail(f"未知的 {FLOW_LABEL} Step: {step}")
      work_path = resolve_work_path(work_path)
-@@ -539,6 +539,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -531,6 +539,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
      managed = load_managed_env(resolve_env_file(work_path, env_file))
      runtime_env = dict(os.environ)
      runtime_env.update(managed)
@@ -125,7 +348,38 @@ index b94291f..270d6b9 100644
      runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
      mode_name = mode or runtime_env.get("DFT_IDE_MODE") or runtime_env.get("mode")
      if not mode_name:
-@@ -580,7 +585,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -542,23 +555,27 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+         "DFT_IDE_PROJECT_NAME": project_name,
+         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODE": mode_name,
+         "DFT_IDE_STAGE": stage_name,
+-        "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
++        "DFT_IDE_PROJECT_ROOT": str(work_path.parent),
++        "DFT_IDE_STEP_STATUS": runtime_env.get("DFT_IDE_STEP_STATUS", "0"),
+         "DFT_IDE_LANDER_MODE": "atpg",
+     })
+     step_args, explicit_matrix = pop_matrix_options(list(step_args))
+     submissions = build_submissions(explicit_matrix, runtime_env)
+     log_folder = resolve_history_folder(work_path, runtime_env)
+-    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
+     source_file = Path(source_value).expanduser().resolve() if source_value else None
+     if source_file is None and (work_path / "project.cshrc").is_file():
+         source_file = work_path / "project.cshrc"
+     if source_file is not None and not source_file.is_file():
+         fail(f"环境初始化文件不存在: {source_file}")
++    eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
++    if eco_only_phase:
++        return run_eco(work_path, runtime_env, source_file, eco_only_phase)
++    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     cfg_file = (
+         Path(cfg).expanduser().resolve()
+         if cfg
+-        else work_path / stage_name / "verification" / "cfg" / f"{mode_name}.cfg"
++        else work_path / stage_name / "lander_env" / "lander_cfg" / f"{mode_name}.cfg"
+     )
+     if not no_eco:
+         before_status = run_eco(work_path, runtime_env, source_file, "before")
+@@ -568,7 +585,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
  
      def make_lines(labels, parameters):
          lines = source_lines(source_file)
@@ -134,7 +388,7 @@ index b94291f..270d6b9 100644
          for _, _, flag in MATRIX_PARAMETERS:
              if flag in parameters:
                  command.extend((flag, parameters[flag]))
-@@ -674,6 +679,7 @@ def main(argv):
+@@ -662,18 +679,24 @@ def main(argv):
          parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
          parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
          parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
@@ -142,7 +396,16 @@ index b94291f..270d6b9 100644
          parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
          parser.add_argument("--groups", help="Comma-separated ATPG groups")
          parser.add_argument("--tcs", help="Comma-separated ATPG testcases")
-@@ -690,7 +696,7 @@ def main(argv):
+         parser.add_argument("--subattrs", help="Comma-separated ATPG subattrs")
++        parser.add_argument("--eco-phase", choices=("before", "after"))
++        parser.add_argument("--step-status", type=int, default=0)
+         args, step_args = parser.parse_known_args(argv[1:])
++        if args.eco_phase:
++            os.environ["DFT_IDE_ECO_ONLY_PHASE"] = args.eco_phase
++            os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
+         if step_args[:1] == ["--"]:
+             step_args = step_args[1:]
+         for option in ("groups", "tcs", "subattrs"):
              value = getattr(args, option)
              if value is not None:
                  step_args.extend((f"--{option}", value))
@@ -152,11 +415,30 @@ index b94291f..270d6b9 100644
  
  
 diff --git a/scripts/run_flow_lander_fml b/scripts/run_flow_lander_fml
-index 2ec4a10..7ae25f2 100644
+index aa53076..7ae25f2 100644
 --- a/scripts/run_flow_lander_fml
 +++ b/scripts/run_flow_lander_fml
-@@ -529,7 +529,7 @@ def run_eco(work_path, env, source_file, phase):
-     return status
+@@ -512,16 +512,24 @@ async def run_submissions(step, submissions, make_lines, runtime_env, max_concur
+ def run_eco(work_path, env, source_file, phase):
+     stage = resolve_stage(env.get("DFT_IDE_STAGE") or env.get("stage"))
+     eco_file = work_path / stage / "eco" / ECO_FILE
++    run_id = env.get("DFT_IDE_HISTORY", "manual")
++    marker_task_id = env.get("DFT_IDE_MARKER_TASK_ID") or env.get("DFT_IDE_STEP", "unknown")
++    print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
+     if not eco_file.is_file():
+-        return 0
++        status = 2
++        print(f"[DFT IDE] ECO 入口文件不存在: {eco_file}", file=sys.stderr, flush=True)
++        print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++        return status
+     eco_env = dict(env)
+     eco_env["DFT_IDE_ECO_PHASE"] = phase
+     lines = source_lines(source_file)
+     lines.extend((f"source {csh_quote(str(eco_file))}", "exit $status"))
+-    return run_csh(lines, eco_env)
++    status = run_csh(lines, eco_env)
++    print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++    return status
  
  
 -def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None, source=None, stage=None, no_eco=False):
@@ -164,7 +446,7 @@ index 2ec4a10..7ae25f2 100644
      if step not in STEPS:
          fail(f"未知的 {FLOW_LABEL} Step: {step}")
      work_path = resolve_work_path(work_path)
-@@ -538,6 +538,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -530,6 +538,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
      managed = load_managed_env(resolve_env_file(work_path, env_file))
      runtime_env = dict(os.environ)
      runtime_env.update(managed)
@@ -176,7 +458,38 @@ index 2ec4a10..7ae25f2 100644
      runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
      mode_name = mode or runtime_env.get("DFT_IDE_MODE") or runtime_env.get("mode")
      if not mode_name:
-@@ -579,7 +584,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -541,23 +554,27 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+         "DFT_IDE_PROJECT_NAME": project_name,
+         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODE": mode_name,
+         "DFT_IDE_STAGE": stage_name,
+-        "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
++        "DFT_IDE_PROJECT_ROOT": str(work_path.parent),
++        "DFT_IDE_STEP_STATUS": runtime_env.get("DFT_IDE_STEP_STATUS", "0"),
+         "DFT_IDE_LANDER_MODE": "fml",
+     })
+     step_args, explicit_matrix = pop_matrix_options(list(step_args))
+     submissions = build_submissions(explicit_matrix, runtime_env)
+     log_folder = resolve_history_folder(work_path, runtime_env)
+-    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
+     source_file = Path(source_value).expanduser().resolve() if source_value else None
+     if source_file is None and (work_path / "project.cshrc").is_file():
+         source_file = work_path / "project.cshrc"
+     if source_file is not None and not source_file.is_file():
+         fail(f"环境初始化文件不存在: {source_file}")
++    eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
++    if eco_only_phase:
++        return run_eco(work_path, runtime_env, source_file, eco_only_phase)
++    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     cfg_file = (
+         Path(cfg).expanduser().resolve()
+         if cfg
+-        else work_path / stage_name / "verification" / "cfg" / f"{mode_name}.cfg"
++        else work_path / stage_name / "lander_env" / "lander_cfg" / f"{mode_name}.cfg"
+     )
+     if not no_eco:
+         before_status = run_eco(work_path, runtime_env, source_file, "before")
+@@ -567,7 +584,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
  
      def make_lines(labels, parameters):
          lines = source_lines(source_file)
@@ -185,7 +498,7 @@ index 2ec4a10..7ae25f2 100644
          for _, _, flag in MATRIX_PARAMETERS:
              if flag in parameters:
                  command.extend((flag, parameters[flag]))
-@@ -673,6 +678,7 @@ def main(argv):
+@@ -661,18 +678,24 @@ def main(argv):
          parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
          parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
          parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
@@ -193,7 +506,16 @@ index 2ec4a10..7ae25f2 100644
          parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
          parser.add_argument("--groups", help="Comma-separated ATPG groups")
          parser.add_argument("--tcs", help="Comma-separated ATPG testcases")
-@@ -689,7 +695,7 @@ def main(argv):
+         parser.add_argument("--subattrs", help="Comma-separated ATPG subattrs")
++        parser.add_argument("--eco-phase", choices=("before", "after"))
++        parser.add_argument("--step-status", type=int, default=0)
+         args, step_args = parser.parse_known_args(argv[1:])
++        if args.eco_phase:
++            os.environ["DFT_IDE_ECO_ONLY_PHASE"] = args.eco_phase
++            os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
+         if step_args[:1] == ["--"]:
+             step_args = step_args[1:]
+         for option in ("groups", "tcs", "subattrs"):
              value = getattr(args, option)
              if value is not None:
                  step_args.extend((f"--{option}", value))
@@ -203,11 +525,30 @@ index 2ec4a10..7ae25f2 100644
  
  
 diff --git a/scripts/run_flow_lander_ip b/scripts/run_flow_lander_ip
-index 0661c43..3520851 100644
+index 8e17424..3520851 100644
 --- a/scripts/run_flow_lander_ip
 +++ b/scripts/run_flow_lander_ip
-@@ -529,7 +529,7 @@ def run_eco(work_path, env, source_file, phase):
-     return status
+@@ -512,16 +512,24 @@ async def run_submissions(step, submissions, make_lines, runtime_env, max_concur
+ def run_eco(work_path, env, source_file, phase):
+     stage = resolve_stage(env.get("DFT_IDE_STAGE") or env.get("stage"))
+     eco_file = work_path / stage / "eco" / ECO_FILE
++    run_id = env.get("DFT_IDE_HISTORY", "manual")
++    marker_task_id = env.get("DFT_IDE_MARKER_TASK_ID") or env.get("DFT_IDE_STEP", "unknown")
++    print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
+     if not eco_file.is_file():
+-        return 0
++        status = 2
++        print(f"[DFT IDE] ECO 入口文件不存在: {eco_file}", file=sys.stderr, flush=True)
++        print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++        return status
+     eco_env = dict(env)
+     eco_env["DFT_IDE_ECO_PHASE"] = phase
+     lines = source_lines(source_file)
+     lines.extend((f"source {csh_quote(str(eco_file))}", "exit $status"))
+-    return run_csh(lines, eco_env)
++    status = run_csh(lines, eco_env)
++    print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++    return status
  
  
 -def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None, source=None, stage=None, no_eco=False):
@@ -215,7 +556,7 @@ index 0661c43..3520851 100644
      if step not in STEPS:
          fail(f"未知的 {FLOW_LABEL} Step: {step}")
      work_path = resolve_work_path(work_path)
-@@ -538,6 +538,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -530,6 +538,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
      managed = load_managed_env(resolve_env_file(work_path, env_file))
      runtime_env = dict(os.environ)
      runtime_env.update(managed)
@@ -227,7 +568,38 @@ index 0661c43..3520851 100644
      runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
      mode_name = mode or runtime_env.get("DFT_IDE_MODE") or runtime_env.get("mode")
      if not mode_name:
-@@ -579,7 +584,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -541,23 +554,27 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+         "DFT_IDE_PROJECT_NAME": project_name,
+         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODE": mode_name,
+         "DFT_IDE_STAGE": stage_name,
+-        "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
++        "DFT_IDE_PROJECT_ROOT": str(work_path.parent),
++        "DFT_IDE_STEP_STATUS": runtime_env.get("DFT_IDE_STEP_STATUS", "0"),
+         "DFT_IDE_LANDER_MODE": "ip",
+     })
+     step_args, explicit_matrix = pop_matrix_options(list(step_args))
+     submissions = build_submissions(explicit_matrix, runtime_env)
+     log_folder = resolve_history_folder(work_path, runtime_env)
+-    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
+     source_file = Path(source_value).expanduser().resolve() if source_value else None
+     if source_file is None and (work_path / "project.cshrc").is_file():
+         source_file = work_path / "project.cshrc"
+     if source_file is not None and not source_file.is_file():
+         fail(f"环境初始化文件不存在: {source_file}")
++    eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
++    if eco_only_phase:
++        return run_eco(work_path, runtime_env, source_file, eco_only_phase)
++    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     cfg_file = (
+         Path(cfg).expanduser().resolve()
+         if cfg
+-        else work_path / stage_name / "verification" / "cfg" / f"{mode_name}.cfg"
++        else work_path / stage_name / "lander_env" / "lander_cfg" / f"{mode_name}.cfg"
+     )
+     if not no_eco:
+         before_status = run_eco(work_path, runtime_env, source_file, "before")
+@@ -567,7 +584,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
  
      def make_lines(labels, parameters):
          lines = source_lines(source_file)
@@ -236,7 +608,7 @@ index 0661c43..3520851 100644
          for _, _, flag in MATRIX_PARAMETERS:
              if flag in parameters:
                  command.extend((flag, parameters[flag]))
-@@ -673,6 +678,7 @@ def main(argv):
+@@ -661,18 +678,24 @@ def main(argv):
          parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
          parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
          parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
@@ -244,7 +616,16 @@ index 0661c43..3520851 100644
          parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
          parser.add_argument("--groups", help="Comma-separated ATPG groups")
          parser.add_argument("--tcs", help="Comma-separated ATPG testcases")
-@@ -689,7 +695,7 @@ def main(argv):
+         parser.add_argument("--subattrs", help="Comma-separated ATPG subattrs")
++        parser.add_argument("--eco-phase", choices=("before", "after"))
++        parser.add_argument("--step-status", type=int, default=0)
+         args, step_args = parser.parse_known_args(argv[1:])
++        if args.eco_phase:
++            os.environ["DFT_IDE_ECO_ONLY_PHASE"] = args.eco_phase
++            os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
+         if step_args[:1] == ["--"]:
+             step_args = step_args[1:]
+         for option in ("groups", "tcs", "subattrs"):
              value = getattr(args, option)
              if value is not None:
                  step_args.extend((f"--{option}", value))
@@ -254,11 +635,30 @@ index 0661c43..3520851 100644
  
  
 diff --git a/scripts/run_flow_lander_jtag b/scripts/run_flow_lander_jtag
-index 4f39b59..bbe4229 100644
+index 1e4a957..bbe4229 100644
 --- a/scripts/run_flow_lander_jtag
 +++ b/scripts/run_flow_lander_jtag
-@@ -529,7 +529,7 @@ def run_eco(work_path, env, source_file, phase):
-     return status
+@@ -512,16 +512,24 @@ async def run_submissions(step, submissions, make_lines, runtime_env, max_concur
+ def run_eco(work_path, env, source_file, phase):
+     stage = resolve_stage(env.get("DFT_IDE_STAGE") or env.get("stage"))
+     eco_file = work_path / stage / "eco" / ECO_FILE
++    run_id = env.get("DFT_IDE_HISTORY", "manual")
++    marker_task_id = env.get("DFT_IDE_MARKER_TASK_ID") or env.get("DFT_IDE_STEP", "unknown")
++    print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
+     if not eco_file.is_file():
+-        return 0
++        status = 2
++        print(f"[DFT IDE] ECO 入口文件不存在: {eco_file}", file=sys.stderr, flush=True)
++        print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++        return status
+     eco_env = dict(env)
+     eco_env["DFT_IDE_ECO_PHASE"] = phase
+     lines = source_lines(source_file)
+     lines.extend((f"source {csh_quote(str(eco_file))}", "exit $status"))
+-    return run_csh(lines, eco_env)
++    status = run_csh(lines, eco_env)
++    print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++    return status
  
  
 -def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None, source=None, stage=None, no_eco=False):
@@ -266,7 +666,7 @@ index 4f39b59..bbe4229 100644
      if step not in STEPS:
          fail(f"未知的 {FLOW_LABEL} Step: {step}")
      work_path = resolve_work_path(work_path)
-@@ -538,6 +538,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -530,6 +538,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
      managed = load_managed_env(resolve_env_file(work_path, env_file))
      runtime_env = dict(os.environ)
      runtime_env.update(managed)
@@ -278,7 +678,38 @@ index 4f39b59..bbe4229 100644
      runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
      mode_name = mode or runtime_env.get("DFT_IDE_MODE") or runtime_env.get("mode")
      if not mode_name:
-@@ -579,7 +584,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -541,23 +554,27 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+         "DFT_IDE_PROJECT_NAME": project_name,
+         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODE": mode_name,
+         "DFT_IDE_STAGE": stage_name,
+-        "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
++        "DFT_IDE_PROJECT_ROOT": str(work_path.parent),
++        "DFT_IDE_STEP_STATUS": runtime_env.get("DFT_IDE_STEP_STATUS", "0"),
+         "DFT_IDE_LANDER_MODE": "jtag",
+     })
+     step_args, explicit_matrix = pop_matrix_options(list(step_args))
+     submissions = build_submissions(explicit_matrix, runtime_env)
+     log_folder = resolve_history_folder(work_path, runtime_env)
+-    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
+     source_file = Path(source_value).expanduser().resolve() if source_value else None
+     if source_file is None and (work_path / "project.cshrc").is_file():
+         source_file = work_path / "project.cshrc"
+     if source_file is not None and not source_file.is_file():
+         fail(f"环境初始化文件不存在: {source_file}")
++    eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
++    if eco_only_phase:
++        return run_eco(work_path, runtime_env, source_file, eco_only_phase)
++    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     cfg_file = (
+         Path(cfg).expanduser().resolve()
+         if cfg
+-        else work_path / stage_name / "verification" / "cfg" / f"{mode_name}.cfg"
++        else work_path / stage_name / "lander_env" / "lander_cfg" / f"{mode_name}.cfg"
+     )
+     if not no_eco:
+         before_status = run_eco(work_path, runtime_env, source_file, "before")
+@@ -567,7 +584,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
  
      def make_lines(labels, parameters):
          lines = source_lines(source_file)
@@ -287,7 +718,7 @@ index 4f39b59..bbe4229 100644
          for _, _, flag in MATRIX_PARAMETERS:
              if flag in parameters:
                  command.extend((flag, parameters[flag]))
-@@ -673,6 +678,7 @@ def main(argv):
+@@ -661,18 +678,24 @@ def main(argv):
          parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
          parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
          parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
@@ -295,7 +726,16 @@ index 4f39b59..bbe4229 100644
          parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
          parser.add_argument("--groups", help="Comma-separated ATPG groups")
          parser.add_argument("--tcs", help="Comma-separated ATPG testcases")
-@@ -689,7 +695,7 @@ def main(argv):
+         parser.add_argument("--subattrs", help="Comma-separated ATPG subattrs")
++        parser.add_argument("--eco-phase", choices=("before", "after"))
++        parser.add_argument("--step-status", type=int, default=0)
+         args, step_args = parser.parse_known_args(argv[1:])
++        if args.eco_phase:
++            os.environ["DFT_IDE_ECO_ONLY_PHASE"] = args.eco_phase
++            os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
+         if step_args[:1] == ["--"]:
+             step_args = step_args[1:]
+         for option in ("groups", "tcs", "subattrs"):
              value = getattr(args, option)
              if value is not None:
                  step_args.extend((f"--{option}", value))
@@ -305,11 +745,30 @@ index 4f39b59..bbe4229 100644
  
  
 diff --git a/scripts/run_flow_lander_mbist-sub b/scripts/run_flow_lander_mbist-sub
-index 97b8dce..187c68c 100644
+index 0194939..187c68c 100644
 --- a/scripts/run_flow_lander_mbist-sub
 +++ b/scripts/run_flow_lander_mbist-sub
-@@ -530,7 +530,7 @@ def run_eco(work_path, env, source_file, phase):
-     return status
+@@ -513,16 +513,24 @@ async def run_submissions(step, submissions, make_lines, runtime_env, max_concur
+ def run_eco(work_path, env, source_file, phase):
+     stage = resolve_stage(env.get("DFT_IDE_STAGE") or env.get("stage"))
+     eco_file = work_path / stage / "eco" / ECO_FILE
++    run_id = env.get("DFT_IDE_HISTORY", "manual")
++    marker_task_id = env.get("DFT_IDE_MARKER_TASK_ID") or env.get("DFT_IDE_STEP", "unknown")
++    print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
+     if not eco_file.is_file():
+-        return 0
++        status = 2
++        print(f"[DFT IDE] ECO 入口文件不存在: {eco_file}", file=sys.stderr, flush=True)
++        print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++        return status
+     eco_env = dict(env)
+     eco_env["DFT_IDE_ECO_PHASE"] = phase
+     lines = source_lines(source_file)
+     lines.extend((f"source {csh_quote(str(eco_file))}", "exit $status"))
+-    return run_csh(lines, eco_env)
++    status = run_csh(lines, eco_env)
++    print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++    return status
  
  
 -def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None, source=None, stage=None, no_eco=False):
@@ -317,7 +776,7 @@ index 97b8dce..187c68c 100644
      if step not in STEPS:
          fail(f"未知的 {FLOW_LABEL} Step: {step}")
      work_path = resolve_work_path(work_path)
-@@ -539,6 +539,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -531,6 +539,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
      managed = load_managed_env(resolve_env_file(work_path, env_file))
      runtime_env = dict(os.environ)
      runtime_env.update(managed)
@@ -329,7 +788,38 @@ index 97b8dce..187c68c 100644
      runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
      mode_name = mode or runtime_env.get("DFT_IDE_MODE") or runtime_env.get("mode")
      if not mode_name:
-@@ -580,7 +585,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -542,23 +555,27 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+         "DFT_IDE_PROJECT_NAME": project_name,
+         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODE": mode_name,
+         "DFT_IDE_STAGE": stage_name,
+-        "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
++        "DFT_IDE_PROJECT_ROOT": str(work_path.parent),
++        "DFT_IDE_STEP_STATUS": runtime_env.get("DFT_IDE_STEP_STATUS", "0"),
+         "DFT_IDE_LANDER_MODE": "mbist-sub",
+     })
+     step_args, explicit_matrix = pop_matrix_options(list(step_args))
+     submissions = build_submissions(explicit_matrix, runtime_env)
+     log_folder = resolve_history_folder(work_path, runtime_env)
+-    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
+     source_file = Path(source_value).expanduser().resolve() if source_value else None
+     if source_file is None and (work_path / "project.cshrc").is_file():
+         source_file = work_path / "project.cshrc"
+     if source_file is not None and not source_file.is_file():
+         fail(f"环境初始化文件不存在: {source_file}")
++    eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
++    if eco_only_phase:
++        return run_eco(work_path, runtime_env, source_file, eco_only_phase)
++    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     cfg_file = (
+         Path(cfg).expanduser().resolve()
+         if cfg
+-        else work_path / stage_name / "verification" / "cfg" / f"{mode_name}.cfg"
++        else work_path / stage_name / "lander_env" / "lander_cfg" / f"{mode_name}.cfg"
+     )
+     if not no_eco:
+         before_status = run_eco(work_path, runtime_env, source_file, "before")
+@@ -568,7 +585,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
  
      def make_lines(labels, parameters):
          lines = source_lines(source_file)
@@ -338,7 +828,7 @@ index 97b8dce..187c68c 100644
          for _, _, flag in MATRIX_PARAMETERS:
              if flag in parameters:
                  command.extend((flag, parameters[flag]))
-@@ -674,6 +679,7 @@ def main(argv):
+@@ -662,18 +679,24 @@ def main(argv):
          parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
          parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
          parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
@@ -346,7 +836,16 @@ index 97b8dce..187c68c 100644
          parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
          parser.add_argument("--groups", help="Comma-separated ATPG groups")
          parser.add_argument("--tcs", help="Comma-separated ATPG testcases")
-@@ -690,7 +696,7 @@ def main(argv):
+         parser.add_argument("--subattrs", help="Comma-separated ATPG subattrs")
++        parser.add_argument("--eco-phase", choices=("before", "after"))
++        parser.add_argument("--step-status", type=int, default=0)
+         args, step_args = parser.parse_known_args(argv[1:])
++        if args.eco_phase:
++            os.environ["DFT_IDE_ECO_ONLY_PHASE"] = args.eco_phase
++            os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
+         if step_args[:1] == ["--"]:
+             step_args = step_args[1:]
+         for option in ("groups", "tcs", "subattrs"):
              value = getattr(args, option)
              if value is not None:
                  step_args.extend((f"--{option}", value))
@@ -356,11 +855,30 @@ index 97b8dce..187c68c 100644
  
  
 diff --git a/scripts/run_flow_lander_mbist-top b/scripts/run_flow_lander_mbist-top
-index ce731e9..971d96d 100644
+index 3565b29..971d96d 100644
 --- a/scripts/run_flow_lander_mbist-top
 +++ b/scripts/run_flow_lander_mbist-top
-@@ -531,7 +531,7 @@ def run_eco(work_path, env, source_file, phase):
-     return status
+@@ -514,16 +514,24 @@ async def run_submissions(step, submissions, make_lines, runtime_env, max_concur
+ def run_eco(work_path, env, source_file, phase):
+     stage = resolve_stage(env.get("DFT_IDE_STAGE") or env.get("stage"))
+     eco_file = work_path / stage / "eco" / ECO_FILE
++    run_id = env.get("DFT_IDE_HISTORY", "manual")
++    marker_task_id = env.get("DFT_IDE_MARKER_TASK_ID") or env.get("DFT_IDE_STEP", "unknown")
++    print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
+     if not eco_file.is_file():
+-        return 0
++        status = 2
++        print(f"[DFT IDE] ECO 入口文件不存在: {eco_file}", file=sys.stderr, flush=True)
++        print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++        return status
+     eco_env = dict(env)
+     eco_env["DFT_IDE_ECO_PHASE"] = phase
+     lines = source_lines(source_file)
+     lines.extend((f"source {csh_quote(str(eco_file))}", "exit $status"))
+-    return run_csh(lines, eco_env)
++    status = run_csh(lines, eco_env)
++    print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++    return status
  
  
 -def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None, source=None, stage=None, no_eco=False):
@@ -368,7 +886,7 @@ index ce731e9..971d96d 100644
      if step not in STEPS:
          fail(f"未知的 {FLOW_LABEL} Step: {step}")
      work_path = resolve_work_path(work_path)
-@@ -540,6 +540,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -532,6 +540,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
      managed = load_managed_env(resolve_env_file(work_path, env_file))
      runtime_env = dict(os.environ)
      runtime_env.update(managed)
@@ -380,7 +898,38 @@ index ce731e9..971d96d 100644
      runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
      mode_name = mode or runtime_env.get("DFT_IDE_MODE") or runtime_env.get("mode")
      if not mode_name:
-@@ -581,7 +586,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -543,23 +556,27 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+         "DFT_IDE_PROJECT_NAME": project_name,
+         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODE": mode_name,
+         "DFT_IDE_STAGE": stage_name,
+-        "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
++        "DFT_IDE_PROJECT_ROOT": str(work_path.parent),
++        "DFT_IDE_STEP_STATUS": runtime_env.get("DFT_IDE_STEP_STATUS", "0"),
+         "DFT_IDE_LANDER_MODE": "mbist-top",
+     })
+     step_args, explicit_matrix = pop_matrix_options(list(step_args))
+     submissions = build_submissions(explicit_matrix, runtime_env)
+     log_folder = resolve_history_folder(work_path, runtime_env)
+-    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
+     source_file = Path(source_value).expanduser().resolve() if source_value else None
+     if source_file is None and (work_path / "project.cshrc").is_file():
+         source_file = work_path / "project.cshrc"
+     if source_file is not None and not source_file.is_file():
+         fail(f"环境初始化文件不存在: {source_file}")
++    eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
++    if eco_only_phase:
++        return run_eco(work_path, runtime_env, source_file, eco_only_phase)
++    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     cfg_file = (
+         Path(cfg).expanduser().resolve()
+         if cfg
+-        else work_path / stage_name / "verification" / "cfg" / f"{mode_name}.cfg"
++        else work_path / stage_name / "lander_env" / "lander_cfg" / f"{mode_name}.cfg"
+     )
+     if not no_eco:
+         before_status = run_eco(work_path, runtime_env, source_file, "before")
+@@ -569,7 +586,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
  
      def make_lines(labels, parameters):
          lines = source_lines(source_file)
@@ -389,7 +938,7 @@ index ce731e9..971d96d 100644
          for _, _, flag in MATRIX_PARAMETERS:
              if flag in parameters:
                  command.extend((flag, parameters[flag]))
-@@ -675,6 +680,7 @@ def main(argv):
+@@ -663,18 +680,24 @@ def main(argv):
          parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
          parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
          parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
@@ -397,7 +946,16 @@ index ce731e9..971d96d 100644
          parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
          parser.add_argument("--groups", help="Comma-separated ATPG groups")
          parser.add_argument("--tcs", help="Comma-separated ATPG testcases")
-@@ -691,7 +697,7 @@ def main(argv):
+         parser.add_argument("--subattrs", help="Comma-separated ATPG subattrs")
++        parser.add_argument("--eco-phase", choices=("before", "after"))
++        parser.add_argument("--step-status", type=int, default=0)
+         args, step_args = parser.parse_known_args(argv[1:])
++        if args.eco_phase:
++            os.environ["DFT_IDE_ECO_ONLY_PHASE"] = args.eco_phase
++            os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
+         if step_args[:1] == ["--"]:
+             step_args = step_args[1:]
+         for option in ("groups", "tcs", "subattrs"):
              value = getattr(args, option)
              if value is not None:
                  step_args.extend((f"--{option}", value))
@@ -407,11 +965,30 @@ index ce731e9..971d96d 100644
  
  
 diff --git a/scripts/run_flow_lander_mbist-top_repair b/scripts/run_flow_lander_mbist-top_repair
-index 3728e63..e0395ce 100644
+index 69bbb0e..e0395ce 100644
 --- a/scripts/run_flow_lander_mbist-top_repair
 +++ b/scripts/run_flow_lander_mbist-top_repair
-@@ -530,7 +530,7 @@ def run_eco(work_path, env, source_file, phase):
-     return status
+@@ -513,16 +513,24 @@ async def run_submissions(step, submissions, make_lines, runtime_env, max_concur
+ def run_eco(work_path, env, source_file, phase):
+     stage = resolve_stage(env.get("DFT_IDE_STAGE") or env.get("stage"))
+     eco_file = work_path / stage / "eco" / ECO_FILE
++    run_id = env.get("DFT_IDE_HISTORY", "manual")
++    marker_task_id = env.get("DFT_IDE_MARKER_TASK_ID") or env.get("DFT_IDE_STEP", "unknown")
++    print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
+     if not eco_file.is_file():
+-        return 0
++        status = 2
++        print(f"[DFT IDE] ECO 入口文件不存在: {eco_file}", file=sys.stderr, flush=True)
++        print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++        return status
+     eco_env = dict(env)
+     eco_env["DFT_IDE_ECO_PHASE"] = phase
+     lines = source_lines(source_file)
+     lines.extend((f"source {csh_quote(str(eco_file))}", "exit $status"))
+-    return run_csh(lines, eco_env)
++    status = run_csh(lines, eco_env)
++    print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++    return status
  
  
 -def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None, source=None, stage=None, no_eco=False):
@@ -419,7 +996,7 @@ index 3728e63..e0395ce 100644
      if step not in STEPS:
          fail(f"未知的 {FLOW_LABEL} Step: {step}")
      work_path = resolve_work_path(work_path)
-@@ -539,6 +539,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -531,6 +539,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
      managed = load_managed_env(resolve_env_file(work_path, env_file))
      runtime_env = dict(os.environ)
      runtime_env.update(managed)
@@ -431,7 +1008,38 @@ index 3728e63..e0395ce 100644
      runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
      mode_name = mode or runtime_env.get("DFT_IDE_MODE") or runtime_env.get("mode")
      if not mode_name:
-@@ -580,7 +585,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -542,23 +555,27 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+         "DFT_IDE_PROJECT_NAME": project_name,
+         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODE": mode_name,
+         "DFT_IDE_STAGE": stage_name,
+-        "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
++        "DFT_IDE_PROJECT_ROOT": str(work_path.parent),
++        "DFT_IDE_STEP_STATUS": runtime_env.get("DFT_IDE_STEP_STATUS", "0"),
+         "DFT_IDE_LANDER_MODE": "mbist-top_repair",
+     })
+     step_args, explicit_matrix = pop_matrix_options(list(step_args))
+     submissions = build_submissions(explicit_matrix, runtime_env)
+     log_folder = resolve_history_folder(work_path, runtime_env)
+-    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
+     source_file = Path(source_value).expanduser().resolve() if source_value else None
+     if source_file is None and (work_path / "project.cshrc").is_file():
+         source_file = work_path / "project.cshrc"
+     if source_file is not None and not source_file.is_file():
+         fail(f"环境初始化文件不存在: {source_file}")
++    eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
++    if eco_only_phase:
++        return run_eco(work_path, runtime_env, source_file, eco_only_phase)
++    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     cfg_file = (
+         Path(cfg).expanduser().resolve()
+         if cfg
+-        else work_path / stage_name / "verification" / "cfg" / f"{mode_name}.cfg"
++        else work_path / stage_name / "lander_env" / "lander_cfg" / f"{mode_name}.cfg"
+     )
+     if not no_eco:
+         before_status = run_eco(work_path, runtime_env, source_file, "before")
+@@ -568,7 +585,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
  
      def make_lines(labels, parameters):
          lines = source_lines(source_file)
@@ -440,7 +1048,7 @@ index 3728e63..e0395ce 100644
          for _, _, flag in MATRIX_PARAMETERS:
              if flag in parameters:
                  command.extend((flag, parameters[flag]))
-@@ -674,6 +679,7 @@ def main(argv):
+@@ -662,18 +679,24 @@ def main(argv):
          parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
          parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
          parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
@@ -448,7 +1056,16 @@ index 3728e63..e0395ce 100644
          parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
          parser.add_argument("--groups", help="Comma-separated ATPG groups")
          parser.add_argument("--tcs", help="Comma-separated ATPG testcases")
-@@ -690,7 +696,7 @@ def main(argv):
+         parser.add_argument("--subattrs", help="Comma-separated ATPG subattrs")
++        parser.add_argument("--eco-phase", choices=("before", "after"))
++        parser.add_argument("--step-status", type=int, default=0)
+         args, step_args = parser.parse_known_args(argv[1:])
++        if args.eco_phase:
++            os.environ["DFT_IDE_ECO_ONLY_PHASE"] = args.eco_phase
++            os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
+         if step_args[:1] == ["--"]:
+             step_args = step_args[1:]
+         for option in ("groups", "tcs", "subattrs"):
              value = getattr(args, option)
              if value is not None:
                  step_args.extend((f"--{option}", value))
@@ -458,11 +1075,30 @@ index 3728e63..e0395ce 100644
  
  
 diff --git a/scripts/run_flow_lander_merge_3d b/scripts/run_flow_lander_merge_3d
-index 38427dd..8b21abb 100644
+index b8ef35d..8b21abb 100644
 --- a/scripts/run_flow_lander_merge_3d
 +++ b/scripts/run_flow_lander_merge_3d
-@@ -528,7 +528,7 @@ def run_eco(work_path, env, source_file, phase):
-     return status
+@@ -511,16 +511,24 @@ async def run_submissions(step, submissions, make_lines, runtime_env, max_concur
+ def run_eco(work_path, env, source_file, phase):
+     stage = resolve_stage(env.get("DFT_IDE_STAGE") or env.get("stage"))
+     eco_file = work_path / stage / "eco" / ECO_FILE
++    run_id = env.get("DFT_IDE_HISTORY", "manual")
++    marker_task_id = env.get("DFT_IDE_MARKER_TASK_ID") or env.get("DFT_IDE_STEP", "unknown")
++    print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
+     if not eco_file.is_file():
+-        return 0
++        status = 2
++        print(f"[DFT IDE] ECO 入口文件不存在: {eco_file}", file=sys.stderr, flush=True)
++        print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++        return status
+     eco_env = dict(env)
+     eco_env["DFT_IDE_ECO_PHASE"] = phase
+     lines = source_lines(source_file)
+     lines.extend((f"source {csh_quote(str(eco_file))}", "exit $status"))
+-    return run_csh(lines, eco_env)
++    status = run_csh(lines, eco_env)
++    print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++    return status
  
  
 -def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None, source=None, stage=None, no_eco=False):
@@ -470,7 +1106,7 @@ index 38427dd..8b21abb 100644
      if step not in STEPS:
          fail(f"未知的 {FLOW_LABEL} Step: {step}")
      work_path = resolve_work_path(work_path)
-@@ -537,6 +537,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -529,6 +537,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
      managed = load_managed_env(resolve_env_file(work_path, env_file))
      runtime_env = dict(os.environ)
      runtime_env.update(managed)
@@ -482,7 +1118,38 @@ index 38427dd..8b21abb 100644
      runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
      mode_name = mode or runtime_env.get("DFT_IDE_MODE") or runtime_env.get("mode")
      if not mode_name:
-@@ -578,7 +583,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -540,23 +553,27 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+         "DFT_IDE_PROJECT_NAME": project_name,
+         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODE": mode_name,
+         "DFT_IDE_STAGE": stage_name,
+-        "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
++        "DFT_IDE_PROJECT_ROOT": str(work_path.parent),
++        "DFT_IDE_STEP_STATUS": runtime_env.get("DFT_IDE_STEP_STATUS", "0"),
+         "DFT_IDE_LANDER_MODE": "merge_3d",
+     })
+     step_args, explicit_matrix = pop_matrix_options(list(step_args))
+     submissions = build_submissions(explicit_matrix, runtime_env)
+     log_folder = resolve_history_folder(work_path, runtime_env)
+-    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
+     source_file = Path(source_value).expanduser().resolve() if source_value else None
+     if source_file is None and (work_path / "project.cshrc").is_file():
+         source_file = work_path / "project.cshrc"
+     if source_file is not None and not source_file.is_file():
+         fail(f"环境初始化文件不存在: {source_file}")
++    eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
++    if eco_only_phase:
++        return run_eco(work_path, runtime_env, source_file, eco_only_phase)
++    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     cfg_file = (
+         Path(cfg).expanduser().resolve()
+         if cfg
+-        else work_path / stage_name / "verification" / "cfg" / f"{mode_name}.cfg"
++        else work_path / stage_name / "lander_env" / "lander_cfg" / f"{mode_name}.cfg"
+     )
+     if not no_eco:
+         before_status = run_eco(work_path, runtime_env, source_file, "before")
+@@ -566,7 +583,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
  
      def make_lines(labels, parameters):
          lines = source_lines(source_file)
@@ -491,7 +1158,7 @@ index 38427dd..8b21abb 100644
          for _, _, flag in MATRIX_PARAMETERS:
              if flag in parameters:
                  command.extend((flag, parameters[flag]))
-@@ -672,6 +677,7 @@ def main(argv):
+@@ -660,18 +677,24 @@ def main(argv):
          parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
          parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
          parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
@@ -499,7 +1166,16 @@ index 38427dd..8b21abb 100644
          parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
          parser.add_argument("--groups", help="Comma-separated ATPG groups")
          parser.add_argument("--tcs", help="Comma-separated ATPG testcases")
-@@ -688,7 +694,7 @@ def main(argv):
+         parser.add_argument("--subattrs", help="Comma-separated ATPG subattrs")
++        parser.add_argument("--eco-phase", choices=("before", "after"))
++        parser.add_argument("--step-status", type=int, default=0)
+         args, step_args = parser.parse_known_args(argv[1:])
++        if args.eco_phase:
++            os.environ["DFT_IDE_ECO_ONLY_PHASE"] = args.eco_phase
++            os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
+         if step_args[:1] == ["--"]:
+             step_args = step_args[1:]
+         for option in ("groups", "tcs", "subattrs"):
              value = getattr(args, option)
              if value is not None:
                  step_args.extend((f"--{option}", value))
@@ -509,11 +1185,30 @@ index 38427dd..8b21abb 100644
  
  
 diff --git a/scripts/run_flow_lander_prune b/scripts/run_flow_lander_prune
-index 267ac17..3041fa9 100644
+index 5bf3b7a..3041fa9 100644
 --- a/scripts/run_flow_lander_prune
 +++ b/scripts/run_flow_lander_prune
-@@ -527,7 +527,7 @@ def run_eco(work_path, env, source_file, phase):
-     return status
+@@ -510,16 +510,24 @@ async def run_submissions(step, submissions, make_lines, runtime_env, max_concur
+ def run_eco(work_path, env, source_file, phase):
+     stage = resolve_stage(env.get("DFT_IDE_STAGE") or env.get("stage"))
+     eco_file = work_path / stage / "eco" / ECO_FILE
++    run_id = env.get("DFT_IDE_HISTORY", "manual")
++    marker_task_id = env.get("DFT_IDE_MARKER_TASK_ID") or env.get("DFT_IDE_STEP", "unknown")
++    print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
+     if not eco_file.is_file():
+-        return 0
++        status = 2
++        print(f"[DFT IDE] ECO 入口文件不存在: {eco_file}", file=sys.stderr, flush=True)
++        print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++        return status
+     eco_env = dict(env)
+     eco_env["DFT_IDE_ECO_PHASE"] = phase
+     lines = source_lines(source_file)
+     lines.extend((f"source {csh_quote(str(eco_file))}", "exit $status"))
+-    return run_csh(lines, eco_env)
++    status = run_csh(lines, eco_env)
++    print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++    return status
  
  
 -def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None, source=None, stage=None, no_eco=False):
@@ -521,7 +1216,7 @@ index 267ac17..3041fa9 100644
      if step not in STEPS:
          fail(f"未知的 {FLOW_LABEL} Step: {step}")
      work_path = resolve_work_path(work_path)
-@@ -536,6 +536,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -528,6 +536,11 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
      managed = load_managed_env(resolve_env_file(work_path, env_file))
      runtime_env = dict(os.environ)
      runtime_env.update(managed)
@@ -533,7 +1228,38 @@ index 267ac17..3041fa9 100644
      runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
      mode_name = mode or runtime_env.get("DFT_IDE_MODE") or runtime_env.get("mode")
      if not mode_name:
-@@ -577,7 +582,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+@@ -539,23 +552,27 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
+         "DFT_IDE_PROJECT_NAME": project_name,
+         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODE": mode_name,
+         "DFT_IDE_STAGE": stage_name,
+-        "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
++        "DFT_IDE_PROJECT_ROOT": str(work_path.parent),
++        "DFT_IDE_STEP_STATUS": runtime_env.get("DFT_IDE_STEP_STATUS", "0"),
+         "DFT_IDE_LANDER_MODE": "prune",
+     })
+     step_args, explicit_matrix = pop_matrix_options(list(step_args))
+     submissions = build_submissions(explicit_matrix, runtime_env)
+     log_folder = resolve_history_folder(work_path, runtime_env)
+-    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
+     source_file = Path(source_value).expanduser().resolve() if source_value else None
+     if source_file is None and (work_path / "project.cshrc").is_file():
+         source_file = work_path / "project.cshrc"
+     if source_file is not None and not source_file.is_file():
+         fail(f"环境初始化文件不存在: {source_file}")
++    eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
++    if eco_only_phase:
++        return run_eco(work_path, runtime_env, source_file, eco_only_phase)
++    dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+     cfg_file = (
+         Path(cfg).expanduser().resolve()
+         if cfg
+-        else work_path / stage_name / "verification" / "cfg" / f"{mode_name}.cfg"
++        else work_path / stage_name / "lander_env" / "lander_cfg" / f"{mode_name}.cfg"
+     )
+     if not no_eco:
+         before_status = run_eco(work_path, runtime_env, source_file, "before")
+@@ -565,7 +582,7 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
  
      def make_lines(labels, parameters):
          lines = source_lines(source_file)
@@ -542,7 +1268,7 @@ index 267ac17..3041fa9 100644
          for _, _, flag in MATRIX_PARAMETERS:
              if flag in parameters:
                  command.extend((flag, parameters[flag]))
-@@ -671,6 +676,7 @@ def main(argv):
+@@ -659,18 +676,24 @@ def main(argv):
          parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
          parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
          parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
@@ -550,7 +1276,16 @@ index 267ac17..3041fa9 100644
          parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
          parser.add_argument("--groups", help="Comma-separated ATPG groups")
          parser.add_argument("--tcs", help="Comma-separated ATPG testcases")
-@@ -687,7 +693,7 @@ def main(argv):
+         parser.add_argument("--subattrs", help="Comma-separated ATPG subattrs")
++        parser.add_argument("--eco-phase", choices=("before", "after"))
++        parser.add_argument("--step-status", type=int, default=0)
+         args, step_args = parser.parse_known_args(argv[1:])
++        if args.eco_phase:
++            os.environ["DFT_IDE_ECO_ONLY_PHASE"] = args.eco_phase
++            os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
+         if step_args[:1] == ["--"]:
+             step_args = step_args[1:]
+         for option in ("groups", "tcs", "subattrs"):
              value = getattr(args, option)
              if value is not None:
                  step_args.extend((f"--{option}", value))
@@ -560,11 +1295,30 @@ index 267ac17..3041fa9 100644
  
  
 diff --git a/scripts/run_flow_sailor b/scripts/run_flow_sailor
-index 82aeea7..258d4b3 100644
+index b95ce11..258d4b3 100644
 --- a/scripts/run_flow_sailor
 +++ b/scripts/run_flow_sailor
-@@ -408,7 +408,7 @@ def run_eco(work_path, env, source_file, phase):
-     return status
+@@ -391,16 +391,24 @@ def resolve_history_folder(work_path, env):
+ 
+ def run_eco(work_path, env, source_file, phase):
+     eco_file = work_path / "eco" / ECO_FILE
++    run_id = env.get("DFT_IDE_HISTORY", "manual")
++    marker_task_id = env.get("DFT_IDE_MARKER_TASK_ID") or env.get("DFT_IDE_STEP", "unknown")
++    print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
+     if not eco_file.is_file():
+-        return 0
++        status = 2
++        print(f"[DFT IDE] ECO 入口文件不存在: {eco_file}", file=sys.stderr, flush=True)
++        print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++        return status
+     eco_env = dict(env)
+     eco_env["DFT_IDE_ECO_PHASE"] = phase
+     lines = source_lines(source_file)
+     lines.extend((f"source {csh_quote(str(eco_file))}", "exit $status"))
+-    return run_csh(lines, eco_env)
++    status = run_csh(lines, eco_env)
++    print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
++    return status
  
  
 -def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=None, source=None, no_eco=False):
@@ -572,7 +1326,7 @@ index 82aeea7..258d4b3 100644
      if step not in STEPS:
          fail(f"未知的 {FLOW_LABEL} Step: {step}")
      work_path = resolve_work_path(work_path)
-@@ -417,6 +417,11 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
+@@ -409,6 +417,11 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
      managed = load_managed_env(resolve_env_file(work_path, env_file))
      runtime_env = dict(os.environ)
      runtime_env.update(managed)
@@ -584,7 +1338,27 @@ index 82aeea7..258d4b3 100644
      runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
      module_name = module or runtime_env.get("DFT_IDE_MODULE") or runtime_env.get("module")
      if not module_name:
-@@ -449,7 +454,7 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
+@@ -418,7 +431,8 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
+         "DFT_IDE_FLOW": FLOW, "DFT_IDE_STEP": step,
+         "DFT_IDE_PROJECT_NAME": project_name,
+         "DFT_IDE_WORK_PATH": str(work_path), "DFT_IDE_MODULE": module_name,
+-        "DFT_IDE_PROJECT_ROOT": str(work_path.parent), "DFT_IDE_STEP_STATUS": "0",
++        "DFT_IDE_PROJECT_ROOT": str(work_path.parent),
++        "DFT_IDE_STEP_STATUS": runtime_env.get("DFT_IDE_STEP_STATUS", "0"),
+     })
+     source_value = source or runtime_env.get("DFT_IDE_ENV_SOURCE")
+     source_file = Path(source_value).expanduser().resolve() if source_value else None
+@@ -426,6 +440,9 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
+         source_file = work_path / "project.cshrc"
+     if source_file is not None and not source_file.is_file():
+         fail(f"环境初始化文件不存在: {source_file}")
++    eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
++    if eco_only_phase:
++        return run_eco(work_path, runtime_env, source_file, eco_only_phase)
+     cfg_file = Path(cfg).expanduser().resolve() if cfg else work_path / "sailor" / "cfg" / module_name / f"{module_name}.sailor.cfg"
+     log_folder = resolve_history_folder(work_path, runtime_env)
+     dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+@@ -437,7 +454,7 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
              return before_status
  
      lines = source_lines(source_file)
@@ -593,16 +1367,18 @@ index 82aeea7..258d4b3 100644
      rendered = " ".join(csh_quote(item) for item in command)
      rendered += " |& tee " + csh_quote(str(log_folder / f"{step}.log"))
      lines.append(rendered)
-@@ -529,6 +534,7 @@ def main(argv):
+@@ -517,11 +534,17 @@ def main(argv):
          parser.add_argument("--env-file", help="环境变量 JSON 文件路径")
          parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
          parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
 +        parser.add_argument("--extra-arg", help="Optional arguments inserted after the step CFG")
          parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
-         parser.add_argument("--eco-phase", choices=("before", "after"))
-         parser.add_argument("--step-status", type=int, default=0)
-@@ -538,7 +544,7 @@ def main(argv):
-             os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
++        parser.add_argument("--eco-phase", choices=("before", "after"))
++        parser.add_argument("--step-status", type=int, default=0)
+         args, step_args = parser.parse_known_args(argv[1:])
++        if args.eco_phase:
++            os.environ["DFT_IDE_ECO_ONLY_PHASE"] = args.eco_phase
++            os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
          if step_args[:1] == ["--"]:
              step_args = step_args[1:]
 -        return run_step(args.step, step_args, args.work_path, args.module, args.cfg, args.env_file, args.source, args.no_eco)
@@ -611,7 +1387,7 @@ index 82aeea7..258d4b3 100644
  
  
 diff --git a/src/extension.ts b/src/extension.ts
-index b741423..ce3c1b6 100644
+index 58ee98f..453aa11 100644
 --- a/src/extension.ts
 +++ b/src/extension.ts
 @@ -143,8 +143,8 @@ const pipelineRuntimeService = new PipelineRuntimeService({
@@ -625,11 +1401,395 @@ index b741423..ce3c1b6 100644
    },
    getPipelineShellPath: () => {
      const configured = vscode.workspace.getConfiguration('dftIde').get<string>('pipeline.shellPath', 'csh');
+@@ -595,7 +595,9 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+       case 'stopPipelineRuntime':
+       case 'selectPipelineTask':
+       case 'stopPipelineTask':
+-      case 'rerunPipelineTask': {
++      case 'rerunPipelineTask':
++      case 'runPipelineTaskEcoHook':
++      case 'stopPipelineTaskEcoHook': {
+         const requestId: string | undefined = msg.requestId;
+         try {
+           const flowKey = msg.flowKey;
+@@ -609,7 +611,17 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+ 
+           let snapshot;
+           if (msg.command === 'ensurePipelineRuntime') {
+-            snapshot = pipelineRuntimeService.ensureRuntime(flowKey, moduleKey, flowLabel);
++            const selectedTasks = Array.isArray(msg.selectedTasks)
++              ? msg.selectedTasks.filter((task: unknown): task is { id: string; name: string; command: string; description: string } => {
++                if (!task || typeof task !== 'object') return false;
++                const value = task as Record<string, unknown>;
++                return typeof value.id === 'string'
++                  && typeof value.name === 'string'
++                  && typeof value.command === 'string'
++                  && typeof value.description === 'string';
++              })
++              : undefined;
++            snapshot = pipelineRuntimeService.ensureRuntime(flowKey, moduleKey, flowLabel, selectedTasks);
+           } else if (msg.command === 'startPipelineRuntime') {
+             const selectedTaskIds = Array.isArray(msg.selectedTaskIds) && msg.selectedTaskIds.length > 0 ? msg.selectedTaskIds : undefined;
+             const selectedTasks = Array.isArray(msg.selectedTasks)
+@@ -642,6 +654,35 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+             pipelineRuntimeService.stopTask(flowKey, moduleKey, taskId, flowLabel);
+           } else if (msg.command === 'rerunPipelineTask') {
+             pipelineRuntimeService.rerunTask(flowKey, moduleKey, taskId);
++          } else if (msg.command === 'runPipelineTaskEcoHook') {
++            const phase = msg.phase === 'before' || msg.phase === 'after' ? msg.phase : undefined;
++            if (!taskId || !phase) {
++              throw new Error('Invalid pipeline ECO hook payload');
++            }
++            const envConfig = await readConfig(flowKey);
++            const verificationStage = flowKey === 'verification'
++              && typeof envConfig?.stage === 'string'
++                ? envConfig.stage
++                : undefined;
++            const taskConfigKey = verificationStage
++              ? `${flowKey}/${verificationStage}/${moduleKey}/config`
++              : `${flowKey}/${moduleKey}/config`;
++            const taskConfig = await readConfig(taskConfigKey);
++            const cwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
++            const stepStatus = Number.isFinite(msg.stepStatus) ? Number(msg.stepStatus) : 0;
++            snapshot = pipelineRuntimeService.runTaskEcoHook(
++              flowKey,
++              moduleKey,
++              taskId,
++              phase,
++              envConfig,
++              taskConfig,
++              undefined,
++              cwd,
++              stepStatus,
++            );
++          } else if (msg.command === 'stopPipelineTaskEcoHook') {
++            pipelineRuntimeService.stopTaskEcoHook(flowKey, moduleKey);
+           }
+ 
+           if (requestId) {
+@@ -1924,9 +1965,10 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+       case 'generateDefaultFlowConfigs': {
+         const requestId: string = msg.requestId;
+         const flow = normalizeConfigFlow(msg.flow);
++        const domain = msg.domain;
+         const module = typeof msg.module === 'string' ? msg.module.trim() : '';
+         const isAllSelected = msg.isAllSelected;
+-        const stage = typeof msg.stage === 'string' ? msg.stage.trim() : undefined;
++        
+         try {
+           if (!flow || flow === 'verification') {
+             throw new Error('Unsupported flow for config files.');
+@@ -1939,7 +1981,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+           const designTree = files.designTree;
+           const normTable = files.normTable;
+           // 从obs获取python脚本
+-          const [configPath, scriptPath] = await downLoadObsScripts(context, flow, stage);
++          const [configPath, scriptPath] = await downLoadObsScripts(context, flow, domain);
+           if (!configPath || !scriptPath) {
+             currentPanel?.webview.postMessage({
+               command: 'generateDefaultFlowConfigsResponse', requestId, success: false, error: '从obs获取py脚本失败'
+@@ -1949,16 +1991,16 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+           const transformLog = await doConfigTransform({
+             requestId,
+             flow,
++            domain,
+             scriptPath,
+             configPath,
+             designTree,
+             normTable,
+             module,
+-            stage,
+             isAllSelected,
+           });
+           if (transformLog.finished) {
+-            const result = await saveTransformLogs(transformLog, stage);
++            const result = await saveTransformLogs(transformLog);
+             currentPanel?.webview.postMessage({
+               command: 'generateDefaultFlowConfigsResponse',
+               requestId,
+@@ -1980,6 +2022,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+       case 'generateLanderConfigs': {
+         const requestId: string = msg.requestId;
+         const flow = normalizeConfigFlow(msg.flow);
++        const domain = msg.domain;
+         const landerAssistant = typeof msg.landerAssistant === 'string' ? msg.landerAssistant.trim() : '';
+         try {
+           if (flow !== 'verification') {
+@@ -1990,7 +2033,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+             throw new Error('请选择 LANDER_ASSISTANT.json。');
+           }
+           // 从obs获取python脚本
+-          const [configPath, scriptPath] = await downLoadObsScripts(context, flow, stage);
++          const [configPath, scriptPath] = await downLoadObsScripts(context, flow, domain, stage);
+           if (!configPath || !scriptPath) {
+             currentPanel?.webview.postMessage({
+               command: 'generateLanderConfigsResponse', requestId, success: false, error: '从obs获取py脚本失败'
+@@ -2000,13 +2043,14 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+           const transformLog = await doConfigTransform({
+             requestId,
+             flow,
++            domain,
+             scriptPath,
+             configPath,
+             stage,
+             landerAssistant,
+           });
+           if (transformLog.finished) {
+-            const result = await saveTransformLogs(transformLog, stage);
++            const result = await saveTransformLogs(transformLog);
+             currentPanel?.webview.postMessage({
+               command: 'generateLanderConfigsResponse',
+               requestId,
+diff --git a/src/services/configService.ts b/src/services/configService.ts
+index ccc4579..522d93a 100644
+--- a/src/services/configService.ts
++++ b/src/services/configService.ts
+@@ -169,108 +169,104 @@ export async function deleteFlowConfigFile(
+   );
+ }
+ 
+-interface ObsScriptEntrance {
+-  dir: string;
++interface ObsScriptFile {
+   fileName: string;
++  fileType: number;
+ }
+ 
+ interface ObsScriptPathConfig {
+-  dir?: string;
+-  files?: unknown[];
+-  entrance?: ObsScriptEntrance;
++  scriptSpace: string;
++  remoteScriptPath: string;
++  remoteScriptFiles: ObsScriptFile[];
++}
++
++export async function getObsScriptConfig(
++  flow: 'hibist' | 'sailor' | 'verification',
++  domain: string
++): Promise<ObsScriptPathConfig> {
++  const scriptSpace = 'DFT_IDE';
++  const remoteScriptPath = domain ? `EXCEL2CFG/${domain}` : 'EXCEL2CFG/Network';
++  const remoteScriptFiles = [{ fileName: flow == 'verification' ? 'lander_env' : 'sailor_env', fileType: 2 }];
++  return { scriptSpace, remoteScriptPath, remoteScriptFiles };
+ }
+ 
+ export async function downLoadObsScripts(
+   context: vscode.ExtensionContext,
+   flow: 'hibist' | 'sailor' | 'verification',
++  domain: string,
+   stage?: string,
+ ): Promise<[configPath: string, scriptPath: string] | []> {
+   const configsDir = await getFlowConfigsDirectory(flow, stage);
+   await ensureLocalConfigDirectory(configsDir);
+ 
+-  // 1. 去特定空间下载转换脚本（具体空间与路径在 package.json 预留，可留空后填）
+-  const obsConfig = vscode.workspace.getConfiguration('dftIde.obs');
+-  const scriptSpace = obsConfig.get<string>('scriptSpace', '').trim();
+-  const scriptPaths = obsConfig.get<Record<string, ObsScriptPathConfig>>('scriptPaths', {});
+-  const flowConfig = scriptPaths[flow];
+-  const remoteScriptPath = flowConfig?.dir?.trim() as string;
+-  const remoteScriptFiles = flowConfig?.files as [{fileName: string, type: number}];
+-  const entrance = flowConfig?.entrance ?? {
++  const obsScriptConfig: ObsScriptPathConfig = await getObsScriptConfig(flow, domain);
++  const entrance = {
+     dir: 'scripts/transform',
+     fileName: flow === 'verification' ? 'run_gen_lander_cfg' : 'run_gen_cfg',
+   };
+ 
+-  if (scriptSpace && remoteScriptPath) {
++  try {
++    const extensionRoot = path.resolve(context.extensionPath);
++    const sourceScript = path.resolve(extensionRoot, entrance.dir, entrance.fileName);
++    const sourceRelativePath = path.relative(extensionRoot, sourceScript);
++    if (sourceRelativePath.startsWith('..') || path.isAbsolute(sourceRelativePath)) {
++      throw new Error(`Transform entrance must stay inside the extension: ${sourceScript}`);
++    }
++    const targetPath = path.join(configsDir, entrance.fileName);
++    await copyFileLF(sourceScript, targetPath);
+     try {
+-      if (!entrance?.dir?.trim() || !entrance.fileName?.trim()) {
+-        throw new Error(`Missing scriptPaths.${flow}.entrance configuration.`);
+-      }
+-      if (path.basename(entrance.fileName) !== entrance.fileName) {
+-        throw new Error(`Invalid transform entrance file name: ${entrance.fileName}`);
++      await fs.promises.chmod(targetPath, 0o755);
++    } catch (error) {
++      console.warn(`[DFT IDE] Transform entrance copied but chmod failed: ${targetPath}`, error);
++    }
++
++    for (const file of obsScriptConfig.remoteScriptFiles) {
++      const filename: string = file.fileName;
++      const fileType = file.fileType;
++
++      const localScriptPath = flow === 'verification' ? path.join(configsDir, filename) : configsDir;
++      if (typeof filename !== 'string' || path.basename(filename) !== filename) {
++        throw new Error(`Invalid OBS script file name: ${String(filename)}`);
+       }
+-      const extensionRoot = path.resolve(context.extensionPath);
+-      const sourceScript = path.resolve(extensionRoot, entrance.dir, entrance.fileName);
+-      const sourceRelativePath = path.relative(extensionRoot, sourceScript);
+-      if (sourceRelativePath.startsWith('..') || path.isAbsolute(sourceRelativePath)) {
+-        throw new Error(`Transform entrance must stay inside the extension: ${sourceScript}`);
++      const remoteFilePath = path.posix.join(obsScriptConfig.remoteScriptPath.replace(/\\/g, '/'), filename);
++      if (fileType == 1) {
++        await obsTrackingService.downloadFile(obsScriptConfig.scriptSpace, remoteFilePath, vscode.Uri.file(localScriptPath), {
++          overwriteUntracked: true,
++        });
++      } else {
++        await obsTrackingService.downloadDirectory(obsScriptConfig.scriptSpace, remoteFilePath, vscode.Uri.file(localScriptPath), {
++          overwriteUntracked: true,
++        });
+       }
+-      const targetPath = path.join(configsDir, entrance.fileName);
+-      await copyFileLF(sourceScript, targetPath);
+       try {
+-        await fs.promises.chmod(targetPath, 0o755);
++        await fs.promises.chmod(localScriptPath, 0o755);
+       } catch (error) {
+-        console.warn(`[DFT IDE] Transform entrance copied but chmod failed: ${targetPath}`, error);
+-      }
+-
+-      for (const file of remoteScriptFiles) {
+-        const filename: string = file.fileName;
+-        const type = file.type;
+-        if (typeof filename !== 'string' || path.basename(filename) !== filename) {
+-          throw new Error(`Invalid OBS script file name: ${String(filename)}`);
+-        }
+-        const localScriptPath = path.join(configsDir, filename);
+-        const remoteFilePath = path.posix.join(remoteScriptPath.replace(/\\/g, '/'), filename);
+-        if (type == 1) {
+-          await obsTrackingService.downloadFile(scriptSpace, remoteFilePath, vscode.Uri.file(localScriptPath), {
+-            overwriteUntracked: true,
+-          });
+-        } else {
+-          await obsTrackingService.downloadDirectory(scriptSpace, remoteFilePath, vscode.Uri.file(localScriptPath), {
+-            overwriteUntracked: true,
+-          });
+-        }
+-        try {
+-          await fs.promises.chmod(localScriptPath, 0o755);
+-        } catch (error) {
+-          console.warn(`[DFT IDE] OBS script downloaded but chmod failed: ${localScriptPath}`, error);
+-        }
++        console.warn(`[DFT IDE] OBS script downloaded but chmod failed: ${configsDir}`, error);
+       }
+-      return [configsDir, targetPath];
+-    } catch (err) {
+-      console.warn(`[DFT IDE] 从 OBS 空间 [${scriptSpace}] 下载转换脚本失败:`, err);
+-      return [];
+     }
+-  } else {
+-    console.info(`[DFT IDE] 尚未配置 dftIde.obs.scriptSpace 或 scriptPaths.${flow}，预留空项待填`);
++    return [configsDir, targetPath];
++  } catch (err) {
++    console.warn(`[DFT IDE] 从 OBS 空间 [${obsScriptConfig.scriptSpace}] 下载转换脚本失败:`, err);
+     return [];
+   }
+ }
+ 
+-export async function removeExecutedScripts(
+-  flow: 'hibist' | 'sailor' | 'verification',
+-  stage?: string,
+-) {
+-  const configsDir = await getFlowConfigsDirectory(flow, stage);
+-  
+-  const obsConfig = vscode.workspace.getConfiguration('dftIde.obs');
+-  const scriptPaths = obsConfig.get<Record<string, ObsScriptPathConfig>>('scriptPaths', {});
+-  const flowConfig = scriptPaths[flow];
+-  const files = flowConfig?.files as [{fileName: string, type: number}];
+-
+-  for (const file of files) {
+-    const filename: string = file.fileName;
+-    const type: number = file.type;
+-    if (type === 1) await vscode.workspace.fs.delete(vscode.Uri.file(path.join(configsDir, filename)), { recursive: false });
++export async function removeExecutedScripts(dirUri: vscode.Uri): Promise<void> {
++  try {
++    const entries = await vscode.workspace.fs.readDirectory(dirUri);
++    for (const [name, type] of entries) {
++      const childUri = vscode.Uri.joinPath(dirUri, name);
++      if (type === vscode.FileType.File) {
++        if (name.endsWith('.obs.json')) {
++          const scriptName = name.replace(/^\.(.+)\.obs\.json$/, '$1');
++          await vscode.workspace.fs.delete(vscode.Uri.joinPath(dirUri, scriptName), { recursive: false });
++        }
++      } else if (type === vscode.FileType.Directory) {
++        await removeExecutedScripts(childUri);
++      }
++    }
++  } catch (error) {
++    console.error(`读取目录失败: ${dirUri.fsPath}`, error);
+   }
+ }
+ 
+@@ -416,7 +412,7 @@ export function collectModuleNames(value: unknown, modules: Set<string>): void {
+   });
+ }
+ 
+-export async function saveTransformLogs(transformLog: TransformLog, stage?: string): Promise<TransformLog> {
++export async function saveTransformLogs(transformLog: TransformLog): Promise<TransformLog> {
+   const localStateDir = resolveLocalConfigDirectory() as string;
+   const targetPath = path.join(localStateDir, 'transform_history', transformLog.flow);
+   const savedLog: TransformLog = {
+@@ -449,7 +445,7 @@ export async function saveTransformLogs(transformLog: TransformLog, stage?: stri
+   }
+   const content = retained.map((item) => JSON.stringify(item)).join('\n');
+   await vscode.workspace.fs.writeFile(vscode.Uri.file(hisotryJson), Buffer.from(content, 'utf-8'));
+-  await removeExecutedScripts(transformLog.flow, transformLog.stage);
++  if (transformLog.flow !== 'verification') await removeExecutedScripts(vscode.Uri.file(transformLog.configPath));
+   return savedLog;
+ }
+ 
+@@ -457,7 +453,7 @@ export async function moveTransformFile(transformLog: TransformLog, sourceFile:
+   try {
+     const { name, extension } = getFileNameAndExtension(sourceFile);
+     const fullName = path.join(targetPath, `${name}_${transformLog.timemilles}${extension ? `.${extension}` : ''}`);
+-    if (type==1) {
++    if (type == 1) {
+       // copy
+       await vscode.workspace.fs.copy(vscode.Uri.file(sourceFile), vscode.Uri.file(fullName));
+     } else {
+@@ -518,12 +514,12 @@ async function readTransformLogFile(filePath: string): Promise<TransformLog[]> {
+     try {
+       const parsed: unknown = JSON.parse(text);
+       if (isRecord(parsed) && typeof parsed.flow === 'string' && typeof parsed.scriptPath === 'string') {
+-        logs.push({...parsed, success: parsed.logFile ? await checkTransformStatus(parsed.logFile as string) : false} as unknown as TransformLog);
++        logs.push({ ...parsed, success: parsed.logFile ? await checkTransformStatus(parsed.logFile as string) : false } as unknown as TransformLog);
+       }
+     } catch {
+       const legacy = parseLegacyTransformLog(text);
+       if (legacy) {
+-        logs.push({...legacy, success: legacy.logFile ? await checkTransformStatus(legacy.logFile as string) : false} as unknown as TransformLog);
++        logs.push({ ...legacy, success: legacy.logFile ? await checkTransformStatus(legacy.logFile as string) : false } as unknown as TransformLog);
+       }
+     }
+   }
+diff --git a/src/services/obsTrackingService.ts b/src/services/obsTrackingService.ts
+index aee0ca8..e1364ed 100644
+--- a/src/services/obsTrackingService.ts
++++ b/src/services/obsTrackingService.ts
+@@ -326,6 +326,7 @@ export class ObsTrackingService implements vscode.Disposable {
+           remoteEtag: item.etag || item.md5 || options.remoteEtag,
+           remoteUpdatedAt: item.updatedAt || options.remoteUpdatedAt,
+         });
++        await fs.promises.chmod(result.localDestUri.fsPath, 0o755);
+         downloadedItems.push(result);
+       } catch (error) {
+         errors.push({
 diff --git a/src/services/pipelineRuntimeService.ts b/src/services/pipelineRuntimeService.ts
-index cef92b6..2b9d6d1 100644
+index 1b31234..2b9d6d1 100644
 --- a/src/services/pipelineRuntimeService.ts
 +++ b/src/services/pipelineRuntimeService.ts
-@@ -30,9 +30,9 @@ export interface PipelineRuntimeSnapshot {
+@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
+ import * as path from 'path';
+ import * as fs from 'fs';
+ import {
++  PipelineEcoHook,
++  PipelineEcoPhase,
+   PipelineLink,
+   PipelineTask,
+   TaskStatus,
+@@ -28,9 +30,9 @@ export interface PipelineRuntimeSnapshot {
    updatedAt: number;
  }
  
@@ -641,7 +1801,7 @@ index cef92b6..2b9d6d1 100644
    tasks: PipelineHistoryTask[];
  }
  
-@@ -48,7 +48,7 @@ export interface PipelineRuntimeHistoryRecord {
+@@ -46,7 +48,7 @@ export interface PipelineRuntimeHistoryRecord {
  interface PipelineRuntimeServiceOptions {
    onUpdate: (snapshot: PipelineRuntimeSnapshot) => void;
    onHistory: (record: PipelineRuntimeHistoryRecord) => void;
@@ -650,7 +1810,140 @@ index cef92b6..2b9d6d1 100644
    getPipelineShellPath?: () => string | undefined;
  }
  
-@@ -370,6 +370,10 @@ function appendVerificationParameterCommands(
+@@ -77,10 +79,28 @@ interface PipelineExecutionSession {
+   buffer: string;
+   seenStarts: Set<string>;
+   seenEnds: Set<string>;
++  seenPhaseStarts: Set<string>;
++  seenPhaseEnds: Set<string>;
+   monitor?: vscode.Disposable;
+   stopped: boolean;
+ }
+ 
++interface PipelineEcoExecutionSession {
++  runId: string;
++  taskId: string;
++  phase: PipelineEcoPhase;
++  terminalTitle: string;
++  buffer: string;
++  monitor?: vscode.Disposable;
++}
++
++interface PipelineRuntimeContext {
++  cwd?: string;
++  envConfig?: Record<string, unknown> | null;
++  taskConfig?: Record<string, unknown> | null;
++  runParameters?: unknown;
++}
++
+ const timers = new Map<string, ReturnType<typeof setTimeout>[]>();
+ const nowText = () => formatTime(new Date());
+ const nowStamp = () => Date.now();
+@@ -147,19 +167,96 @@ function mergeToolConfigs(projectTools: unknown, rowTools: unknown): RuntimeTool
+ }
+ 
+ function buildPipelineStepExecutionCommand(projectPath: string | undefined, stepCommand: string): string {
+-  let scriptPath = '';
+   const scriptName = stepCommand.split(' ')[0];
+-  if (projectPath) {
+-    scriptPath = path.join(path.dirname(projectPath), ".dft-ide", "local-state", "scripts", scriptName);
+-  }
+-  if (!scriptPath || !fs.existsSync(scriptPath)) {
+-    scriptPath = path.resolve(__dirname, '../scripts', scriptName);
+-  }
++  const scriptPath = resolvePipelineScriptPath(projectPath, scriptName);
+   const stepArguments = stepCommand.substring(scriptName.length).trim();
+   const argumentsSuffix = stepArguments ? ` ${stepArguments}` : '';
+   return `ma ${PIPELINE_PYTHON_MODULE} && python3 ${quoteCshArgument(scriptPath)}${argumentsSuffix}`;
+ }
+ 
++function resolvePipelineScriptPath(projectPath: string | undefined, scriptName: string): string {
++  const projectScriptPath = projectPath
++    ? path.join(path.dirname(projectPath), '.dft-ide', 'local-state', 'scripts', scriptName)
++    : '';
++  return projectScriptPath && fs.existsSync(projectScriptPath)
++    ? projectScriptPath
++    : path.resolve(__dirname, '../scripts', scriptName);
++}
++
++function getRunFlowScriptName(command: string): string | undefined {
++  const scriptName = command.trim().split(/\s+/)[0];
++  return /^run_flow_[A-Za-z0-9_-]+$/.test(scriptName) ? scriptName : undefined;
++}
++
++function getDefaultRunFlowScriptName(flowKey: PipelineFlowKey): string {
++  if (flowKey === 'verification') return 'run_flow_lander';
++  return `run_flow_${flowKey}`;
++}
++
++function getRunFlowStepName(task: PipelineTask): string {
++  if (!getRunFlowScriptName(task.command)) return task.id;
++  const [, stepName] = task.command.trim().split(/\s+/, 2);
++  return stepName || task.id;
++}
++
++function resolveEcoScriptPath(
++  flowKey: PipelineFlowKey,
++  command: string,
++  envConfig?: Record<string, unknown> | null,
++): { scriptName: string; scriptPath?: string } {
++  const runFlowScript = getRunFlowScriptName(command) ?? getDefaultRunFlowScriptName(flowKey);
++  const scriptName = `${runFlowScript}_eco`;
++  const projectPath = resolveProjectPath(flowKey);
++  if (!projectPath) {
++    return { scriptName };
++  }
++  const stage = flowKey === 'verification' ? firstNonEmptyString(envConfig?.stage) : '';
++  const candidateScriptPath = flowKey === 'verification'
++    ? (stage ? path.join(projectPath, stage, 'eco', scriptName) : undefined)
++    : path.join(projectPath, 'eco', scriptName);
++  return {
++    scriptName,
++    scriptPath: candidateScriptPath && fs.existsSync(candidateScriptPath)
++      ? candidateScriptPath
++      : undefined,
++  };
++}
++
++function makeEcoHook(
++  phase: PipelineEcoPhase,
++  scriptPath?: string,
++  previous?: PipelineEcoHook,
++): PipelineEcoHook {
++  return {
++    phase,
++    scriptPath,
++    status: previous?.status ?? 'pending',
++    attempts: previous?.attempts ?? 0,
++    startedAt: previous?.startedAt,
++    finishedAt: previous?.finishedAt,
++    duration: previous?.duration,
++    exitCode: previous?.exitCode,
++    lastRunSource: previous?.lastRunSource,
++  };
++}
++
++function attachEcoRuntime(
++  task: PipelineTask,
++  flowKey: PipelineFlowKey,
++  envConfig?: Record<string, unknown> | null,
++): PipelineTask {
++  const resolved = resolveEcoScriptPath(flowKey, task.command, envConfig);
++  return {
++    ...task,
++    eco: {
++      scriptName: resolved.scriptName,
++      scriptPath: resolved.scriptPath,
++      before: makeEcoHook('before', resolved.scriptPath, task.eco?.before),
++      after: makeEcoHook('after', resolved.scriptPath, task.eco?.after),
++    },
++  };
++}
++
+ function stripAnsi(value: string): string {
+   return value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+ }
+@@ -273,6 +370,10 @@ function appendVerificationParameterCommands(
    append(parameterTask.enableGroup, 'groupNames', 'DFT_IDE_GROUPS');
    append(parameterTask.enableTC, 'tcNames', 'DFT_IDE_TCS');
    append(parameterTask.enableSubAttr, 'subattrNames', 'DFT_IDE_SUBATTRS');
@@ -661,7 +1954,201 @@ index cef92b6..2b9d6d1 100644
  }
  function buildStepCommands(
    runId: string,
-@@ -967,7 +971,7 @@ export class PipelineRuntimeService {
+@@ -288,6 +389,7 @@ function buildStepCommands(
+   const commands: string[] = [];
+   const projectPath = resolveProjectPath(flowKey);
+   commands.push(`setenv DFT_IDE_HISTORY ${quoteCshArgument(runId)}`);
++  commands.push(`setenv DFT_IDE_MARKER_TASK_ID ${quoteCshArgument(markerTaskId)}`);
+ 
+   if (index === 0) {
+     const [oriModuleKey, version] = getVersionFromModuleName(moduleKey);
+@@ -605,14 +707,20 @@ function createIdleRuntime(
+   flowKey: PipelineFlowKey,
+   moduleKey: string,
+   flowLabel: string,
++  selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>,
+ ): PipelineRuntimeSnapshot {
+-  const config = pipelineFlowConfigs[flowKey];
+-  const { tasks, links } = loadPipelineConfig(flowKey);
++  const loadedPipeline = loadPipelineConfig(flowKey);
++  const tasks = selectedTasks?.length
++    ? selectedTasks.map((task) => makeTask(task.id, task.name, task.command, task.description))
++    : loadedPipeline.tasks;
++  const links = selectedTasks?.length
++    ? tasks.slice(1).map((task, index) => ({ source: tasks[index].id, target: task.id }))
++    : loadedPipeline.links;
+   return {
+     flowKey,
+     moduleKey,
+     flowLabel,
+-    tasks: tasks.map((t) => ({ ...t, status: 'pending' })),
++    tasks: tasks.map((t) => attachEcoRuntime({ ...t, status: 'pending' }, flowKey)),
+     links,
+     runState: 'idle',
+     updatedAt: nowStamp(),
+@@ -632,6 +740,8 @@ function scheduleRuntime(key: string, delay: number, action: () => void) {
+ export class PipelineRuntimeService {
+   private runtimes = new Map<string, PipelineRuntimeSnapshot>();
+   private executionSessions = new Map<string, PipelineExecutionSession>();
++  private ecoExecutionSessions = new Map<string, PipelineEcoExecutionSession>();
++  private runtimeContexts = new Map<string, PipelineRuntimeContext>();
+ 
+   constructor(private readonly options: PipelineRuntimeServiceOptions) {}
+ 
+@@ -639,17 +749,24 @@ export class PipelineRuntimeService {
+     return Array.from(this.runtimes.values());
+   }
+ 
+-  ensureRuntime(flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string): PipelineRuntimeSnapshot {
++  ensureRuntime(
++    flowKey: PipelineFlowKey,
++    moduleKey: string,
++    flowLabel: string,
++    selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>,
++  ): PipelineRuntimeSnapshot {
+     const key = getPipelineRuntimeKey(flowKey, moduleKey);
+     const existing = this.runtimes.get(key);
+     if (existing) {
+-      const next = { ...existing, flowLabel, updatedAt: nowStamp() };
++      const next = existing.runState === 'idle' && selectedTasks?.length
++        ? createIdleRuntime(flowKey, moduleKey, flowLabel, selectedTasks)
++        : { ...existing, flowLabel, updatedAt: nowStamp() };
+       this.runtimes.set(key, next);
+       this.options.onUpdate(next);
+       return next;
+     }
+ 
+-    const runtime = createIdleRuntime(flowKey, moduleKey, flowLabel);
++    const runtime = createIdleRuntime(flowKey, moduleKey, flowLabel, selectedTasks);
+     this.runtimes.set(key, runtime);
+     this.options.onUpdate(runtime);
+     return runtime;
+@@ -674,6 +791,7 @@ export class PipelineRuntimeService {
+     if (existing?.runState === 'running') {
+       return existing;
+     }
++    this.runtimeContexts.set(key, { cwd, envConfig, taskConfig, runParameters });
+ 
+     const projectRoot = resolveProjectRoot();
+     if (projectRoot) {
+@@ -729,7 +847,7 @@ export class PipelineRuntimeService {
+           : idx === 0
+       );
+       return {
+-        ...t,
++        ...attachEcoRuntime(t, flowKey, envConfig),
+         status: isSelected
+           ? (isFirstSelected ? 'running' as TaskStatus : 'pending' as TaskStatus)
+           : 'skipped' as TaskStatus,
+@@ -752,48 +870,66 @@ export class PipelineRuntimeService {
+     this.runtimes.set(key, runtime);
+     this.notify(key);
+ 
+-    const selectedTasksToRun = initialTasks.filter((t) => t.status !== 'skipped');
+-    const resolvedRunParameters = flowKey === 'verification'
+-      ? resolveVerificationRunParameters(runParameters, taskConfig)
+-      : runParameters;
+-    const executionPlan = selectedTasksToRun.flatMap((task, taskIndex) => {
+-      const parameterSets = flowKey === 'verification'
+-        ? getApplicableVerificationParameterSets(task, resolvedRunParameters)
+-        : [];
+-      const taskRuns: Array<Record<string, unknown> | undefined> = parameterSets.length > 0
+-        ? parameterSets
+-        : [undefined];
+-      return taskRuns.map((parameters, parameterIndex) => ({
+-        task,
+-        parameters,
+-        markerTaskId: `${task.id}__params_${parameterIndex + 1}`,
+-        isLastTaskRun: parameterIndex === taskRuns.length - 1,
+-        taskIndex,
+-        continueOnFailure: parameterSets.length > 0,
+-      }));
+-    });
++    try {
++      const selectedTasksToRun = initialTasks.filter((t) => t.status !== 'skipped');
++      const resolvedRunParameters = flowKey === 'verification'
++        ? resolveVerificationRunParameters(runParameters, taskConfig)
++        : runParameters;
++      const executionPlan = selectedTasksToRun.flatMap((task, taskIndex) => {
++        const parameterSets = flowKey === 'verification'
++          ? getApplicableVerificationParameterSets(task, resolvedRunParameters)
++          : [];
++        const taskRuns: Array<Record<string, unknown> | undefined> = parameterSets.length > 0
++          ? parameterSets
++          : [undefined];
++        return taskRuns.map((parameters, parameterIndex) => ({
++          task,
++          parameters,
++          markerTaskId: `${task.id}__params_${parameterIndex + 1}`,
++          isLastTaskRun: parameterIndex === taskRuns.length - 1,
++          taskIndex,
++          continueOnFailure: parameterSets.length > 0,
++        }));
++      });
+ 
+-    this.registerExecutionSession(key, {
+-      runId,
+-      flowKey,
+-      moduleKey,
+-      flowLabel,
+-      logPrefix: config.logPrefix,
+-      terminalTitle: getPipelineTerminalTitle(flowLabel, moduleKey),
+-      tasks: selectedTasksToRun,
+-      executionPlan,
+-      nextIndex: 0,
+-      cwd,
+-      envConfig,
+-      taskConfig,
+-      runParameters: resolvedRunParameters,
+-      shellPath: this.options.getPipelineShellPath?.() ?? 'csh',
+-      buffer: '',
+-      seenStarts: new Set<string>(),
+-      seenEnds: new Set<string>(),
+-      stopped: false,
+-    });
+-    this.startNextSessionTask(key);
++      this.registerExecutionSession(key, {
++        runId,
++        flowKey,
++        moduleKey,
++        flowLabel,
++        logPrefix: config.logPrefix,
++        terminalTitle: getPipelineTerminalTitle(flowLabel, moduleKey),
++        tasks: selectedTasksToRun,
++        executionPlan,
++        nextIndex: 0,
++        cwd,
++        envConfig,
++        taskConfig,
++        runParameters: resolvedRunParameters,
++        shellPath: this.options.getPipelineShellPath?.() ?? 'csh',
++        buffer: '',
++        seenStarts: new Set<string>(),
++        seenEnds: new Set<string>(),
++        seenPhaseStarts: new Set<string>(),
++        seenPhaseEnds: new Set<string>(),
++        stopped: false,
++      });
++      this.startNextSessionTask(key);
++    } catch (error) {
++      const failedTaskId = runtime.tasks.find((task) => task.status === 'running')?.id
++        ?? runtime.tasks[0]?.id;
++      if (failedTaskId) {
++        const detail = error instanceof Error ? error.message : String(error);
++        this.finishRuntimeWithFailure(
++          key,
++          config.logPrefix,
++          failedTaskId,
++          -1,
++          `Pipeline failed to start: ${detail}`,
++        );
++      }
++      throw error;
++    }
+ 
+     return runtime;
+   }
+@@ -835,7 +971,7 @@ export class PipelineRuntimeService {
        commands.push(flowKey === 'verification'
          ? stepCommand
          : buildPipelineStepExecutionCommand(resolveProjectPath(flowKey), stepCommand));
@@ -670,15 +2157,192 @@ index cef92b6..2b9d6d1 100644
      }
  
      scheduleRuntime(key, 1200, () => {
-@@ -1061,6 +1065,7 @@ export class PipelineRuntimeService {
-       this.options.openTerminal(
-         terminalTitle,
-         commands,
+@@ -847,6 +983,184 @@ export class PipelineRuntimeService {
+     });
+   }
+ 
++  runTaskEcoHook(
++    flowKey: PipelineFlowKey,
++    moduleKey: string,
++    taskId: string,
++    phase: PipelineEcoPhase,
++    envConfig?: Record<string, unknown> | null,
++    taskConfig?: Record<string, unknown> | null,
++    runParameters?: unknown,
++    cwd?: string,
++    stepStatus = 0,
++  ): PipelineRuntimeSnapshot {
++    const key = getPipelineRuntimeKey(flowKey, moduleKey);
++    const previousContext = this.runtimeContexts.get(key);
++    envConfig ??= previousContext?.envConfig;
++    taskConfig ??= previousContext?.taskConfig;
++    runParameters ??= previousContext?.runParameters;
++    cwd ??= previousContext?.cwd;
++    const runtime = this.runtimes.get(key);
++    if (!runtime) {
++      throw new Error('流水线运行态不存在，请先加载流水线。');
++    }
++    if (runtime.runState === 'running') {
++      throw new Error('流水线正在运行，不能并行调试 ECO。请先停止或等待流水线结束。');
++    }
++    if (this.ecoExecutionSessions.has(key)) {
++      throw new Error('当前模块已有 ECO Hook 正在运行。');
++    }
++
++    const originalTask = runtime.tasks.find((item) => item.id === taskId);
++    if (!originalTask) {
++      throw new Error(`找不到流水线 Step: ${taskId}`);
++    }
++    const task = attachEcoRuntime(originalTask, flowKey, envConfig);
++    const hook = task.eco?.[phase];
++    if (!hook) {
++      throw new Error(`Step ${taskId} 缺少 ${phase} ECO 执行阶段。`);
++    }
++
++    const runId = `eco_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
++    const terminalTitle = `${runtime.flowLabel} / ${moduleKey} / ECO`;
++    const commands = this.buildEcoHookCommands(
++      runId,
++      task,
++      phase,
++      flowKey,
++      moduleKey,
++      envConfig,
++      taskConfig,
++      runParameters,
++      stepStatus,
++    );
++    const session: PipelineEcoExecutionSession = {
++      runId,
++      taskId,
++      phase,
++      terminalTitle,
++      buffer: '',
++    };
++    session.monitor = registerExecutionTerminalMonitor(terminalTitle, {
++      onData: (data) => this.handleEcoTerminalData(key, data),
++      onClose: () => this.finishManualEcoHook(key, 'stopped'),
++    });
++    this.ecoExecutionSessions.set(key, session);
++    this.patchTask(key, taskId, {
++      eco: {
++        ...task.eco!,
++        [phase]: {
++          ...hook,
++          status: 'running',
++          attempts: hook.attempts + 1,
++          startedAt: nowText(),
++          finishedAt: undefined,
++          exitCode: undefined,
++          lastRunSource: 'manual',
++        },
++      },
++    });
++
++    void Promise.resolve(
++      this.options.openTerminal(
++        terminalTitle,
++        commands,
 +        true,
-         cwd,
-         this.options.getPipelineShellPath?.() ?? 'csh',
-       ),
-@@ -1227,6 +1232,7 @@ export class PipelineRuntimeService {
++        cwd,
++        this.options.getPipelineShellPath?.() ?? 'csh',
++      ),
++    ).catch(() => {
++      this.finishManualEcoHook(key, 'failed', -1);
++    });
++    return this.runtimes.get(key)!;
++  }
++
++  stopTaskEcoHook(flowKey: PipelineFlowKey, moduleKey: string): void {
++    const key = getPipelineRuntimeKey(flowKey, moduleKey);
++    const session = this.ecoExecutionSessions.get(key);
++    if (!session) return;
++    stopExecutionTerminal(session.terminalTitle);
++    this.finishManualEcoHook(key, 'stopped', 130);
++  }
++
++  private buildEcoHookCommands(
++    runId: string,
++    task: PipelineTask,
++    phase: PipelineEcoPhase,
++    flowKey: PipelineFlowKey,
++    moduleKey: string,
++    envConfig?: Record<string, unknown> | null,
++    taskConfig?: Record<string, unknown> | null,
++    runParameters?: unknown,
++    stepStatus = 0,
++  ): string[] {
++    const commands: string[] = [
++      `setenv DFT_IDE_HISTORY ${quoteCshArgument(runId)}`,
++      `setenv DFT_IDE_MARKER_TASK_ID ${quoteCshArgument(task.id)}`,
++    ];
++    const [oriModuleKey, version] = getVersionFromModuleName(moduleKey);
++    if (version) {
++      commands.push(`setenv DFT_IDE_MODULE_ORI ${quoteCshArgument(oriModuleKey)}`);
++      commands.push(`setenv DFT_IDE_VERSION ${quoteCshArgument(version)}`);
++    }
++    commands.push(`setenv ${flowKey === 'verification' ? 'DFT_IDE_MODE' : 'DFT_IDE_MODULE'} ${quoteCshArgument(moduleKey)}`);
++    const projectPath = resolveProjectPath(flowKey);
++    if (projectPath) {
++      commands.push(`setenv DFT_IDE_WORK_PATH ${quoteCshArgument(projectPath)}`);
++    }
++    const stage = flowKey === 'verification' ? firstNonEmptyString(envConfig?.stage) : '';
++    if (stage) {
++      commands.push(`setenv DFT_IDE_STAGE ${quoteCshArgument(stage)}`);
++    }
++
++    const source = taskConfig?.step2 as Record<string, unknown> | undefined;
++    const customConfig = source?.step2Task as Record<string, unknown> | undefined;
++    const parameterRow = Array.isArray(runParameters) && runParameters[0] && typeof runParameters[0] === 'object'
++      ? runParameters[0] as Record<string, unknown>
++      : undefined;
++    if (customConfig) {
++      appendToolCommands(commands, mergeToolConfigs(customConfig.tools, parameterRow?.tools));
++      const parameterDonau = parameterRow?.donau && typeof parameterRow.donau === 'object'
++        ? parameterRow.donau as Record<string, unknown>
++        : undefined;
++      const clusterGroup = firstNonEmptyString(parameterDonau?.group, customConfig.clusterGroup);
++      const clusterQueue = firstNonEmptyString(parameterDonau?.queue, customConfig.clusterQueue);
++      const cpu = firstNonEmptyString(parameterDonau?.cpu, customConfig.cpu);
++      const memory = firstNonEmptyString(parameterDonau?.mem, customConfig.memory);
++      const clusterExtra = firstNonEmptyString(customConfig.clusterExtra);
++      if (clusterGroup) {
++        commands.push(`setenv DONAU_GROUP ${quoteCshArgument(clusterGroup)}`);
++        const queue = clusterQueue ? `-q ${clusterQueue}` : '';
++        const resources = [
++          cpu ? `cpu=${cpu}` : '',
++          memory ? `mem=${memory}` : '',
++        ].filter(Boolean);
++        const resource = resources.length ? `-R '${resources.join(';')}'` : '';
++        const dsubArgs = ['-A', clusterGroup, queue, resource, clusterExtra].filter(Boolean).join(' ');
++        commands.push(`setenv DFT_IDE_DSUBRUN_I ${quoteCshArgument(`dsub -I ${dsubArgs}`)}`);
++      }
++    }
++    if (flowKey === 'verification') {
++      appendVerificationParameterCommands(commands, task, runParameters);
++    }
++
++    const scriptName = getRunFlowScriptName(task.command);
++    if (!scriptName) {
++      throw new Error(`Step ${task.id} 不是 run_flow 命令，无法运行 ECO。`);
++    }
++    const scriptPath = resolvePipelineScriptPath(projectPath, scriptName);
++    const stepName = getRunFlowStepName(task);
++    commands.push(`echo "=== [DFT IDE] ${phase === 'before' ? 'Before' : 'After'} ECO: ${task.name || task.id} ==="`);
++    commands.push(`echo "__DFT_IDE_ECO_START__|${runId}|${task.id}|${phase}"`);
++    commands.push('set dft_ide_eco_status = 0');
++    commands.push(
++      `ma ${PIPELINE_PYTHON_MODULE} && python3 ${quoteCshArgument(scriptPath)} run --eco-phase ${phase} --step-status ${Math.trunc(stepStatus)} ${quoteCshArgument(stepName)}`,
++    );
++    commands.push('set dft_ide_eco_status = $status');
++    commands.push(`echo "__DFT_IDE_ECO_END__|${runId}|${task.id}|${phase}|$dft_ide_eco_status"`);
++    return commands;
++  }
++
+   private registerExecutionSession(key: string, session: PipelineExecutionSession): void {
+     this.disposeExecutionSession(key);
+     const monitor = registerExecutionTerminalMonitor(session.terminalTitle, {
+@@ -918,6 +1232,7 @@ export class PipelineRuntimeService {
      console.log('groups:', runParameterRows.map((row) => row.groupNames ?? []));
      console.log('tcs:', runParameterRows.map((row) => row.tcNames ?? []));
      console.log('subattrs:', runParameterRows.map((row) => row.subattrNames ?? []));
@@ -686,7 +2350,7 @@ index cef92b6..2b9d6d1 100644
      console.log('tools:', runParameterRows.map((row) => row.tools ?? []));
      console.log('Donau:', runParameterRows.map((row) => row.donau ?? {}));
      console.log('parameter rows:', runParameterRows);
-@@ -1234,7 +1240,7 @@ export class PipelineRuntimeService {
+@@ -925,7 +1240,7 @@ export class PipelineRuntimeService {
      this.patchTask(key, task.id, (current) => ({
      }));
      void Promise.resolve(
@@ -695,7 +2359,157 @@ index cef92b6..2b9d6d1 100644
      ).catch((error) => {
        const message = error instanceof Error ? error.message : String(error);
        this.finishRuntimeWithFailure(key, session.logPrefix, task.id, -1, `Terminal 启动失败：${message}`);
-@@ -1597,7 +1603,7 @@ export class PipelineRuntimeService {
+@@ -969,6 +1284,79 @@ export class PipelineRuntimeService {
+       session.seenEnds.add(taskId);
+       this.handleStepEnd(key, taskId, Number(exitCodeText));
+     }
++
++    const phaseStartRegex = /__DFT_IDE_ECO_START__\|([^|\s]+)\|([^|\r\n]+)\|(before|after)/g;
++    for (const match of session.buffer.matchAll(phaseStartRegex)) {
++      const [, runId, markerTaskId, phaseText] = match;
++      const markerKey = `${markerTaskId}:${phaseText}`;
++      if (runId !== session.runId || session.seenPhaseStarts.has(markerKey)) continue;
++      session.seenPhaseStarts.add(markerKey);
++      const execution = session.executionPlan.find((item) => item.markerTaskId === markerTaskId);
++      const runtimeTaskId = execution?.task.id ?? markerTaskId;
++      this.patchEcoHook(key, runtimeTaskId, phaseText as PipelineEcoPhase, (hook) => ({
++        ...hook,
++        status: 'running',
++        attempts: hook.attempts + 1,
++        startedAt: nowText(),
++        finishedAt: undefined,
++        exitCode: undefined,
++        lastRunSource: 'pipeline',
++      }));
++    }
++
++    const phaseEndRegex = /__DFT_IDE_ECO_END__\|([^|\s]+)\|([^|\r\n]+)\|(before|after)\|(-?\d+)/g;
++    for (const match of session.buffer.matchAll(phaseEndRegex)) {
++      const [, runId, markerTaskId, phaseText, exitCodeText] = match;
++      const markerKey = `${markerTaskId}:${phaseText}`;
++      if (runId !== session.runId || session.seenPhaseEnds.has(markerKey)) continue;
++      session.seenPhaseEnds.add(markerKey);
++      const execution = session.executionPlan.find((item) => item.markerTaskId === markerTaskId);
++      const runtimeTaskId = execution?.task.id ?? markerTaskId;
++      const exitCode = Number(exitCodeText);
++      this.patchEcoHook(key, runtimeTaskId, phaseText as PipelineEcoPhase, (hook) => ({
++        ...hook,
++        status: exitCode === 0 ? (hook.status === 'failed' ? 'failed' : 'success') : 'failed',
++        finishedAt: nowText(),
++        exitCode,
++        lastRunSource: 'pipeline',
++      }));
++    }
++  }
++
++  private handleEcoTerminalData(key: string, data: string): void {
++    const session = this.ecoExecutionSessions.get(key);
++    if (!session) return;
++    if (isInterruptOutput(data)) {
++      this.finishManualEcoHook(key, 'stopped', 130);
++      return;
++    }
++    session.buffer = stripAnsi(`${session.buffer}${data}`).slice(-30000);
++    const endRegex = /__DFT_IDE_ECO_END__\|([^|\s]+)\|([^|\r\n]+)\|(before|after)\|(-?\d+)/g;
++    for (const match of session.buffer.matchAll(endRegex)) {
++      const [, runId, taskId, phaseText, exitCodeText] = match;
++      if (runId !== session.runId || taskId !== session.taskId || phaseText !== session.phase) continue;
++      const exitCode = Number(exitCodeText);
++      this.finishManualEcoHook(key, exitCode === 0 ? 'success' : 'failed', exitCode);
++      return;
++    }
++  }
++
++  private finishManualEcoHook(
++    key: string,
++    status: Extract<TaskStatus, 'success' | 'failed' | 'stopped'>,
++    exitCode?: number,
++  ): void {
++    const session = this.ecoExecutionSessions.get(key);
++    if (!session) return;
++    session.monitor?.dispose();
++    this.ecoExecutionSessions.delete(key);
++    this.patchEcoHook(key, session.taskId, session.phase, (hook) => ({
++      ...hook,
++      status,
++      finishedAt: nowText(),
++      exitCode,
++      lastRunSource: 'manual',
++    }));
+   }
+ 
+   private handleTerminalShellEnd(key: string, exitCode: number | undefined): void {
+@@ -980,6 +1368,33 @@ export class PipelineRuntimeService {
+     if (exitCode === 130 || exitCode === 143) {
+       this.markRuntimeStopped(key, session.logPrefix, 'Terminal 收到 Ctrl+C，中断已同步到流水线。', false);
+     }
++
++    if (exitCode !== 0 && session.currentTaskId) {
++      const runId = session.runId;
++      const taskId = session.currentTaskId;
++      const markerTaskId = session.currentMarkerTaskId;
++      scheduleRuntime(key, 100, () => {
++        const currentSession = this.executionSessions.get(key);
++        if (
++          !currentSession ||
++          currentSession.stopped ||
++          currentSession.runId !== runId ||
++          currentSession.currentTaskId !== taskId ||
++          currentSession.currentMarkerTaskId !== markerTaskId ||
++          (markerTaskId && currentSession.seenEnds.has(markerTaskId))
++        ) {
++          return;
++        }
++
++        this.finishRuntimeWithFailure(
++          key,
++          currentSession.logPrefix,
++          taskId,
++          exitCode,
++          `Terminal command exited with code ${exitCode} before its task-end marker was received.`,
++        );
++      });
++    }
+   }
+ 
+   private handleStepEnd(key: string, taskId: string, exitCode: number): void {
+@@ -1029,6 +1444,7 @@ export class PipelineRuntimeService {
+     clearRuntimeTimers(key);
+     this.disposeExecutionSession(key);
+     if (message) {
++      console.error(`[DFT IDE] ${message}`);
+     }
+     this.updateRuntime(key, (runtime) => ({
+       ...runtime,
+@@ -1128,6 +1544,27 @@ export class PipelineRuntimeService {
+     }));
+   }
+ 
++  private patchEcoHook(
++    key: string,
++    taskId: string,
++    phase: PipelineEcoPhase,
++    patch: (hook: PipelineEcoHook) => PipelineEcoHook,
++  ): void {
++    this.updateRuntime(key, (runtime) => ({
++      ...runtime,
++      tasks: runtime.tasks.map((task) => {
++        if (task.id !== taskId || !task.eco) return task;
++        return {
++          ...task,
++          eco: {
++            ...task.eco,
++            [phase]: patch(task.eco[phase]),
++          },
++        };
++      }),
++    }));
++  }
++
+   private updateRuntime(
+     key: string,
+     updater: (runtime: PipelineRuntimeSnapshot) => PipelineRuntimeSnapshot,
+@@ -1166,7 +1603,7 @@ export class PipelineRuntimeService {
          : 'success';
  
      const { tasks, ...historySnapshot } = runtime;
@@ -729,7 +2543,7 @@ index 715da63..943c9a9 100644
    if (isNew) {
      await waitForNewTerminalReady(terminal!)
 diff --git a/src/services/workspaceService.ts b/src/services/workspaceService.ts
-index 6fa3c47..dac0a02 100644
+index 6fa3c47..f539ad9 100644
 --- a/src/services/workspaceService.ts
 +++ b/src/services/workspaceService.ts
 @@ -186,7 +186,7 @@ export async function openProjectWorkspace(rootPath: string): Promise<{ opened:
@@ -741,6 +2555,14 @@ index 6fa3c47..dac0a02 100644
    return {
      opened: true,
      targetPath: targetUri.fsPath,
+@@ -902,6 +902,7 @@ const defaultConfigTimeoutMs = 60 * 60 * 1000;
+ export interface TransformLog {
+   requestId?: string;
+   flow: 'hibist' | 'sailor' | 'verification';
++  domain: string;
+   scriptPath: string;
+   configPath: string;
+   designTree?: string;
 diff --git a/src/webview/components/ProjectMembers.tsx b/src/webview/components/ProjectMembers.tsx
 index 33e1b92..3d0043a 100644
 --- a/src/webview/components/ProjectMembers.tsx
@@ -1191,23 +3013,59 @@ index 4471af3..923f6c9 100644
                            <Progress percent={initializingProgress} size="small" status="active" style={{ maxWidth: 420 }} />
                          )}
                        </Space>
+diff --git a/src/webview/components/design/Step1_CommonConfig.tsx b/src/webview/components/design/Step1_CommonConfig.tsx
+index e9d1ce9..b9eb532 100644
+--- a/src/webview/components/design/Step1_CommonConfig.tsx
++++ b/src/webview/components/design/Step1_CommonConfig.tsx
+@@ -37,6 +37,8 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+   const { savedData, loading, saving, handleSave } =
+     useFlowConfig(moduleKey ? `${flowKey}/${moduleKey}/config` : flowKey);
+ 
++  const activeProject = useWizardStore((s) => s.activeProject);
++
+   useEffect(() => {
+     getGitInfo(flowKey as RepoKey)
+       .then((res) => {
+@@ -114,13 +116,18 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+       message.warning('请至少选择一个 module。');
+       return;
+     }
++    if (!activeProject?.domain.key) {
++      message.warning('请在首页为项目配置领域。');
++      return;
++    }
+     setGenerating(true);
+     try {
+       const isAllSelected = moduleOptions.every(val => selectedModules.includes(val.value));
+-      const result = await generateDefaultFlowConfigs(flowKey, selectedModules.join('; '), isAllSelected);
++      const result = await generateDefaultFlowConfigs(flowKey, activeProject?.domain.key, selectedModules.join('; '), isAllSelected);
+       if (!result.success) {
+         throw new Error(result.error ?? '转换失败');
+       }
++      message.success(`${flowKey} 配置转换完成。`);
+     } catch (error) {
+       message.error(error instanceof Error ? error.message : String(error));
+     } finally {
 diff --git a/src/webview/components/design/Step4_Result.tsx b/src/webview/components/design/Step4_Result.tsx
-index 3d03761..024d9c9 100644
+index 8b1ca64..024d9c9 100644
 --- a/src/webview/components/design/Step4_Result.tsx
 +++ b/src/webview/components/design/Step4_Result.tsx
-@@ -1,9 +1,9 @@
+@@ -1,12 +1,9 @@
  import React, { useState, useEffect } from 'react';
--import { Button, Space, Typography, message } from 'antd';
+-import { Button, Alert, Space, Typography, message } from 'antd';
 +import { Button, Empty, Tabs, message } from 'antd';
  import {
    LeftOutlined,
    RightOutlined,
+-  CheckCircleOutlined,
+-  WarningOutlined,
 -  FileTextOutlined,
+-  HistoryOutlined,
 +  FileSearchOutlined,
    CloudUploadOutlined,
  } from '@ant-design/icons';
  import ExecutionHistoryList from '../shared/ExecutionHistoryList';
-@@ -12,8 +12,6 @@ import { uploadExecutionData } from '../../services/projectService';
+@@ -15,8 +12,6 @@ import { uploadExecutionData } from '../../services/projectService';
  import useWizardStore from '../../store/wizardStore';
  import ExecutionHistoryDetail from '../shared/ExecutionHistoryDetail';
  
@@ -1216,11 +3074,28 @@ index 3d03761..024d9c9 100644
  interface Props {
    onNext: () => void;
    onPrev: () => void;
-@@ -74,21 +72,30 @@ const Step4Result: React.FC<Props> = ({ onNext, onPrev, category }) => {
+@@ -26,7 +21,6 @@ interface Props {
+ const Step4Result: React.FC<Props> = ({ onNext, onPrev, category }) => {
+   const flowKey = category.toLowerCase();
+   const activeProject = useWizardStore((s) => s.activeProject);
+-  const [historyOpen, setHistoryOpen] = useState(false);
+   const [historyRecords, setHistoryRecords] = useState<ExecutionHistoryRecord[]>([]);
+   const [activeRecord, setActiveRecord] = useState<ExecutionHistoryRecord | null>(null);
+   const [historyDetail, setHistoryDetail] = useState<ExecutionHistoryRecord | null>(null);
+@@ -78,39 +72,30 @@ const Step4Result: React.FC<Props> = ({ onNext, onPrev, category }) => {
  
    return (
      <div style={{ padding: '16px 0' }}>
--      <div style={{ marginBottom: 16 }}>
+-      <Alert
+-        message="状态检查"
+-        description="执行结果来自已保存的日志或历史记录；真实任务请在 VS Code 终端中运行。"
+-        type={activeRecord?.status === 'success' ? 'success' : 'warning'}
+-        showIcon
+-        icon={activeRecord?.status === 'success' ? <CheckCircleOutlined /> : <WarningOutlined />}
+-        style={{ marginBottom: 16 }}
+-      />
+-
+-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
 -        <Space size="large">
 -          <Link>
 -            <FileTextOutlined /> {flowKey}/synth.log
@@ -1230,10 +3105,19 @@ index 3d03761..024d9c9 100644
 -          </Link>
 -        </Space>
 -
+-        <Button
+-          icon={<HistoryOutlined />}
+-          onClick={() => setHistoryOpen(true)}
+-        >
+-          查看历史记录 ({historyRecords.length})
+-        </Button>
 -      </div>
 -
 -      <ExecutionHistoryList
+-        open={historyOpen}
+-        onClose={() => setHistoryOpen(false)}
 -        history={historyRecords}
+-        onSelect={(record) => setActiveRecord(record)}
 -        onOpenPipeline={viewHistoryDetail}
 +      <Tabs
 +        defaultActiveKey={'history'}
@@ -1292,9 +3176,18 @@ index 8b96cd0..c9f4057 100644
    const [createValue, setCreateValue] = useState('');
    const [taskModalOpen, setTaskModalOpen] = useState(false);
 diff --git a/src/webview/components/shared/ExecutionHistoryDetail.tsx b/src/webview/components/shared/ExecutionHistoryDetail.tsx
-index 052d41c..c3ddcb1 100644
+index 07db4e3..c3ddcb1 100644
 --- a/src/webview/components/shared/ExecutionHistoryDetail.tsx
 +++ b/src/webview/components/shared/ExecutionHistoryDetail.tsx
+@@ -1,7 +1,7 @@
+ import React, { useMemo } from 'react'
+ import {
+   Descriptions,
+-  Drawer,
++  Modal,
+   Empty,
+   Statistic,
+   Table,
 @@ -9,7 +9,8 @@ import {
    Typography,
  } from 'antd'
@@ -1428,7 +3321,7 @@ index 052d41c..c3ddcb1 100644
    const counts = useMemo(
      () =>
        nodes.reduce<Record<string, number>>((result, node) => {
-@@ -121,10 +145,15 @@ const ExecutionHistoryDetail: React.FC<Props> = ({ record, onClose }) => {
+@@ -121,105 +145,108 @@ const ExecutionHistoryDetail: React.FC<Props> = ({ record, onClose }) => {
        }, {}),
      [nodes],
    )
@@ -1447,24 +3340,25 @@ index 052d41c..c3ddcb1 100644
 +  ]
  
    return (
-     <Modal
-@@ -132,99 +161,88 @@ const ExecutionHistoryDetail: React.FC<Props> = ({ record, onClose }) => {
+-    <Drawer
++    <Modal
+       title="执行记录详情"
        open={!!record}
-       onCancel={onClose}
-       footer={null}
--      width="92vw"
+-      onClose={onClose}
+-      width="88%"
++      onCancel={onClose}
++      footer={null}
 +      width="90vw"
-       centered
++      centered
        destroyOnClose
-       styles={{
-         body: {
--          maxHeight: 'calc(90vh - 110px)',
++      styles={{
++        body: {
 +          maxHeight: 'calc(88vh - 92px)',
-           overflowY: 'auto',
-           overflowX: 'hidden',
++          overflowY: 'auto',
++          overflowX: 'hidden',
 +          paddingTop: 12,
-         },
-       }}
++        },
++      }}
      >
        {record ? (
 -        <div
@@ -1602,57 +3496,149 @@ index 052d41c..c3ddcb1 100644
            </div>
          </div>
        ) : null}
+-    </Drawer>
++    </Modal>
+   )
+ }
+ 
 diff --git a/src/webview/components/shared/ExecutionHistoryList.tsx b/src/webview/components/shared/ExecutionHistoryList.tsx
-index ba273a5..acedf44 100644
+index 801866a..acedf44 100644
 --- a/src/webview/components/shared/ExecutionHistoryList.tsx
 +++ b/src/webview/components/shared/ExecutionHistoryList.tsx
-@@ -1,11 +1,12 @@
- import React, { useMemo } from 'react';
--import { Button, Table, Tag } from 'antd';
+@@ -1,115 +1,150 @@
+-import React from 'react';
+-import { Button, Drawer, Empty, Tag, Typography } from 'antd';
++import React, { useMemo } from 'react';
 +import { Button, Input, Table, Tag } from 'antd';
- import type { ColumnsType } from 'antd/es/table';
++import type { ColumnsType } from 'antd/es/table';
  import {
    CheckCircleOutlined,
    ClockCircleOutlined,
    CloseCircleOutlined,
    EyeOutlined,
+-  RightOutlined,
 +  SearchOutlined,
  } from '@ant-design/icons';
  import { ExecutionHistoryRecord } from '../../utils/ipc';
+-import VirtualList from './VirtualList';
+-
+-const { Text } = Typography;
  
-@@ -38,25 +39,9 @@ const statusMeta = {
+ interface Props {
+-  open: boolean;
+-  onClose: () => void;
+   history: ExecutionHistoryRecord[];
+-  onSelect: (record: ExecutionHistoryRecord) => void;
+-  onOpenPipeline?: (record: ExecutionHistoryRecord) => void;
++  onOpenPipeline: (record: ExecutionHistoryRecord) => void;
+ }
+ 
+ const statusMeta = {
+   running: {
+     color: 'processing',
+     label: 'RUNNING',
+-    icon: <ClockCircleOutlined style={{ fontSize: 24, color: '#1677ff' }} />,
++    icon: <ClockCircleOutlined />,
+   },
+   success: {
+     color: 'success',
+     label: 'SUCCESS',
+-    icon: <CheckCircleOutlined style={{ fontSize: 24, color: '#4ade80' }} />,
++    icon: <CheckCircleOutlined />,
+   },
+   error: {
+     color: 'error',
+     label: 'ERROR',
+-    icon: <CloseCircleOutlined style={{ fontSize: 24, color: '#ff4d4f' }} />,
++    icon: <CloseCircleOutlined />,
+   },
+   cancelled: {
+     color: 'warning',
+     label: 'CANCELLED',
+-    icon: <CloseCircleOutlined style={{ fontSize: 24, color: '#faad14' }} />,
++    icon: <CloseCircleOutlined />,
+   },
  } as const;
  
- const getStartedAt = (record: ExecutionHistoryRecord) => record.startedAt ?? record.executedAt;
--
--const formatDuration = (record: ExecutionHistoryRecord) => {
--  if (!record.startedAt || !record.finishedAt) {
--    return record.status === 'running' ? '进行中' : '-';
--  }
--
--  const durationSeconds = Math.max(0, Math.floor((record.finishedAt - record.startedAt) / 1000));
--  const hours = Math.floor(durationSeconds / 3600);
--  const minutes = Math.floor((durationSeconds % 3600) / 60);
--  const seconds = durationSeconds % 60;
--
--  if (hours > 0) {
--    return `${hours}时 ${minutes}分 ${seconds}秒`;
--  }
--  if (minutes > 0) {
--    return `${minutes}分 ${seconds}秒`;
--  }
--  return `${seconds}秒`;
--};
+-const ExecutionHistoryList: React.FC<Props> = ({ open, onClose, history, onSelect, onOpenPipeline }) => (
+-  <Drawer
+-    title="历史执行记录"
+-    placement="right"
+-    onClose={onClose}
+-    open={open}
+-    width={400}
+-    styles={{ body: { padding: 0 } }}
+-  >
+-    {history.length === 0 ? (
+-      <Empty description="暂无历史执行记录" style={{ marginTop: 60 }} />
+-    ) : (
+-      <VirtualList
+-        items={history}
+-        estimateSize={94}
+-        height="100%"
+-        getKey={(item) => item.id}
+-        renderItem={(item) => {
+-          const meta = statusMeta[item.status] ?? statusMeta.error;
+-          return (
+-            <div
+-              style={{
+-                borderBottom: '1px solid var(--vscode-panel-border, rgba(127,127,127,0.18))',
+-                cursor: 'pointer',
+-                padding: '16px 24px',
+-                transition: 'background 0.2s',
+-              }}
+-              onMouseEnter={(event) => (event.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+-              onMouseLeave={(event) => (event.currentTarget.style.background = 'transparent')}
+-              onClick={() => {
+-                onSelect(item);
+-                onClose();
+-              }}
+-            >
+-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+-                <div style={{ flex: '0 0 auto' }}>{meta.icon}</div>
+-                <div style={{ minWidth: 0, flex: 1 }}>
+-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+-                    <Text strong>{new Date(item.executedAt).toLocaleString()}</Text>
+-                    <Tag color={meta.color}>{meta.label}</Tag>
+-                  </div>
+-                  <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', color: '#888', fontSize: 12 }}>
+-                    <ClockCircleOutlined style={{ marginRight: 4 }} /> 包含 {item.nodes?.length || 0} 个 Node
+-                  </div>
+-                </div>
+-                {(item.nodes?.length || item.runtimeSnapshot) && onOpenPipeline ? (
+-                  <Button
+-                    size="small"
+-                    type="text"
+-                    icon={<EyeOutlined />}
+-                    onClick={(event) => {
+-                      event.stopPropagation();
+-                      onOpenPipeline(item);
+-                      onClose();
+-                    }}
+-                  >
+-                    查看
+-                  </Button>
+-                ) : null}
+-                <RightOutlined style={{ color: '#888' }} />
+-              </div>
+-            </div>
+-          );
+-        }}
+-      />
+-    )}
+-  </Drawer>
++const getStartedAt = (record: ExecutionHistoryRecord) => record.startedAt ?? record.executedAt;
 +const getConfigTarget = (record: ExecutionHistoryRecord) => (
 +  record.mode || record.module || record.moduleKey || '-'
-+);
+ );
  
- const ExecutionHistoryList: React.FC<Props> = ({ history, onOpenPipeline }) => {
-   const dataSource = useMemo(
-@@ -65,6 +50,40 @@ const ExecutionHistoryList: React.FC<Props> = ({ history, onOpenPipeline }) => {
-   );
- 
-   const columns: ColumnsType<ExecutionHistoryRecord> = [
++const ExecutionHistoryList: React.FC<Props> = ({ history, onOpenPipeline }) => {
++  const dataSource = useMemo(
++    () => [...history].sort((a, b) => getStartedAt(b) - getStartedAt(a)),
++    [history],
++  );
++
++  const columns: ColumnsType<ExecutionHistoryRecord> = [
 +    {
 +      title: '配置',
 +      key: 'configTarget',
@@ -1687,48 +3673,492 @@ index ba273a5..acedf44 100644
 +        .toLocaleLowerCase()
 +        .includes(String(value).trim().toLocaleLowerCase()),
 +    },
-     {
-       title: '执行 ID',
-       dataIndex: 'id',
-@@ -92,12 +111,6 @@ const ExecutionHistoryList: React.FC<Props> = ({ history, onOpenPipeline }) => {
-       width: 240,
-       render: (_, record) => new Date(getStartedAt(record)).toLocaleString(),
-     },
--    {
--      title: '耗时',
--      key: 'duration',
--      width: 150,
--      render: (_, record) => formatDuration(record),
--    },
-     {
-       title: '查看',
-       key: 'action',
-@@ -128,7 +141,7 @@ const ExecutionHistoryList: React.FC<Props> = ({ history, onOpenPipeline }) => {
-         showTotal: (total) => `共 ${total} 条`,
-       }}
-       locale={{ emptyText: '暂无历史执行记录' }}
--      scroll={{ x: 940 }}
++    {
++      title: '执行 ID',
++      dataIndex: 'id',
++      width: 220,
++      ellipsis: true,
++    },
++    {
++      title: '状态',
++      dataIndex: 'status',
++      width: 130,
++      render: (status: ExecutionHistoryRecord['status']) => {
++        const meta = statusMeta[status] ?? statusMeta.error;
++        return <Tag color={meta.color} icon={meta.icon}>{meta.label}</Tag>;
++      },
++    },
++    {
++      title: '节点数',
++      key: 'nodeCount',
++      width: 100,
++      render: (_, record) => record.nodes?.length ?? 0,
++    },
++    {
++      title: '开始时间',
++      key: 'startedAt',
++      width: 240,
++      render: (_, record) => new Date(getStartedAt(record)).toLocaleString(),
++    },
++    {
++      title: '查看',
++      key: 'action',
++      width: 100,
++      align: 'center',
++      render: (_, record) => (
++        <Button
++          type="link"
++          size="small"
++          icon={<EyeOutlined />}
++          onClick={() => onOpenPipeline(record)}
++        >
++          详细
++        </Button>
++      ),
++    },
++  ];
++
++  return (
++    <Table
++      rowKey="id"
++      columns={columns}
++      dataSource={dataSource}
++      pagination={{
++        pageSize: 10,
++        showSizeChanger: true,
++        pageSizeOptions: [10, 20, 50],
++        showTotal: (total) => `共 ${total} 条`,
++      }}
++      locale={{ emptyText: '暂无历史执行记录' }}
 +      scroll={{ x: 1010 }}
-       size="middle"
-     />
-   );
++      size="middle"
++    />
++  );
++};
++
+ export default ExecutionHistoryList;
+diff --git a/src/webview/components/shared/PipelineExecutionOverview.tsx b/src/webview/components/shared/PipelineExecutionOverview.tsx
+index 87ca17d..48c2b04 100644
+--- a/src/webview/components/shared/PipelineExecutionOverview.tsx
++++ b/src/webview/components/shared/PipelineExecutionOverview.tsx
+@@ -6,6 +6,7 @@ import {
+   Empty,
+   Input,
+   List,
++  message,
+   Pagination,
+   Row,
+   Space,
+@@ -18,7 +19,11 @@ import {
+   CheckCircleOutlined,
+   ClockCircleOutlined,
+   CloseCircleOutlined,
++  FileTextOutlined,
+   FilterOutlined,
++  PauseCircleOutlined,
++  PlayCircleOutlined,
++  ReloadOutlined,
+   SearchOutlined,
+   SyncOutlined,
+ } from '@ant-design/icons';
+@@ -27,11 +32,14 @@ import usePipelineRuntimeStore, {
+   PipelineRuntimeSnapshot,
+   getPipelineRuntimeKey,
+ } from '../../store/pipelineRuntimeStore';
+-import { PipelineLink, PipelineTask } from './pipelineMockData';
++import { PipelineEcoPhase, PipelineEcoRuntime, PipelineLink, PipelineTask } from './pipelineMockData';
+ import {
++  openFileInEditor,
+   openExecutionTerminal,
+   parseExecutionHistoryDiagnostics,
+   revealExecutionHistory,
++  runPipelineTaskEcoHook,
++  stopPipelineTaskEcoHook,
+ } from '../../utils/ipc';
+ import { useShallow } from 'zustand/react/shallow';
+ 
+@@ -129,6 +137,25 @@ function getStatusColor(status?: string): string {
+   return themeStyles.idle;
+ }
+ 
++function makePendingEcoRuntime(flowKey: PipelineFlowKey, task: Pick<PipelineTask, 'command'>): PipelineEcoRuntime {
++  const commandName = task.command.trim().split(/\s+/)[0];
++  const runFlowScript = /^run_flow_[A-Za-z0-9_-]+$/.test(commandName)
++    ? commandName
++    : flowKey === 'verification'
++      ? 'run_flow_lander'
++      : `run_flow_${flowKey}`;
++  const makeHook = (phase: PipelineEcoPhase) => ({
++    phase,
++    status: 'pending' as const,
++    attempts: 0,
++  });
++  return {
++    scriptName: `${runFlowScript}_eco`,
++    before: makeHook('before'),
++    after: makeHook('after'),
++  };
++}
++
+ function formatStartTime(time?: number): string {
+   if (!time) {
+     return '--:--:--';
+@@ -328,6 +355,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+   const [activeModuleKey, setActiveModuleKey] = useState<string>();
+   const [selectedTaskId, setSelectedTaskId] = useState<string>();
+   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(() => new Set());
++  const [expandedEcoTaskKeys, setExpandedEcoTaskKeys] = useState<Set<string>>(() => new Set());
+   const [peakMetrics, setPeakMetrics] = useState<Record<string, { maxCpu: number; maxMem: number }>>({});
+   const [currentPage, setCurrentPage] = useState(1);
+   const [pageSize, setPageSize] = useState(10);
+@@ -339,14 +367,15 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+ 
+   useEffect(() => {
+     selectedModuleKeys.forEach((moduleKey) => {
+-      ensureRuntime(flowKey, moduleKey, getFlowLabel(moduleKey));
++      ensureRuntime(flowKey, moduleKey, getFlowLabel(moduleKey), defaultTasksByModule?.[moduleKey]);
+     });
+-  }, [flowKey, selectedModuleKeys, ensureRuntime, getFlowLabel]);
++  }, [defaultTasksByModule, flowKey, selectedModuleKeys, ensureRuntime, getFlowLabel]);
+ 
+   const visibleRuns = useMemo(() => (
+     selectedModuleKeys.map((moduleKey) => {
+       const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
+       const defaultTasks = defaultTasksByModule?.[moduleKey];
++      const runtimeTasksById = new Map(runtime?.tasks.map((task) => [task.id, task]));
+       const effectiveRuntime = runtime?.runState === 'idle' && defaultTasks?.length
+         ? {
+           ...runtime,
+@@ -354,6 +383,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+             ...task,
+             status: 'pending' as const,
+             attempts: 1,
++            eco: runtimeTasksById.get(task.id)?.eco ?? makePendingEcoRuntime(flowKey, task),
+           })),
+           links: defaultTasks.slice(1).map((task, index) => ({
+             source: defaultTasks[index].id,
+@@ -512,6 +542,19 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+     });
+   }, []);
+ 
++  const toggleEcoExpanded = useCallback((moduleKey: string, taskId: string) => {
++    const key = `${moduleKey}:${taskId}`;
++    setExpandedEcoTaskKeys((prev) => {
++      const next = new Set(prev);
++      if (next.has(key)) {
++        next.delete(key);
++      } else {
++        next.add(key);
++      }
++      return next;
++    });
++  }, []);
++
+   useEffect(() => {
+     if (!activeModuleData) {
+       setSelectedTaskId(undefined);
+@@ -552,6 +595,34 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+     }
+   }, [activeHierarchy, activeModuleData]);
+ 
++  const runEcoHook = useCallback(async (task: PipelineTask, phase: PipelineEcoPhase) => {
++    if (!activeModuleData) return;
++    const result = await runPipelineTaskEcoHook({
++      flowKey,
++      moduleKey: activeModuleData.moduleKey,
++      taskId: task.id,
++      phase,
++      cwd: moduleWorkDirs?.[activeModuleData.moduleKey],
++      stepStatus: task.status === 'failed' ? 1 : 0,
++    });
++    if (!result.success) {
++      message.error(result.error ?? 'ECO Hook 启动失败');
++    }
++  }, [activeModuleData, flowKey, moduleWorkDirs]);
++
++  const stopEcoHook = useCallback(async (task: PipelineTask, phase: PipelineEcoPhase) => {
++    if (!activeModuleData) return;
++    const result = await stopPipelineTaskEcoHook({
++      flowKey,
++      moduleKey: activeModuleData.moduleKey,
++      taskId: task.id,
++      phase,
++    });
++    if (!result.success) {
++      message.error(result.error ?? 'ECO Hook 停止失败');
++    }
++  }, [activeModuleData, flowKey]);
++
+   const renderTaskDetail = useCallback((task: PipelineTask, depth = 0): React.ReactNode => {
+     if (!activeModuleData || !activeHierarchy) {
+       return null;
+@@ -559,6 +630,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+     const children = activeHierarchy.childrenByParent.get(task.id) ?? [];
+     const hasChildren = children.length > 0;
+     const expanded = expandedTaskIds.has(task.id);
++    const ecoExpanded = expandedEcoTaskKeys.has(`${activeModuleData.moduleKey}:${task.id}`);
+     const isSelected = selectedTaskId === task.id;
+     const isRunning = task.status === 'running';
+     const isChild = depth > 0;
+@@ -629,6 +701,37 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+           }}
+         >
+           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
++            {task.eco ? (
++              <Tooltip title={ecoExpanded ? '收起 ECO' : '展开 ECO'}>
++                <Button
++                  size="small"
++                  type="text"
++                  aria-label={ecoExpanded ? '收起 ECO' : '展开 ECO'}
++                  aria-expanded={ecoExpanded}
++                  icon={ecoExpanded
++                    ? <CaretDownOutlined style={{ fontSize: 10 }} />
++                    : <CaretRightOutlined style={{ fontSize: 10 }} />}
++                  onClick={(event) => {
++                    event.stopPropagation();
++                    toggleEcoExpanded(activeModuleData.moduleKey, task.id);
++                  }}
++                  style={{
++                    color: isSelected ? themeStyles.selectedFg : themeStyles.textSecondary,
++                    width: 14,
++                    height: 18,
++                    padding: 0,
++                    border: 0,
++                    background: 'transparent',
++                    display: 'inline-flex',
++                    alignItems: 'center',
++                    justifyContent: 'center',
++                    flex: '0 0 14px',
++                  }}
++                />
++              </Tooltip>
++            ) : (
++              <span style={{ width: 14, flex: '0 0 14px' }} />
++            )}
+             {hasChildren ? (
+               <Button
+                 size="small"
+@@ -693,6 +796,115 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+             </Tag>
+           </div>
+         </div>
++        {ecoExpanded && task.eco && (
++          <div
++            style={{
++              marginTop: 2,
++              marginLeft: isChild ? 28 : 20,
++              padding: '3px 0 3px 8px',
++              borderLeft: `2px solid ${themeStyles.borderLight}`,
++              display: 'flex',
++              alignItems: 'center',
++              flexWrap: 'wrap',
++              gap: 5,
++            }}
++          >
++            <span style={{ color: themeStyles.textMuted, fontSize: 10, fontWeight: 700, fontFamily: 'monospace' }}>
++              ECO
++            </span>
++            {(['before', 'after'] as const).map((phase) => {
++              const hook = task.eco![phase];
++              const hookColor = getStatusColor(hook.status);
++              const running = hook.status === 'running';
++              const hasRunningEco = activeModuleData.tasks.some(
++                (item) => item.eco?.before.status === 'running' || item.eco?.after.status === 'running',
++              );
++              const canRun = activeModuleData.runState !== 'running'
++                && !hasRunningEco;
++              const hookDetails = [
++                hook.scriptPath ?? task.eco!.scriptName,
++                hook.lastRunSource === 'manual' ? '手动执行' : hook.lastRunSource === 'pipeline' ? '流水线执行' : '',
++                hook.finishedAt ?? hook.startedAt ?? '',
++                hook.exitCode !== undefined ? `exit ${hook.exitCode}` : '',
++              ].filter(Boolean).join(' · ');
++              return (
++                <div
++                  key={phase}
++                  style={{
++                    display: 'flex',
++                    alignItems: 'center',
++                    gap: 4,
++                    minHeight: 22,
++                    padding: '1px 4px',
++                    border: `1px solid ${themeStyles.borderLight}`,
++                    borderRadius: 3,
++                    background: themeStyles.panelBg,
++                  }}
++                >
++                  {running ? (
++                    <SyncOutlined spin style={{ color: hookColor, fontSize: 11 }} />
++                  ) : hook.status === 'success' ? (
++                    <CheckCircleOutlined style={{ color: hookColor, fontSize: 11 }} />
++                  ) : hook.status === 'failed' || hook.status === 'stopped' ? (
++                    <CloseCircleOutlined style={{ color: hookColor, fontSize: 11 }} />
++                  ) : (
++                    <ClockCircleOutlined style={{ color: themeStyles.idle, fontSize: 11 }} />
++                  )}
++                  <Tooltip title={hookDetails}>
++                    <span style={{ color: themeStyles.textPrimary, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
++                      {phase === 'before' ? 'Before ECO' : 'After ECO'}
++                    </span>
++                  </Tooltip>
++                  <Tag style={{ margin: 0, color: hookColor, borderColor: themeStyles.borderLight, background: themeStyles.metricBg, fontSize: 9, padding: '0 2px', height: 16, lineHeight: '14px' }}>
++                    {statusText[hook.status] ?? hook.status}
++                  </Tag>
++                  {hook.scriptPath && (
++                    <Tooltip title="打开 ECO 脚本">
++                      <Button
++                        size="small"
++                        type="text"
++                        icon={<FileTextOutlined />}
++                        onClick={(event) => {
++                          event.stopPropagation();
++                          openFileInEditor(hook.scriptPath!);
++                        }}
++                        style={{ width: 20, height: 20, padding: 0 }}
++                      />
++                    </Tooltip>
++                  )}
++                  {running ? (
++                    <Tooltip title="停止 ECO Hook">
++                      <Button
++                        size="small"
++                        danger
++                        icon={<PauseCircleOutlined />}
++                        onClick={(event) => {
++                          event.stopPropagation();
++                          void stopEcoHook(task, phase);
++                        }}
++                        style={{ width: 20, height: 20, padding: 0 }}
++                      />
++                    </Tooltip>
++                  ) : (
++                    <Tooltip title={hook.attempts > 0 ? '重跑 ECO Hook' : '单独运行 ECO Hook'}>
++                      <Button
++                        size="small"
++                        type={hook.status === 'failed' ? 'primary' : 'default'}
++                        icon={hook.attempts > 0 ? <ReloadOutlined /> : <PlayCircleOutlined />}
++                        disabled={!canRun}
++                        onClick={(event) => {
++                          event.stopPropagation();
++                          void runEcoHook(task, phase);
++                        }}
++                        style={{ width: 20, height: 20, padding: 0 }}
++                      />
++                    </Tooltip>
++                  )}
++                </div>
++              );
++            })}
++          </div>
++        )}
+         {hasChildren && expanded && (
+           <div
+             style={{
+@@ -709,9 +921,13 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+   }, [
+     activeHierarchy,
+     activeModuleData,
++    expandedEcoTaskKeys,
+     expandedTaskIds,
+     selectStep,
+     selectedTaskId,
++    runEcoHook,
++    stopEcoHook,
++    toggleEcoExpanded,
+     toggleExpanded,
+   ]);
+ 
+diff --git a/src/webview/components/shared/pipelineMockData.ts b/src/webview/components/shared/pipelineMockData.ts
+index 0e49080..5a6367e 100644
+--- a/src/webview/components/shared/pipelineMockData.ts
++++ b/src/webview/components/shared/pipelineMockData.ts
+@@ -1,5 +1,26 @@
+ export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'stopped' | 'skipped';
+ 
++export type PipelineEcoPhase = 'before' | 'after';
++
++export interface PipelineEcoHook {
++  phase: PipelineEcoPhase;
++  scriptPath?: string;
++  status: TaskStatus;
++  attempts: number;
++  startedAt?: string;
++  finishedAt?: string;
++  duration?: string;
++  exitCode?: number;
++  lastRunSource?: 'pipeline' | 'manual';
++}
++
++export interface PipelineEcoRuntime {
++  scriptName: string;
++  scriptPath?: string;
++  before: PipelineEcoHook;
++  after: PipelineEcoHook;
++}
++
+ export interface PipelineTask {
+   id: string;
+   name: string;
+@@ -10,6 +31,7 @@ export interface PipelineTask {
+   duration?: string;
+   attempts: number;
+   description: string;
++  eco?: PipelineEcoRuntime;
+ }
+ 
+ export interface PipelineLink {
+diff --git a/src/webview/components/verification/Step1_CommonConfig.tsx b/src/webview/components/verification/Step1_CommonConfig.tsx
+index f2455c0..3650842 100644
+--- a/src/webview/components/verification/Step1_CommonConfig.tsx
++++ b/src/webview/components/verification/Step1_CommonConfig.tsx
+@@ -30,6 +30,8 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey }) => {
+   const { savedData, loading, saving, handleSave } =
+     useFlowConfig(moduleKey ? `${flowKey}/${moduleKey}/config` : flowKey);
+ 
++  const activeProject = useWizardStore((s) => s.activeProject);
++
+   useEffect(() => {
+     getGitInfo(flowKey as RepoKey)
+       .then((res) => {
+@@ -90,12 +92,17 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey }) => {
+       message.warning('请选择 LANDER_ASSISTANT.json。');
+       return;
+     }
++    if (!activeProject?.domain.key) {
++      message.warning('请在首页为项目配置领域。');
++      return;
++    }
+     setGenerating(true);
+     try {
+-      const result = await generateLanderConfigs(stage, landerAssistant.value);
++      const result = await generateLanderConfigs(activeProject?.domain.key, stage, landerAssistant.value);
+       if (!result.success) {
+         throw new Error(result.error ?? 'Verification 配置转换失败');
+       }
++      message.success('Verification 配置转换完成。');
+     } catch (error) {
+       message.error(error instanceof Error ? error.message : String(error));
+     } finally {
 diff --git a/src/webview/components/verification/Step3_Result.tsx b/src/webview/components/verification/Step3_Result.tsx
-index 88bc6a5..cf277af 100644
+index 9f45b5e..cf277af 100644
 --- a/src/webview/components/verification/Step3_Result.tsx
 +++ b/src/webview/components/verification/Step3_Result.tsx
-@@ -1,9 +1,9 @@
+@@ -1,12 +1,9 @@
  import React, { useState, useEffect } from 'react';
--import { Button, Space, Typography, message } from 'antd';
+-import { Button, Alert, Space, Typography, message } from 'antd';
 +import { Button, Empty, Tabs, message } from 'antd';
  import {
    LeftOutlined,
    RightOutlined,
+-  CheckCircleOutlined,
+-  WarningOutlined,
 -  FileTextOutlined,
+-  HistoryOutlined,
 +  FileSearchOutlined,
    CloudUploadOutlined,
  } from '@ant-design/icons';
  import ExecutionHistoryList from '../shared/ExecutionHistoryList';
-@@ -12,8 +12,6 @@ import { uploadExecutionData } from '../../services/projectService';
+@@ -15,8 +12,6 @@ import { uploadExecutionData } from '../../services/projectService';
  import useWizardStore from '../../store/wizardStore';
  import ExecutionHistoryDetail from '../shared/ExecutionHistoryDetail';
  
@@ -1737,11 +4167,37 @@ index 88bc6a5..cf277af 100644
  interface Props {
    onNext: () => void;
    onPrev: () => void;
-@@ -72,21 +70,30 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
+@@ -24,7 +19,6 @@ interface Props {
+ 
+ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
+   const activeProject = useWizardStore((s) => s.activeProject);
+-  const [historyOpen, setHistoryOpen] = useState(false);
+   const [historyRecords, setHistoryRecords] = useState<ExecutionHistoryRecord[]>([]);
+   const [activeRecord, setActiveRecord] = useState<ExecutionHistoryRecord | null>(null);
+   const [historyDetail, setHistoryDetail] = useState<ExecutionHistoryRecord | null>(null);
+@@ -39,7 +33,7 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
+       }
+     };
+     fetchHistory();
+-  });
++  }, []);
+ 
+   const handleUpload = async () => {
+     if (!activeProject?.id) {
+@@ -76,39 +70,30 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
  
    return (
      <div style={{ padding: '16px 0' }}>
--      <div style={{ marginBottom: 16 }}>
+-      <Alert
+-        message="状态检查"
+-        description="执行结果来自已保存的日志或历史记录；真实任务请在 VS Code 终端中运行。"
+-        type={activeRecord?.status === 'success' ? 'success' : 'warning'}
+-        showIcon
+-        icon={activeRecord?.status === 'success' ? <CheckCircleOutlined /> : <WarningOutlined />}
+-        style={{ marginBottom: 16 }}
+-      />
+-
+-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
 -        <Space size="large">
 -          <Link>
 -            <FileTextOutlined /> {'verification'}/synth.log
@@ -1751,10 +4207,19 @@ index 88bc6a5..cf277af 100644
 -          </Link>
 -        </Space>
 -
+-        <Button
+-          icon={<HistoryOutlined />}
+-          onClick={() => setHistoryOpen(true)}
+-        >
+-          查看历史记录 ({historyRecords.length})
+-        </Button>
 -      </div>
 -
 -      <ExecutionHistoryList
+-        open={historyOpen}
+-        onClose={() => setHistoryOpen(false)}
 -        history={historyRecords}
+-        onSelect={(record) => setActiveRecord(record)}
 -        onOpenPipeline={viewHistoryDetail}
 +      <Tabs
 +        defaultActiveKey={'history'}
@@ -1962,3 +4427,231 @@ index 9e95f3c..8e24347 100644
      }),
    });
  
+diff --git a/src/webview/store/pipelineRuntimeStore.ts b/src/webview/store/pipelineRuntimeStore.ts
+index 4ea15e2..f18f816 100644
+--- a/src/webview/store/pipelineRuntimeStore.ts
++++ b/src/webview/store/pipelineRuntimeStore.ts
+@@ -1,5 +1,6 @@
+ import { create } from 'zustand';
+ import { z } from 'zod';
++import { message } from 'antd';
+ import {
+   ensurePipelineRuntime,
+   getPipelineRuntimes,
+@@ -39,6 +40,7 @@ interface PipelineRuntimeStore {
+     flowKey: PipelineFlowKey,
+     moduleKey: string,
+     flowLabel: string,
++    selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>,
+   ) => Promise<PipelineRuntimeSnapshot | undefined>;
+   startRuntime: (
+     flowKey: PipelineFlowKey,
+@@ -60,6 +62,24 @@ interface PipelineRuntimeStore {
+ let subscribed = false;
+ 
+ const taskStatusSchema = z.enum(['pending', 'running', 'success', 'failed', 'stopped', 'skipped']);
++const pipelineEcoPhaseSchema = z.enum(['before', 'after']);
++const pipelineEcoHookSchema = z.object({
++  phase: pipelineEcoPhaseSchema,
++  scriptPath: z.string().optional(),
++  status: taskStatusSchema,
++  attempts: z.number(),
++  startedAt: z.string().optional(),
++  finishedAt: z.string().optional(),
++  duration: z.string().optional(),
++  exitCode: z.number().optional(),
++  lastRunSource: z.enum(['pipeline', 'manual']).optional(),
++});
++const pipelineEcoRuntimeSchema = z.object({
++  scriptName: z.string(),
++  scriptPath: z.string().optional(),
++  before: pipelineEcoHookSchema,
++  after: pipelineEcoHookSchema,
++});
+ const pipelineFlowKeySchema = z.enum(['hibist', 'sailor', 'verification']);
+ const pipelineRunStateSchema = z.enum(['idle', 'running', 'completed', 'failed', 'stopped']);
+ const pipelineTaskSchema = z.object({
+@@ -72,6 +92,7 @@ const pipelineTaskSchema = z.object({
+   duration: z.string().optional(),
+   attempts: z.number(),
+   description: z.string(),
++  eco: pipelineEcoRuntimeSchema.optional(),
+ });
+ const pipelineLinkSchema = z.object({
+   source: z.string(),
+@@ -176,7 +197,7 @@ function applySnapshot(
+ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
+   runtimes: {},
+ 
+-  ensureRuntime: (flowKey, moduleKey, flowLabel) => {
++  ensureRuntime: (flowKey, moduleKey, flowLabel, selectedTasks) => {
+     set((state) => {
+       const key = getPipelineRuntimeKey(flowKey, moduleKey);
+       if (state.runtimes[key]) {
+@@ -189,7 +210,7 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
+         },
+       };
+     });
+-    return ensurePipelineRuntime({ flowKey, moduleKey, flowLabel }).then((res) => {
++    return ensurePipelineRuntime({ flowKey, moduleKey, flowLabel, selectedTasks }).then((res) => {
+       const snapshot = res.success ? parseRuntimeSnapshot(res.snapshot) : null;
+       if (snapshot) {
+         set((state) => {
+@@ -208,6 +229,8 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
+   },
+ 
+   startRuntime: (flowKey, moduleKey, flowLabel, selectedTaskIds, cwd, selectedTasks, runParameters) => {
++    const key = getPipelineRuntimeKey(flowKey, moduleKey);
++    let previousRuntime: PipelineRuntimeSnapshot | undefined;
+     const normalizedSelectedTaskIds = selectedTaskIds?.length ? selectedTaskIds : undefined;
+     const optimisticTasks: PipelineTask[] = (selectedTasks ?? []).map((task, index) => {
+       const isSelected = !normalizedSelectedTaskIds || normalizedSelectedTaskIds.includes(task.id);
+@@ -220,23 +243,59 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
+         attempts: 1,
+       };
+     });
+-    set((state) => ({
+-      runtimes: applySnapshot(
+-        state.runtimes,
+-        {
+-          ...makeInitialRuntime(flowKey, moduleKey, flowLabel),
+-          tasks: optimisticTasks,
+-          links: optimisticTasks.slice(1).map((task, index) => ({
+-            source: optimisticTasks[index].id,
+-            target: task.id,
+-          })),
+-          selectedTaskId: optimisticTasks.find((task) => task.status === 'running')?.id
+-            ?? optimisticTasks[0]?.id,
+-          runState: 'running',
+-        },
+-      ),
+-    }));
+-    void startPipelineRuntime({ flowKey, moduleKey, flowLabel, selectedTaskIds, selectedTasks, cwd, runParameters });
++    const optimisticRuntime: PipelineRuntimeSnapshot = {
++      ...makeInitialRuntime(flowKey, moduleKey, flowLabel),
++      tasks: optimisticTasks,
++      links: optimisticTasks.slice(1).map((task, index) => ({
++        source: optimisticTasks[index].id,
++        target: task.id,
++      })),
++      selectedTaskId: optimisticTasks.find((task) => task.status === 'running')?.id
++        ?? optimisticTasks[0]?.id,
++      runState: 'running',
++    };
++    set((state) => {
++      previousRuntime = state.runtimes[key];
++      return { runtimes: applySnapshot(state.runtimes, optimisticRuntime) };
++    });
++
++    const rollbackOptimisticRuntime = (error?: string) => {
++      set((state) => {
++        const current = state.runtimes[key];
++        if (
++          current?.runId ||
++          current?.updatedAt !== optimisticRuntime.updatedAt ||
++          current.runState !== 'running'
++        ) {
++          return state;
++        }
++
++        const runtimes = { ...state.runtimes };
++        if (previousRuntime) {
++          runtimes[key] = previousRuntime;
++        } else {
++          delete runtimes[key];
++        }
++        return { runtimes };
++      });
++      message.error(error || '???????');
++    };
++
++    void startPipelineRuntime({
++      flowKey,
++      moduleKey,
++      flowLabel,
++      selectedTaskIds,
++      selectedTasks,
++      cwd,
++      runParameters,
++    }).then((result) => {
++      if (!result.success) {
++        rollbackOptimisticRuntime(result.error);
++      }
++    }).catch((error) => {
++      rollbackOptimisticRuntime(error instanceof Error ? error.message : String(error));
++    });
+   },
+ 
+   stopRuntime: (flowKey, moduleKey, flowLabel) => {
+diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
+index 3e64d5c..a06210c 100644
+--- a/src/webview/utils/ipc.ts
++++ b/src/webview/utils/ipc.ts
+@@ -11,6 +11,7 @@ import type { DftProject, ProjectDomain } from '../services/projectService';
+ import { z } from 'zod';
+ import type { LanderStep } from '../../services/landerPipelineService';
+ import type { CommonSyncArtifact } from '../../services/commonSyncArtifacts';
++import type { PipelineTask } from '../components/shared/pipelineMockData';
+ 
+ let _reqId = 0;
+ /** 等待响应的 Promise 回调池：key = `{command}Response:{requestId}` */
+@@ -652,18 +653,20 @@ export async function deleteFlowConfigFile(
+ }
+ 
+ export async function generateDefaultFlowConfigs(
+-  flow: 'hibist' | 'sailor', module: string, isAllSelected?: boolean, stage?: string
++  flow: 'hibist' | 'sailor', domain: string, module: string, isAllSelected?: boolean
+ ): Promise<TransformResponse> {
+-  const res = await ipcRequest('generateDefaultFlowConfigs', { flow, module, isAllSelected, stage });
++  const res = await ipcRequest('generateDefaultFlowConfigs', { flow, domain, module, isAllSelected });
+   return res as unknown as TransformResponse;
+ }
+ 
+ export async function generateLanderConfigs(
++  domain: string,
+   stage: string,
+   landerAssistant: string
+ ): Promise<TransformResponse> {
+   const res = await ipcRequest('generateLanderConfigs', {
+     flow: 'verification',
++    domain,
+     stage,
+     landerAssistant,
+   });
+@@ -965,6 +968,7 @@ export async function ensurePipelineRuntime(options: {
+   flowKey: 'hibist' | 'sailor' | 'verification'
+   moduleKey: string
+   flowLabel: string
++  selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>
+ }): Promise<{ success: boolean; snapshot?: unknown; error?: string }> {
+   const res = await ipcRequest('ensurePipelineRuntime', options)
+   return res as { success: boolean; snapshot?: unknown; error?: string }
+@@ -1025,6 +1029,28 @@ export async function rerunPipelineTask(options: {
+   return res as { success: boolean; error?: string }
+ }
+ 
++export async function runPipelineTaskEcoHook(options: {
++  flowKey: 'hibist' | 'sailor' | 'verification'
++  moduleKey: string
++  taskId: string
++  phase: 'before' | 'after'
++  cwd?: string
++  stepStatus?: number
++}): Promise<{ success: boolean; error?: string }> {
++  const res = await ipcRequest('runPipelineTaskEcoHook', options)
++  return res as { success: boolean; error?: string }
++}
++
++export async function stopPipelineTaskEcoHook(options: {
++  flowKey: 'hibist' | 'sailor' | 'verification'
++  moduleKey: string
++  taskId: string
++  phase: 'before' | 'after'
++}): Promise<{ success: boolean; error?: string }> {
++  const res = await ipcRequest('stopPipelineTaskEcoHook', options)
++  return res as { success: boolean; error?: string }
++}
++
+ /**
+  * 打开 GitLab 仓库主页。
+  */
