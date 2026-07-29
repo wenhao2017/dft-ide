@@ -1,4 +1,4 @@
-import type { ModeConfigItem, ModePanelItem, ParsedCfgResult } from '../types'
+import type { ModeConfigItem, ModePanelItem } from '../types'
 
 /**
  * 判断当前资源是否为 Mode
@@ -72,28 +72,4 @@ export const createCopyName = (
  */
 export const sameName = (left: string, right: string): boolean => {
   return left.trim().toLowerCase() === right.trim().toLowerCase()
-}
-
-const MOCK_PRE_MODES = ['ip', 'atpg', 'fml', 'jtag', 'mbist-top'] as const
-
-const pickMockPreMode = (): string => {
-  const index = Math.floor(Math.random() * MOCK_PRE_MODES.length)
-  return MOCK_PRE_MODES[index]
-}
-
-export async function parseImportedModeCfg(
-  file: File | string,
-): Promise<ParsedCfgResult> {
-  void file
-  return parseModeCfgText('')
-}
-
-export function parseModeCfgText(text: string): ParsedCfgResult {
-  void text
-  const preMode = pickMockPreMode()
-
-  return {
-    extractedCandidate: preMode,
-    preMode,
-  }
 }

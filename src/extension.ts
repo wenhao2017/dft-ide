@@ -18,6 +18,7 @@ import { SpreadsheetProvider } from "./spreadsheet"
 import {
   handleGetLanderModePipelines,
 } from './ipc/landerPipelineIpc';
+import { parsePreModeFromModeCfg } from './services/modeCfgService';
 // Import constants
 import {
   VIEW_TYPE,
@@ -894,11 +895,14 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           if (path.resolve(path.dirname(selectedPath)).toLowerCase() !== path.resolve(cfgRoot).toLowerCase()) {
             throw new Error(`导入文件必须位于 ${cfgRoot} 目录中。`);
           }
+          const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(selectedPath));
+          const preMode = parsePreModeFromModeCfg(Buffer.from(bytes).toString('utf8')) ?? '';
           currentPanel?.webview.postMessage({
             command: 'selectVerificationModeCfgResponse', requestId,
             path: selectedPath,
             fileName: path.basename(selectedPath),
             modeName: path.basename(selectedPath, path.extname(selectedPath)),
+            preMode,
           });
         } catch (err) {
           currentPanel?.webview.postMessage({
@@ -2676,13 +2680,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           const modes = await Promise.all(entries.filter(([name, type]) => type === vscode.FileType.File && name.toLowerCase().endsWith('.cfg')).sort(([a], [b]) => a.localeCompare(b)).map(async ([fileName]) => {
             const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(path.join(cfgRoot, fileName)));
             const text = Buffer.from(bytes).toString('utf8');
-            const assignment = text.match(/(?:^|[\r\n])\s*(?:preMode|pre_mode|PRE_MODE)\s*(?:=|:)\s*["']?([A-Za-z0-9_-]+)["']?/m);
-            const pipeline = text.match(/lander_([A-Za-z0-9_-]+)\.ya?ml/i);
-            void assignment;
-            void pipeline;
-            const mockPreModes = ['ip', 'atpg', 'fml', 'jtag', 'mbist-top'];
-            const stableIndex = Array.from(fileName).reduce((sum, char) => sum + char.charCodeAt(0), 0) % mockPreModes.length;
-            const preMode = mockPreModes[stableIndex];
+            const preMode = parsePreModeFromModeCfg(text) ?? '';
             return { name: path.basename(fileName, path.extname(fileName)), preMode };
           }));
           currentPanel?.webview.postMessage({ command: 'syncVerificationModesResponse', requestId, modes });

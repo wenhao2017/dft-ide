@@ -175,11 +175,19 @@ export async function getMavToolVersions(toolName: string): Promise<string[]> {
 
 export async function selectVerificationModeCfg(
   stage: string,
-): Promise<{ path: string; fileName: string; modeName: string } | null> {
+): Promise<{ path: string; fileName: string; modeName: string; preMode: string } | null> {
   const res = await ipcRequest('selectVerificationModeCfg', { stage })
   if (typeof res.error === 'string') throw new Error(res.error)
-  return typeof res.path === 'string' && typeof res.fileName === 'string' && typeof res.modeName === 'string'
-    ? { path: res.path, fileName: res.fileName, modeName: res.modeName }
+  return typeof res.path === 'string'
+    && typeof res.fileName === 'string'
+    && typeof res.modeName === 'string'
+    && typeof res.preMode === 'string'
+    ? {
+        path: res.path,
+        fileName: res.fileName,
+        modeName: res.modeName,
+        preMode: res.preMode,
+      }
     : null
 }
 

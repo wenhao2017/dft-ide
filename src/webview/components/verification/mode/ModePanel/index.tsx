@@ -23,7 +23,7 @@ import { useModeSelection } from './hooks/useModeSelection'
 import { useModeCrud } from './hooks/useModeCrud'
 import { useModeRun } from './hooks/useModeRun'
 
-import { createCopyName, parseImportedModeCfg, sameName } from './utils'
+import { createCopyName, sameName } from './utils'
 import { readSavedParams, updateSavedParamReferences } from '../savedParamUtils'
 
 import {
@@ -253,7 +253,11 @@ export default function ModePanel({
     setCfgResult(undefined)
 
     try {
-      const result = await parseImportedModeCfg(selected.path)
+      const preMode = selected.preMode.trim()
+      const result: ParsedCfgResult = {
+        extractedCandidate: preMode || undefined,
+        preMode: preMode || undefined,
+      }
 
       setCfgResult(result)
       return selected.modeName
