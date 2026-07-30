@@ -251,7 +251,6 @@ export async function saveExecutionHistoryRecord(
         log_path: logDirectory,
         updatedAt: runtimeSnapshot?.updatedAt ?? Date.now(),
       }
-      await vscode.workspace.fs.createDirectory(vscode.Uri.file(logDirectory))
       const filePath = path.join(historyDir, `${id}.json`)
       await vscode.workspace.fs.writeFile(
         vscode.Uri.file(filePath),

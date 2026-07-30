@@ -52,6 +52,15 @@ interface PipelineRuntimeServiceOptions {
   getPipelineShellPath?: () => string | undefined;
 }
 
+interface PipelineExecutionPlanItem {
+  task: PipelineTask;
+  parameters?: Record<string, unknown>;
+  markerTaskId: string;
+  isLastTaskRun: boolean;
+  taskIndex: number;
+  continueOnFailure: boolean;
+}
+
 interface PipelineExecutionSession {
   runId: string;
   flowKey: PipelineFlowKey;
@@ -60,14 +69,8 @@ interface PipelineExecutionSession {
   logPrefix: string;
   terminalTitle: string;
   tasks: PipelineTask[];
-  executionPlan: Array<{
-    task: PipelineTask;
-    parameters?: Record<string, unknown>;
-    markerTaskId: string;
-    isLastTaskRun: boolean;
-    taskIndex: number;
-    continueOnFailure: boolean;
-  }>;
+  executionPlan: PipelineExecutionPlanItem[];
+  executionPlanByMarkerTaskId: Map<string, PipelineExecutionPlanItem>;
   nextIndex: number;
   cwd?: string;
   envConfig?: Record<string, unknown> | null;
@@ -901,6 +904,9 @@ export class PipelineRuntimeService {
         terminalTitle: getPipelineTerminalTitle(flowLabel, moduleKey),
         tasks: selectedTasksToRun,
         executionPlan,
+        executionPlanByMarkerTaskId: new Map(
+          executionPlan.map((item) => [item.markerTaskId, item]),
+        ),
         nextIndex: 0,
         cwd,
         envConfig,
@@ -1267,7 +1273,7 @@ export class PipelineRuntimeService {
         continue;
       }
       session.seenStarts.add(taskId);
-      const execution = session.executionPlan.find((item) => item.markerTaskId === taskId);
+      const execution = session.executionPlanByMarkerTaskId.get(taskId);
       const runtimeTaskId = execution?.task.id ?? taskId;
       this.patchTask(key, runtimeTaskId, (task) => ({
         status: task.status === 'success' || task.status === 'failed' ? task.status : 'running',
@@ -1291,7 +1297,7 @@ export class PipelineRuntimeService {
       const markerKey = `${markerTaskId}:${phaseText}`;
       if (runId !== session.runId || session.seenPhaseStarts.has(markerKey)) continue;
       session.seenPhaseStarts.add(markerKey);
-      const execution = session.executionPlan.find((item) => item.markerTaskId === markerTaskId);
+      const execution = session.executionPlanByMarkerTaskId.get(markerTaskId);
       const runtimeTaskId = execution?.task.id ?? markerTaskId;
       this.patchEcoHook(key, runtimeTaskId, phaseText as PipelineEcoPhase, (hook) => ({
         ...hook,
@@ -1310,7 +1316,7 @@ export class PipelineRuntimeService {
       const markerKey = `${markerTaskId}:${phaseText}`;
       if (runId !== session.runId || session.seenPhaseEnds.has(markerKey)) continue;
       session.seenPhaseEnds.add(markerKey);
-      const execution = session.executionPlan.find((item) => item.markerTaskId === markerTaskId);
+      const execution = session.executionPlanByMarkerTaskId.get(markerTaskId);
       const runtimeTaskId = execution?.task.id ?? markerTaskId;
       const exitCode = Number(exitCodeText);
       this.patchEcoHook(key, runtimeTaskId, phaseText as PipelineEcoPhase, (hook) => ({
@@ -1403,7 +1409,7 @@ export class PipelineRuntimeService {
       return;
     }
 
-    const execution = session.executionPlan.find((item) => item.markerTaskId === taskId);
+    const execution = session.executionPlanByMarkerTaskId.get(taskId);
     const task = execution?.task ?? session.tasks.find((item) => item.id === taskId);
     const runtimeTaskId = task?.id ?? taskId;
     if (exitCode === 0) {

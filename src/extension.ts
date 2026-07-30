@@ -135,6 +135,35 @@ function enqueueConfigTask<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+const EXECUTION_HISTORY_READ_CONCURRENCY = 12;
+
+async function readExecutionHistoryFiles(
+  historyDir: string,
+  fileNames: string[],
+): Promise<Record<string, unknown>[]> {
+  const results = new Array<Record<string, unknown> | undefined>(fileNames.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(EXECUTION_HISTORY_READ_CONCURRENCY, fileNames.length);
+
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < fileNames.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      try {
+        const raw = await vscode.workspace.fs.readFile(
+          vscode.Uri.file(path.join(historyDir, fileNames[index]))
+        );
+        results[index] = JSON.parse(Buffer.from(raw).toString('utf-8')) as Record<string, unknown>;
+      } catch {
+        // Keep history loading tolerant of unreadable or invalid history files.
+      }
+    }
+  });
+
+  await Promise.all(workers);
+  return results.filter((record): record is Record<string, unknown> => record !== undefined);
+}
+
 const pipelineRuntimeService = new PipelineRuntimeService({
   onUpdate: (snapshot) => {
     currentPanel?.webview.postMessage({ command: 'pipelineRuntimeUpdated', snapshot });
@@ -2380,14 +2409,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
               .filter(e => e[1] === vscode.FileType.File && e[0].endsWith('.json'))
               .map(e => e[0]);
 
-            for (const name of jsonFiles) {
-              const raw = await vscode.workspace.fs.readFile(
-                vscode.Uri.file(path.join(historyDir, name))
-              );
-              try {
-                history.push(JSON.parse(Buffer.from(raw).toString('utf-8')));
-              } catch {}
-            }
+            history = await readExecutionHistoryFiles(historyDir, jsonFiles);
             history.sort((a: any, b: any) => (b.executedAt ?? 0) - (a.executedAt ?? 0));
           } catch {}
 

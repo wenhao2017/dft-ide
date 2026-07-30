@@ -418,8 +418,9 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     });
   }, [searchText, statusFilters, visibleRuns]);
 
-  const visibleRunsWithHierarchies = useMemo(() => {
-    return filteredRuns.map((run) => {
+  const pagedRuns = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredRuns.slice(start, start + pageSize).map((run) => {
       const hierarchy = getTaskHierarchy(run);
       const trackTasks = hierarchy.topLevelTasks.length ? hierarchy.topLevelTasks : run.tasks;
       const trackTaskId = getTrackTaskId(run, hierarchy.parentByChild);
@@ -443,16 +444,12 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
       const counterText = `${Math.min(Math.max(trackTaskIndex + 1, completedTrackTasks), trackTasks.length)}/${trackTasks.length}`;
       return { counterText, hierarchy, run, trackTasks };
     });
-  }, [filteredRuns]);
-  const pagedRuns = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return visibleRunsWithHierarchies.slice(start, start + pageSize);
-  }, [currentPage, pageSize, visibleRunsWithHierarchies]);
+  }, [currentPage, filteredRuns, pageSize]);
 
   useEffect(() => {
-    const lastPage = Math.max(1, Math.ceil(visibleRunsWithHierarchies.length / pageSize));
+    const lastPage = Math.max(1, Math.ceil(filteredRuns.length / pageSize));
     if (currentPage > lastPage) setCurrentPage(lastPage);
-  }, [currentPage, pageSize, visibleRunsWithHierarchies.length]);
+  }, [currentPage, filteredRuns.length, pageSize]);
 
   useEffect(() => {
     if (!activeModuleKey || filteredRuns.some((run) => run.moduleKey === activeModuleKey)) return;
@@ -1130,11 +1127,11 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
             );
           }}
         />
-        {visibleRunsWithHierarchies.length > 0 && (
+        {filteredRuns.length > 0 && (
           <Pagination
             current={currentPage}
             pageSize={pageSize}
-            total={visibleRunsWithHierarchies.length}
+            total={filteredRuns.length}
             showSizeChanger
             pageSizeOptions={['10', '20', '50']}
             size="small"
