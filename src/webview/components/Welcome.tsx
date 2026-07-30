@@ -55,6 +55,7 @@ import {
   updateProjectDomain,
   updateProjectStar,
   fetchDomains,
+  syncCtmpProjects,
 } from '../services/projectService';
 
 const { Paragraph, Text, Title } = Typography;
@@ -220,6 +221,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
   const [domainSaving, setDomainSaving] = useState(false);
   const [showStarProject, setShowStarProject] = useState(false);
   const [domains, setDomains] = useState<ProjectDomain[]>([]);
+  const [ctmpDataSyncing, setCtmpDataSyncing] = useState(false);
 
   const cardBorder = 'var(--vscode-panel-border, rgba(127,127,127,0.18))';
   const panelBg = isDark
@@ -666,6 +668,19 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     }
   }, [projectForm, currentUser, closeProjectModal, fetchProjectData, initProjectDomain]);
 
+  const syncCtmpData = useCallback(async () => {
+    setCtmpDataSyncing(true);
+    try {
+      await syncCtmpProjects();
+      message.success('CTMP 数据同步成功');
+      fetchProjectData();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'CTMP 数据同步失败');
+    } finally {
+      setCtmpDataSyncing(false);
+    }
+  }, []);
+
   return (
     <div>
       <div
@@ -773,7 +788,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
                         key: 'ctmp-sync',
                         label: 'CTMP 数据同步',
                         icon: <SyncOutlined />,
-                        // onClick: () => onSyncCtmp?.(),
+                        onClick: () => syncCtmpData(),
                       },
                     ],
                   }}
@@ -784,6 +799,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
                       color: 'rgba(9, 110, 243, 1)',
                       borderColor: 'rgba(9, 110, 243, 1)',
                     }}
+                    loading={ctmpDataSyncing}
                   >
                     <SettingOutlined /> 管理员配置 <DownOutlined />
                   </Button>

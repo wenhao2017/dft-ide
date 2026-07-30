@@ -169,6 +169,22 @@ function getApiBase(): string | null {
   return configured?.replace(/\/$/, '') ?? null;
 }
 
+export async function syncCtmpProjects(): Promise<boolean> {
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    return false;
+  }
+
+  const response = await fetch(`${apiBase}/api/dft-ide/ctmp/sync/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+  await responseErrorHandler(response, 'Ctmp data sync failed');
+  return true;
+}
+
 export async function createProject(currentUser: string, project: {
   name: string;
   domain: string;

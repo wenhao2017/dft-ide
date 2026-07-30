@@ -1229,9 +1229,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         try {
           await initProjectWorkspace(project);
           await downloadDomainEcoFiles(project, domain);
-          if(isInit){
-            await pushDomainEcoFiles(project);
-          }
+          await pushDomainEcoFiles(project, isInit);
 
           currentPanel?.webview.postMessage({
             command: 'downloadDomainEcoFromObsResponse',
@@ -2817,7 +2815,7 @@ async function downloadDomainEcoFiles(project: DftProject, domain: ProjectDomain
   }
 }
 
-async function pushDomainEcoFiles(project: DftProject) {
+async function pushDomainEcoFiles(project: DftProject, isInit: boolean) {
   const projectRoot = project.projectPath;
   if (!projectRoot) {
     throw new Error('Fetch project root failed.');
@@ -2826,12 +2824,29 @@ async function pushDomainEcoFiles(project: DftProject) {
   for (const repo of project.repos) {
     if (repo.key === 'data') {
       continue;
-    } else{
+    } else {
       const repoPath = path.join(projectRoot, repo.gitlabProjectName);
-
       const commands = [];
-      commands.push("git add .");
-      commands.push(`git commit -m "Commit domain eco"`);
+
+      if (isInit) {
+        commands.push("git add .");
+        commands.push(`git commit -m "Commit domain eco"`);
+      } else {
+        if (repo.key === 'verification') {
+          const files = fs.readdirSync(repoPath, { withFileTypes: true });
+          files.forEach(file => {
+            if (file.isDirectory()) {
+              const destPath = path.join(repoPath, file.name, 'eco');
+              if (fs.existsSync(destPath)) {
+                commands.push(`git add ./${file.name}/eco`);
+              }
+            }
+          });
+        } else {
+          commands.push("git add ./eco");
+        }
+        commands.push(`git commit -m "Update domain eco"`);
+      }
       commands.push("git push origin master");
 
       await pushDomainEcoWithTerminal(repoPath, commands);
