@@ -6,7 +6,10 @@ import {
   normalizeDsubCommand,
   tokenizeShellWords,
 } from '../src/shared/clusterSubmission'
-import { parseCshAliasOutput } from '../src/services/dsubAliasService'
+import {
+  attachResolvedClusterSubmission,
+  parseCshAliasOutput,
+} from '../src/services/dsubAliasService'
 
 describe('cluster submission commands', () => {
   it('adds interactive mode and preserves quoted resources and extra arguments', () => {
@@ -106,5 +109,11 @@ describe('csh Alias discovery', () => {
     )
 
     expect(aliases).toEqual([])
+  })
+
+  it('prompts for Donau configuration before starting a pipeline', async () => {
+    await expect(
+      attachResolvedClusterSubmission({}, null),
+    ).rejects.toThrow('尚未配置 Donau 集群提交策略')
   })
 })

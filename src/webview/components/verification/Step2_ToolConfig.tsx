@@ -103,6 +103,7 @@ const Step2ToolConfig: React.FC<Props> = ({
             children: (
               <Form
                 form={form}
+                className="dft-step2-compact"
                 layout="vertical"
                 onValuesChange={markDirty}
                 style={{ paddingTop: 12 }}

@@ -278,7 +278,7 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
         }
         return { runtimes };
       });
-      message.error(error || '???????');
+      message.error(error || '流水线启动失败，请检查配置后重试。');
     };
 
     void startPipelineRuntime({

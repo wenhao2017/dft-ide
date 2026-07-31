@@ -89,7 +89,10 @@ export async function attachResolvedClusterSubmission(
   const cluster = migrateLegacyClusterSubmission(flowTask)
     ?? migrateLegacyClusterSubmission(legacyTask);
   if (!cluster) {
-    throw new Error('尚未配置集群提交策略，请先在“工具与集群”中选择 Alias 或独立配置集群。');
+    throw new Error('尚未配置 Donau 集群提交策略，请先进入“工具与集群”完成配置并保存，再运行流水线。');
+  }
+  if (cluster.mode === 'alias' && !cluster.aliasName.trim()) {
+    throw new Error('尚未配置 Donau 集群提交策略，请先进入“工具与集群”选择个人 Alias 并保存，再运行流水线。');
   }
 
   const resolved = cluster.mode === 'alias'

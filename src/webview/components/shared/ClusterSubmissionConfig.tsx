@@ -150,6 +150,23 @@ export default function ClusterSubmissionConfigEditor({
           --cluster-border: ${token.colorBorderSecondary};
           --cluster-surface: ${token.colorBgContainer};
           --cluster-soft: ${token.colorFillQuaternary};
+          font-size: 12px;
+        }
+        .dft-step2-compact,
+        .dft-step2-compact .ant-typography,
+        .dft-step2-compact .ant-card-head-title,
+        .dft-step2-compact .ant-form-item-label > label,
+        .dft-step2-compact .ant-btn,
+        .dft-step2-compact .ant-input,
+        .dft-step2-compact .ant-select {
+          font-size: 12px;
+        }
+        .dft-step2-compact .ant-card-head {
+          min-height: 44px;
+        }
+        .dft-step2-compact .ant-card-head-title,
+        .dft-step2-compact .ant-card-extra {
+          padding-block: 10px;
         }
         .dft-cluster-config .cluster-hero {
           position: relative;
@@ -177,7 +194,7 @@ export default function ClusterSubmissionConfigEditor({
           background: ${token.colorFillQuaternary};
         }
         .dft-cluster-config .cluster-mode .ant-segmented-item {
-          min-height: 44px;
+          min-height: 38px;
           display: grid;
           place-items: center;
           font-weight: 650;
@@ -204,14 +221,14 @@ export default function ClusterSubmissionConfigEditor({
           background: ${token.colorFillQuaternary};
         }
         .dft-cluster-config .cluster-command {
-          min-height: 64px;
+          min-height: 56px;
           margin: 0;
           padding: 16px;
           white-space: pre-wrap;
           overflow-wrap: anywhere;
           font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Consolas, monospace);
-          font-size: 12px;
-          line-height: 1.75;
+          font-size: 11px;
+          line-height: 1.65;
           color: ${token.colorText};
         }
         .dft-cluster-config .alias-option {
@@ -230,14 +247,14 @@ export default function ClusterSubmissionConfigEditor({
         }
       `}</style>
 
-      <Card className="cluster-hero" styles={{ body: { padding: 20 } }}>
-        <Space direction="vertical" size={6} style={{ width: '100%', position: 'relative', zIndex: 1 }}>
-          <Space size={10} align="center">
-            <CloudServerOutlined style={{ color: token.colorPrimary, fontSize: 22 }} />
-            <Title level={4} style={{ margin: 0 }}>集群提交策略</Title>
+      <Card className="cluster-hero" styles={{ body: { padding: 16 } }}>
+        <Space direction="vertical" size={4} style={{ width: '100%', position: 'relative', zIndex: 1 }}>
+          <Space size={8} align="center">
+            <CloudServerOutlined style={{ color: token.colorPrimary, fontSize: 19 }} />
+            <Title level={5} style={{ margin: 0, fontSize: 16 }}>Donau集群提交策略</Title>
             <Tag icon={<SafetyCertificateOutlined />} color="processing">强制交互模式 -I</Tag>
           </Space>
-          <Paragraph type="secondary" style={{ margin: 0, maxWidth: 760 }}>
+          <Paragraph type="secondary" style={{ margin: 0, maxWidth: 760, fontSize: 12 }}>
             使用个人 csh Alias，或独立选择 Donau 资源。两种方式都会生成完整命令，
             并通过 <Text code>DFT_IDE_DSUBRUN_I</Text> 下发给 run_flow。
           </Paragraph>
@@ -261,7 +278,7 @@ export default function ClusterSubmissionConfigEditor({
         ]}
       />
 
-      <Card className="cluster-editor" styles={{ body: { padding: 20 } }}>
+      <Card className="cluster-editor" styles={{ body: { padding: 16 } }}>
         {value.mode === 'alias' ? (
           <Space direction="vertical" size={14} style={{ width: '100%' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start' }}>
@@ -286,7 +303,6 @@ export default function ClusterSubmissionConfigEditor({
               <Select
                 showSearch
                 allowClear
-                size="large"
                 style={{ width: '100%' }}
                 value={value.aliasName || undefined}
                 placeholder="选择个人 dsub Alias"
@@ -343,7 +359,6 @@ export default function ClusterSubmissionConfigEditor({
               <Col xs={24} lg={14}>
                 <Text type="secondary">用户组 / Account</Text>
                 <Input
-                  size="large"
                   value={value.group}
                   placeholder="例如 root.ug_dft..."
                   onChange={(event) => updateCustom({ group: event.target.value })}
@@ -352,7 +367,6 @@ export default function ClusterSubmissionConfigEditor({
               <Col xs={24} lg={10}>
                 <Text type="secondary">队列 / Queue</Text>
                 <Input
-                  size="large"
                   value={value.queue}
                   placeholder="例如 normal、bigmem"
                   onChange={(event) => updateCustom({ queue: event.target.value })}
@@ -361,7 +375,6 @@ export default function ClusterSubmissionConfigEditor({
               <Col xs={12} lg={6}>
                 <Text type="secondary">CPU</Text>
                 <Input
-                  size="large"
                   value={value.cpu}
                   placeholder="1"
                   onChange={(event) => updateCustom({ cpu: event.target.value })}
@@ -370,7 +383,6 @@ export default function ClusterSubmissionConfigEditor({
               <Col xs={12} lg={6}>
                 <Text type="secondary">内存 / MB</Text>
                 <Input
-                  size="large"
                   value={value.memory}
                   placeholder="20000"
                   onChange={(event) => updateCustom({ memory: event.target.value })}
@@ -379,7 +391,6 @@ export default function ClusterSubmissionConfigEditor({
               <Col xs={24} lg={12}>
                 <Text type="secondary">其他参数</Text>
                 <Input
-                  size="large"
                   value={value.extraArgs}
                   placeholder="-FR 'Design-Compiler'"
                   onChange={(event) => updateCustom({ extraArgs: event.target.value })}
