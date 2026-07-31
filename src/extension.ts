@@ -120,6 +120,7 @@ import {
 import { parseModuleString } from './services/utils';
 import { DftProject, ProjectDomain } from './webview/services/projectService';
 import { getVersionFromModuleName, modifyModuleCfgByVersion } from './utils';
+import { attachResolvedClusterSubmission, getDsubAliases } from './services/dsubAliasService';
 
 const execFileAsync = promisify(execFile);
 
@@ -679,15 +680,24 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
               })
               : undefined;
             const cwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
-            const envConfig = await readConfig(flowKey);
+            const savedFlowConfig = await readConfig(flowKey);
             const verificationStage = flowKey === 'verification'
-              && typeof envConfig?.stage === 'string'
-                ? envConfig.stage
+              && typeof savedFlowConfig?.stage === 'string'
+                ? savedFlowConfig.stage
                 : undefined;
             const taskConfigKey = verificationStage
               ? `${flowKey}/${verificationStage}/${moduleKey}/config`
               : `${flowKey}/${moduleKey}/config`;
             const taskConfig = await readConfig(taskConfigKey);
+            const configuredShell = vscode.workspace
+              .getConfiguration('dftIde')
+              .get<string>('pipeline.shellPath', 'csh')
+              .trim() || 'csh';
+            const envConfig = await attachResolvedClusterSubmission(
+              savedFlowConfig,
+              taskConfig,
+              configuredShell,
+            );
             const runParameters = msg.runParameters;
             pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel, selectedTaskIds, cwd, envConfig, taskConfig, selectedTasks, runParameters);
           } else if (msg.command === 'stopPipelineRuntime') {
@@ -703,15 +713,24 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             if (!taskId || !phase) {
               throw new Error('Invalid pipeline ECO hook payload');
             }
-            const envConfig = await readConfig(flowKey);
+            const savedFlowConfig = await readConfig(flowKey);
             const verificationStage = flowKey === 'verification'
-              && typeof envConfig?.stage === 'string'
-                ? envConfig.stage
+              && typeof savedFlowConfig?.stage === 'string'
+                ? savedFlowConfig.stage
                 : undefined;
             const taskConfigKey = verificationStage
               ? `${flowKey}/${verificationStage}/${moduleKey}/config`
               : `${flowKey}/${moduleKey}/config`;
             const taskConfig = await readConfig(taskConfigKey);
+            const configuredShell = vscode.workspace
+              .getConfiguration('dftIde')
+              .get<string>('pipeline.shellPath', 'csh')
+              .trim() || 'csh';
+            const envConfig = await attachResolvedClusterSubmission(
+              savedFlowConfig,
+              taskConfig,
+              configuredShell,
+            );
             const cwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
             const stepStatus = Number.isFinite(msg.stepStatus) ? Number(msg.stepStatus) : 0;
             snapshot = pipelineRuntimeService.runTaskEcoHook(
@@ -907,6 +926,30 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         } catch (err) {
           currentPanel?.webview.postMessage({
             command: 'getMavToolVersionsResponse', requestId, versions: [],
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
+      case 'getDsubAliases': {
+        const requestId: string = msg.requestId;
+        try {
+          const configuredShell = vscode.workspace
+            .getConfiguration('dftIde')
+            .get<string>('pipeline.shellPath', 'csh')
+            .trim() || 'csh';
+          const aliases = await getDsubAliases(configuredShell);
+          currentPanel?.webview.postMessage({
+            command: 'getDsubAliasesResponse',
+            requestId,
+            aliases,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'getDsubAliasesResponse',
+            requestId,
+            aliases: [],
             error: err instanceof Error ? err.message : String(err),
           });
         }

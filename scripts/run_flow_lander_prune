@@ -535,7 +535,10 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
         fail(f"Work Path 不存在: {work_path}")
     managed = load_managed_env(resolve_env_file(work_path, env_file))
     runtime_env = dict(os.environ)
+    inherited_dsubrun = runtime_env.get("DFT_IDE_DSUBRUN_I")
     runtime_env.update(managed)
+    if inherited_dsubrun:
+        runtime_env["DFT_IDE_DSUBRUN_I"] = inherited_dsubrun
     extra_arg_value = extra_arg if extra_arg is not None else runtime_env.get("DFT_IDE_TOOL_EXTRA_ARG", "")
     try:
         tool_extra_args = shlex.split(extra_arg_value) if extra_arg_value.strip() else []

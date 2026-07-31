@@ -12,6 +12,10 @@ import {
 import { resolveProjectPath, resolveProjectRoot } from './workspaceService';
 import { getExecutionTerminalCapabilities, registerExecutionTerminalMonitor, stopExecutionTerminal } from './terminalService';
 import { formatTime, getVersionFromModuleName } from '../utils';
+import {
+  applyDsubCommandOverrides,
+  type DonauSubmissionOverride,
+} from '../shared/clusterSubmission';
 
 export type PipelineFlowKey = 'hibist' | 'sailor' | 'verification';
 export type PipelineRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
@@ -113,8 +117,6 @@ function getPipelineTerminalTitle(flowLabel: string, moduleKey: string): string 
 }
 
 const PIPELINE_PYTHON_MODULE = 'python/3.10.6';
-const DEFAULT_DONAU_GROUP = 'ug_dft.HIS-HIS-ASIC-HISC-DFT-PLAT-WS';
-const DEFAULT_DONAU_QUEUE = 'normal';
 
 function quoteCshArgument(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -167,6 +169,44 @@ function mergeToolConfigs(projectTools: unknown, rowTools: unknown): RuntimeTool
     merged.set(tool.name.toLocaleLowerCase(), tool);
   }
   return Array.from(merged.values());
+}
+
+function getRuntimeTaskConfig(
+  envConfig?: Record<string, unknown> | null,
+  legacyTaskConfig?: Record<string, unknown> | null,
+): Record<string, unknown> | undefined {
+  const flowStep2 = envConfig?.step2 && typeof envConfig.step2 === 'object'
+    ? envConfig.step2 as Record<string, unknown>
+    : undefined;
+  const flowTask = flowStep2?.step2Task && typeof flowStep2.step2Task === 'object'
+    ? flowStep2.step2Task as Record<string, unknown>
+    : undefined;
+  if (flowTask) return flowTask;
+  const legacyStep2 = legacyTaskConfig?.step2 && typeof legacyTaskConfig.step2 === 'object'
+    ? legacyTaskConfig.step2 as Record<string, unknown>
+    : undefined;
+  return legacyStep2?.step2Task && typeof legacyStep2.step2Task === 'object'
+    ? legacyStep2.step2Task as Record<string, unknown>
+    : undefined;
+}
+
+function resolveRuntimeDsubCommand(
+  customConfig: Record<string, unknown> | undefined,
+  runParameters: unknown,
+): { command: string; group?: string } {
+  const baseCommand = firstNonEmptyString(customConfig?.resolvedDsubCommand);
+  if (!baseCommand) {
+    throw new Error('缺少已解析的集群提交命令，请重新保存 Flow 集群配置后再运行。');
+  }
+  const parameterRow = Array.isArray(runParameters)
+    && runParameters[0]
+    && typeof runParameters[0] === 'object'
+    ? runParameters[0] as Record<string, unknown>
+    : undefined;
+  const override = parameterRow?.donau && typeof parameterRow.donau === 'object'
+    ? parameterRow.donau as DonauSubmissionOverride
+    : undefined;
+  return applyDsubCommandOverrides(baseCommand, override);
 }
 
 function buildPipelineStepExecutionCommand(projectPath: string | undefined, stepCommand: string): string {
@@ -275,46 +315,6 @@ function buildStepEndMarker(runId: string, taskId: string): string {
   return `__DFT_IDE_STEP_END__|${runId}|${taskId}|`;
 }
 
-function resolveVerificationRunParameters(
-  runParameters: unknown,
-  taskConfig?: Record<string, unknown> | null,
-): unknown {
-  if (!Array.isArray(runParameters)) {
-    return runParameters;
-  }
-
-  const step2 = taskConfig?.step2 as Record<string, unknown> | undefined;
-  const task = step2?.step2Task as Record<string, unknown> | undefined;
-  const fallbackDonau = {
-    group: String(task?.clusterGroup ?? DEFAULT_DONAU_GROUP).trim() || DEFAULT_DONAU_GROUP,
-    queue: String(task?.clusterQueue ?? DEFAULT_DONAU_QUEUE).trim() || DEFAULT_DONAU_QUEUE,
-    cpu: String(task?.cpu ?? '').trim(),
-    mem: String(task?.memory ?? '').trim(),
-  };
-
-  return runParameters.map((row) => {
-    if (!row || typeof row !== 'object') {
-      return row;
-    }
-    const record = row as Record<string, unknown>;
-    const suppliedDonau = record.donau && typeof record.donau === 'object'
-      ? record.donau as Record<string, unknown>
-      : {};
-    const value = (key: keyof typeof fallbackDonau) => (
-      String(suppliedDonau[key] ?? '').trim() || fallbackDonau[key]
-    );
-    return {
-      ...record,
-      donau: {
-        group: value('group'),
-        queue: value('queue'),
-        ...(value('cpu') ? { cpu: value('cpu') } : {}),
-        ...(value('mem') ? { mem: value('mem') } : {}),
-      },
-    };
-  });
-}
-
 function readRunParameterNames(row: Record<string, unknown>, key: string): string[] {
   const value = row[key];
   if (!Array.isArray(value)) return [];
@@ -393,6 +393,7 @@ function buildStepCommands(
   const projectPath = resolveProjectPath(flowKey);
   commands.push(`setenv DFT_IDE_HISTORY ${quoteCshArgument(runId)}`);
   commands.push(`setenv DFT_IDE_MARKER_TASK_ID ${quoteCshArgument(markerTaskId)}`);
+  const customConfig = getRuntimeTaskConfig(envConfig, taskConfig);
 
   if (index === 0) {
     const [oriModuleKey, version] = getVersionFromModuleName(moduleKey);
@@ -413,43 +414,24 @@ function buildStepCommands(
       commands.push(`setenv DFT_IDE_STAGE ${quoteCshArgument(stage)}`);
     }
 
-    const source = taskConfig?.step2 as Record<string, unknown> | undefined;
-    const customConfig = source?.step2Task as Record<string, unknown> | undefined;
     if (customConfig) {
       const parameterRow = Array.isArray(runParameters) && runParameters[0] && typeof runParameters[0] === 'object'
         ? runParameters[0] as Record<string, unknown>
         : undefined;
       appendToolCommands(commands, mergeToolConfigs(customConfig.tools, parameterRow?.tools));
-
-      const parameterDonau = parameterRow?.donau && typeof parameterRow.donau === 'object'
-        ? parameterRow.donau as Record<string, unknown>
-        : undefined;
-      const clusterGroup = firstNonEmptyString(parameterDonau?.group, customConfig.clusterGroup);
-      const clusterQueue = firstNonEmptyString(parameterDonau?.queue, customConfig.clusterQueue);
-      const cpu = firstNonEmptyString(parameterDonau?.cpu, customConfig.cpu);
-      const memory = firstNonEmptyString(parameterDonau?.mem, customConfig.memory);
-      const clusterExtra = firstNonEmptyString(customConfig.clusterExtra);
-      if (clusterGroup) {
-        commands.push(`setenv DONAU_GROUP "${clusterGroup}"`);
-        const queue = clusterQueue ? `-q ${clusterQueue}` : '';
-        let resource = '';
-        if (cpu || memory) {
-          const resources: string[] = [];
-          if (cpu) {
-            resources.push(`cpu=${cpu}`);
-          }
-          if (memory) {
-            resources.push(`mem=${memory}`);
-          }
-          resource = `-R '${resources.join(';')}'`;
-        }
-        const dsubArgs = ['-A', clusterGroup, queue, resource, clusterExtra]
-          .filter(Boolean)
-          .join(' ');
-        commands.push(`setenv DFT_IDE_DSUBRUN_I "dsub -I ${dsubArgs}"`);
-      }
     }
   }
+
+  const resolvedDsub = resolveRuntimeDsubCommand(customConfig, runParameters);
+  const dsubCommand = resolvedDsub.command;
+  const donauGroup = firstNonEmptyString(
+    resolvedDsub.group,
+    customConfig?.resolvedDonauGroup,
+  );
+  if (donauGroup) {
+    commands.push(`setenv DONAU_GROUP ${quoteCshArgument(donauGroup)}`);
+  }
+  commands.push(`setenv DFT_IDE_DSUBRUN_I ${quoteCshArgument(dsubCommand)}`);
 
   if (flowKey === 'verification') {
     appendVerificationParameterCommands(commands, task, runParameters);
@@ -876,9 +858,7 @@ export class PipelineRuntimeService {
 
     try {
       const selectedTasksToRun = initialTasks.filter((t) => t.status !== 'skipped');
-      const resolvedRunParameters = flowKey === 'verification'
-        ? resolveVerificationRunParameters(runParameters, taskConfig)
-        : runParameters;
+      const resolvedRunParameters = runParameters;
       const executionPlan = selectedTasksToRun.flatMap((task, taskIndex) => {
         const parameterSets = flowKey === 'verification'
           ? getApplicableVerificationParameterSets(task, resolvedRunParameters)
@@ -972,13 +952,24 @@ export class PipelineRuntimeService {
     });
 
     if (task && task.command.trim() && runtime) {
-      const stepCommand = task.command.trim();
-      let commands: string[] = [];
-      commands.push(`echo "=== [DFT IDE] Rerun Step: ${task.name || task.id} ==="`);
-      commands.push(flowKey === 'verification'
-        ? stepCommand
-        : buildPipelineStepExecutionCommand(resolveProjectPath(flowKey), stepCommand));
-      this.options.openTerminal(getPipelineTerminalTitle(runtime.flowLabel, moduleKey), commands, true);
+      const context = this.runtimeContexts.get(key);
+      const commands = buildStepCommands(
+        `rerun_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        task,
+        0,
+        flowKey,
+        moduleKey,
+        context?.envConfig,
+        context?.taskConfig,
+        context?.runParameters,
+      );
+      this.options.openTerminal(
+        getPipelineTerminalTitle(runtime.flowLabel, moduleKey),
+        commands,
+        true,
+        context?.cwd,
+        this.options.getPipelineShellPath?.() ?? 'csh',
+      );
     }
 
     scheduleRuntime(key, 1200, () => {
@@ -1120,33 +1111,23 @@ export class PipelineRuntimeService {
       commands.push(`setenv DFT_IDE_STAGE ${quoteCshArgument(stage)}`);
     }
 
-    const source = taskConfig?.step2 as Record<string, unknown> | undefined;
-    const customConfig = source?.step2Task as Record<string, unknown> | undefined;
+    const customConfig = getRuntimeTaskConfig(envConfig, taskConfig);
     const parameterRow = Array.isArray(runParameters) && runParameters[0] && typeof runParameters[0] === 'object'
       ? runParameters[0] as Record<string, unknown>
       : undefined;
     if (customConfig) {
       appendToolCommands(commands, mergeToolConfigs(customConfig.tools, parameterRow?.tools));
-      const parameterDonau = parameterRow?.donau && typeof parameterRow.donau === 'object'
-        ? parameterRow.donau as Record<string, unknown>
-        : undefined;
-      const clusterGroup = firstNonEmptyString(parameterDonau?.group, customConfig.clusterGroup);
-      const clusterQueue = firstNonEmptyString(parameterDonau?.queue, customConfig.clusterQueue);
-      const cpu = firstNonEmptyString(parameterDonau?.cpu, customConfig.cpu);
-      const memory = firstNonEmptyString(parameterDonau?.mem, customConfig.memory);
-      const clusterExtra = firstNonEmptyString(customConfig.clusterExtra);
-      if (clusterGroup) {
-        commands.push(`setenv DONAU_GROUP ${quoteCshArgument(clusterGroup)}`);
-        const queue = clusterQueue ? `-q ${clusterQueue}` : '';
-        const resources = [
-          cpu ? `cpu=${cpu}` : '',
-          memory ? `mem=${memory}` : '',
-        ].filter(Boolean);
-        const resource = resources.length ? `-R '${resources.join(';')}'` : '';
-        const dsubArgs = ['-A', clusterGroup, queue, resource, clusterExtra].filter(Boolean).join(' ');
-        commands.push(`setenv DFT_IDE_DSUBRUN_I ${quoteCshArgument(`dsub -I ${dsubArgs}`)}`);
-      }
     }
+    const resolvedDsub = resolveRuntimeDsubCommand(customConfig, runParameters);
+    const dsubCommand = resolvedDsub.command;
+    const donauGroup = firstNonEmptyString(
+      resolvedDsub.group,
+      customConfig?.resolvedDonauGroup,
+    );
+    if (donauGroup) {
+      commands.push(`setenv DONAU_GROUP ${quoteCshArgument(donauGroup)}`);
+    }
+    commands.push(`setenv DFT_IDE_DSUBRUN_I ${quoteCshArgument(dsubCommand)}`);
     if (flowKey === 'verification') {
       appendVerificationParameterCommands(commands, task, runParameters);
     }
@@ -1241,7 +1222,7 @@ export class PipelineRuntimeService {
     console.log('subattrs:', runParameterRows.map((row) => row.subattrNames ?? []));
     console.log('extraArg:', runParameterRows.map((row) => row.extraArg ?? ''));
     console.log('tools:', runParameterRows.map((row) => row.tools ?? []));
-    console.log('Donau:', runParameterRows.map((row) => row.donau ?? {}));
+    console.log('Donau overrides:', runParameterRows.map((row) => row.donau ?? {}));
     console.log('parameter rows:', runParameterRows);
     console.groupEnd();
     this.patchTask(key, task.id, (current) => ({

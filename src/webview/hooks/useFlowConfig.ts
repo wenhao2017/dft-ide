@@ -140,8 +140,9 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
       const result = await saveConfig(flow, data);
       if (result.success) {
         message.success(`配置已保存${result.filePath ? `（${result.filePath}）` : ''}`);
-        setSavedData(data);
-        configCache.set(flow, data);
+        const merged = { ...(configCache.get(flow) ?? {}), ...data };
+        setSavedData(merged);
+        configCache.set(flow, merged);
         setHasUnsaved(false);
         clearDirtyStore(flow);
         return true;
@@ -171,8 +172,9 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
       try {
         const result = await saveConfig(flow, data);
         if (result.success && mountedRef.current) {
-          setSavedData(data);
-          configCache.set(flow, data);
+          const merged = { ...(configCache.get(flow) ?? {}), ...data };
+          setSavedData(merged);
+          configCache.set(flow, merged);
           // 自动保存成功后标记已保存（但保留 hasUnsaved = true 直到手动 sync）
         }
       } catch {
@@ -201,8 +203,9 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
         message.error(`保存失败：${saveResult.error ?? '未知错误'}`);
         return false;
       }
-      setSavedData(data);
-      configCache.set(flow, data);
+      const merged = { ...(configCache.get(flow) ?? {}), ...data };
+      setSavedData(merged);
+      configCache.set(flow, merged);
 
       // 然后 Git commit (+可选 push)
       const gitResult = await syncGit(flow, commitMessage, push);

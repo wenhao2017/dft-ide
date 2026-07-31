@@ -12,6 +12,7 @@ import { z } from 'zod';
 import type { LanderStep } from '../../services/landerPipelineService';
 import type { CommonSyncArtifact } from '../../services/commonSyncArtifacts';
 import type { PipelineTask } from '../components/shared/pipelineMockData';
+import type { DsubAliasOption } from '../../shared/clusterSubmission';
 
 let _reqId = 0;
 /** 等待响应的 Promise 回调池：key = `{command}Response:{requestId}` */
@@ -170,6 +171,21 @@ export async function getMavToolVersions(toolName: string): Promise<string[]> {
   if (typeof res.error === 'string') throw new Error(res.error)
   return Array.isArray(res.versions)
     ? res.versions.filter((value): value is string => typeof value === 'string')
+    : []
+}
+
+export async function getDsubAliases(): Promise<DsubAliasOption[]> {
+  const res = await ipcRequest('getDsubAliases')
+  if (typeof res.error === 'string') throw new Error(res.error)
+  return Array.isArray(res.aliases)
+    ? res.aliases.filter((value): value is DsubAliasOption => {
+        if (!value || typeof value !== 'object') return false
+        const alias = value as Record<string, unknown>
+        return typeof alias.name === 'string'
+          && typeof alias.definition === 'string'
+          && typeof alias.command === 'string'
+          && typeof alias.originallyInteractive === 'boolean'
+      })
     : []
 }
 
