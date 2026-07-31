@@ -1,0 +1,1262 @@
+diff --git a/scripts/run_flow_hibist b/scripts/run_flow_hibist
+index 81d137d..fb2cda1 100644
+--- a/scripts/run_flow_hibist
++++ b/scripts/run_flow_hibist
+@@ -441,7 +441,7 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
+     eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
+     if eco_only_phase:
+         return run_eco(work_path, runtime_env, source_file, eco_only_phase)
+-    cfg_file = Path(cfg).expanduser().resolve() if cfg else work_path / "hibist" / "cfg" / module_name / f"{module_name}.sailor.cfg"
++    cfg_file = Path(cfg).expanduser().resolve() if cfg else work_path / "hibist" / "cfg" / module_name / f"{module_name}.cfg"
+     log_folder = resolve_history_folder(work_path, runtime_env)
+     dsubrun_prefix = read_dsubrun_prefix(runtime_env)
+ 
+diff --git a/src/extension.ts b/src/extension.ts
+index 5c35479..39be804 100644
+--- a/src/extension.ts
++++ b/src/extension.ts
+@@ -104,6 +104,7 @@ import {
+ import {
+   openExecutionTerminal,
+   saveExecutionHistoryRecord,
++  deleteExecutionHistoryRecords,
+   normalizeHistoryFlow,
+ } from './services/terminalService';
+ 
+@@ -118,6 +119,7 @@ import {
+ } from './services/obsPreviewService';
+ import { parseModuleString } from './services/utils';
+ import { DftProject, ProjectDomain } from './webview/services/projectService';
++import { getVersionFromModuleName, modifyModuleCfgByVersion } from './utils';
+ 
+ const execFileAsync = promisify(execFile);
+ 
+@@ -136,6 +138,18 @@ function enqueueConfigTask<T>(task: () => Promise<T>): Promise<T> {
+ }
+ 
+ const EXECUTION_HISTORY_READ_CONCURRENCY = 12;
++const EXECUTION_HISTORY_READ_LIMIT = 300;
++const EXECUTION_HISTORY_FILE_PATTERN = /^exec_(\d+)_(\d+)\.json$/;
++
++function compareExecutionHistoryFileNames(left: string, right: string): number {
++  const leftMatch = EXECUTION_HISTORY_FILE_PATTERN.exec(left);
++  const rightMatch = EXECUTION_HISTORY_FILE_PATTERN.exec(right);
++  if (!leftMatch || !rightMatch) {
++    return right.localeCompare(left);
++  }
++  const timestampDifference = Number(rightMatch[1]) - Number(leftMatch[1]);
++  return timestampDifference || Number(rightMatch[2]) - Number(leftMatch[2]);
++}
+ 
+ async function readExecutionHistoryFiles(
+   historyDir: string,
+@@ -971,6 +985,13 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+           }
+           if (command === 'renameVerificationModeCfg') {
+             await vscode.workspace.fs.rename(vscode.Uri.file(source), vscode.Uri.file(target), { overwrite: false });
++            const [oriModuleKey, version] = getVersionFromModuleName(msg.targetMode);
++            if (version) {
++              const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
++              const content = Buffer.from(bytes).toString('utf-8');
++              const lines = modifyModuleCfgByVersion('verification', content);
++              await vscode.workspace.fs.writeFile(vscode.Uri.file(target), Buffer.from(lines.join('\n'), 'utf-8'));
++            }
+           } else {
+             await vscode.workspace.fs.copy(vscode.Uri.file(source), vscode.Uri.file(target), { overwrite: false });
+           }
+@@ -2406,8 +2427,10 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+           try {
+             const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(historyDir));
+             const jsonFiles = entries
+-              .filter(e => e[1] === vscode.FileType.File && e[0].endsWith('.json'))
+-              .map(e => e[0]);
++              .filter(e => e[1] === vscode.FileType.File && EXECUTION_HISTORY_FILE_PATTERN.test(e[0]))
++              .map(e => e[0])
++              .sort(compareExecutionHistoryFileNames)
++              .slice(0, EXECUTION_HISTORY_READ_LIMIT);
+ 
+             history = await readExecutionHistoryFiles(historyDir, jsonFiles);
+             history.sort((a: any, b: any) => (b.executedAt ?? 0) - (a.executedAt ?? 0));
+@@ -2415,7 +2438,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+ 
+           currentPanel?.webview.postMessage({
+             command: 'getExecutionHistoryResponse', requestId,
+-            success: true, history: history.slice(0, 500)
++            success: true, history
+           });
+         } catch (err) {
+           currentPanel?.webview.postMessage({
+@@ -2426,6 +2449,24 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+         return;
+       }
+ 
++      case 'deleteExecutionHistory': {
++        const requestId: string = msg.requestId;
++        const flow = normalizeHistoryFlow(msg.flow);
++        try {
++          const deleted = await deleteExecutionHistoryRecords(flow, msg.ids);
++          currentPanel?.webview.postMessage({
++            command: 'deleteExecutionHistoryResponse', requestId,
++            success: true, deleted
++          });
++        } catch (err) {
++          currentPanel?.webview.postMessage({
++            command: 'deleteExecutionHistoryResponse', requestId,
++            success: false, deleted: 0, error: String(err)
++          });
++        }
++        return;
++      }
++
+       case 'openGitlabHost': {
+         const requestId: string = msg.requestId;
+         const repoGitName = normalizeHistoryFlow(msg.repoGitName);
+diff --git a/src/services/configService.ts b/src/services/configService.ts
+index 522d93a..2ea5661 100644
+--- a/src/services/configService.ts
++++ b/src/services/configService.ts
+@@ -12,7 +12,7 @@ import {
+   type TransformLog, resolveLocalConfigDirectory,
+ } from './workspaceService';
+ import { obsTrackingService } from './obsTrackingService';
+-import { getVersionFromModuleName } from '../utils';
++import { getVersionFromModuleName, modifyModuleCfgByVersion } from '../utils';
+ 
+ export interface FlowConfigFileInfo {
+   key: string;
+@@ -66,7 +66,7 @@ export async function listFlowConfigFiles(flow: 'hibist' | 'sailor' | 'verificat
+ 
+   for (const [name, type] of entries) {
+     if (type !== vscode.FileType.Directory) continue;
+-    const filePath = resolveCfgPath(configsDir, name);
++    const filePath = resolveCfgPath(flow, configsDir, name);
+     if (!await pathExists(filePath)) continue;
+     const stat = await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+     configs.push({
+@@ -85,7 +85,7 @@ export async function createFlowConfigFile(
+   moduleName: string
+ ): Promise<FlowConfigFileInfo> {
+   const configsDir = await getFlowConfigsDirectory(flow);
+-  const target = resolveCfgPath(configsDir, moduleName);
++  const target = resolveCfgPath(flow, configsDir, moduleName);
+   if (await pathExists(target)) {
+     throw new Error(`Config already exists: ${path.basename(target)}`);
+   }
+@@ -106,15 +106,15 @@ export async function duplicateFlowConfigFile(
+   moduleName: string
+ ): Promise<FlowConfigFileInfo> {
+   const configsDir = await getFlowConfigsDirectory(flow);
+-  const source = resolveCfgPath(configsDir, moduleName);
++  const source = resolveCfgPath(flow, configsDir, moduleName);
+   const sourceDir = path.dirname(source);
+   const stat = await vscode.workspace.fs.stat(vscode.Uri.file(source));
+   if (stat.type !== vscode.FileType.File) {
+     throw new Error(`Config is not a file: ${moduleName}`);
+   }
+ 
+-  const targetModule = await makeUniqueCfgModuleName(configsDir, `${path.basename(moduleName, '.cfg')}@copy`);
+-  const target = resolveCfgPath(configsDir, targetModule);
++  const targetModule = await makeUniqueCfgModuleName(flow, configsDir, `${path.basename(moduleName, '.cfg')}_copy`);
++  const target = resolveCfgPath(flow, configsDir, targetModule);
+   const targetDir = path.dirname(target);
+   await vscode.workspace.fs.copy(vscode.Uri.file(sourceDir), vscode.Uri.file(targetDir), { overwrite: false });
+   await vscode.workspace.fs.rename(
+@@ -132,8 +132,8 @@ export async function renameFlowConfigFile(
+   nextModuleName: string
+ ): Promise<FlowConfigFileInfo> {
+   const configsDir = await getFlowConfigsDirectory(flow);
+-  const source = resolveCfgPath(configsDir, moduleName);
+-  const target = resolveCfgPath(configsDir, nextModuleName);
++  const source = resolveCfgPath(flow, configsDir, moduleName);
++  const target = resolveCfgPath(flow, configsDir, nextModuleName);
+   const sourceDir = path.dirname(source);
+   const targetDir = path.dirname(target);
+   if (path.resolve(source).toLowerCase() === path.resolve(target).toLowerCase()) {
+@@ -150,6 +150,14 @@ export async function renameFlowConfigFile(
+       vscode.Uri.file(target),
+       { overwrite: false }
+     );
++
++    const [oriModuleKey, version] = getVersionFromModuleName(nextModuleName);
++    if (version) {
++      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
++      const content = Buffer.from(bytes).toString('utf-8');
++      const lines = modifyModuleCfgByVersion(flow, content);
++      await vscode.workspace.fs.writeFile(vscode.Uri.file(target), Buffer.from(lines.join('\n'), 'utf-8'));
++    }
+   } catch (error) {
+     await vscode.workspace.fs.rename(vscode.Uri.file(targetDir), vscode.Uri.file(sourceDir), { overwrite: false });
+     throw error;
+@@ -164,7 +172,7 @@ export async function deleteFlowConfigFile(
+ ): Promise<void> {
+   const configsDir = await getFlowConfigsDirectory(flow);
+   await vscode.workspace.fs.delete(
+-    vscode.Uri.file(path.dirname(resolveCfgPath(configsDir, moduleName))),
++    vscode.Uri.file(path.dirname(resolveCfgPath(flow, configsDir, moduleName))),
+     { recursive: true }
+   );
+ }
+@@ -185,7 +193,7 @@ export async function getObsScriptConfig(
+   domain: string
+ ): Promise<ObsScriptPathConfig> {
+   const scriptSpace = 'DFT_IDE';
+-  const remoteScriptPath = domain ? `EXCEL2CFG/${domain}` : 'EXCEL2CFG/Network';
++  const remoteScriptPath = `EXCEL2CFG/${domain}`;
+   const remoteScriptFiles = [{ fileName: flow == 'verification' ? 'lander_env' : 'sailor_env', fileType: 2 }];
+   return { scriptSpace, remoteScriptPath, remoteScriptFiles };
+ }
+@@ -277,9 +285,9 @@ export async function copyFileLF(sourceScript: string, targetPath: string) {
+   await fs.promises.writeFile(targetPath, content, 'utf8');
+ }
+ 
+-export function resolveCfgPath(configsDir: string, moduleName: string): string {
++export function resolveCfgPath(flow: 'hibist' | 'sailor' | 'verification', configsDir: string, moduleName: string): string {
+   const clean = sanitizeCfgModuleName(moduleName);
+-  return path.join(configsDir, clean, `${clean}.sailor.cfg`);
++  return path.join(configsDir, clean, `${clean}${flow === 'sailor' ? '.sailor' : ''}.cfg`);
+ }
+ 
+ export function sanitizeCfgModuleName(value: string): string {
+@@ -290,11 +298,11 @@ export function sanitizeCfgModuleName(value: string): string {
+   return clean;
+ }
+ 
+-export async function makeUniqueCfgModuleName(configsDir: string, base: string): Promise<string> {
++export async function makeUniqueCfgModuleName(flow: 'hibist' | 'sailor' | 'verification', configsDir: string, base: string): Promise<string> {
+   const cleanBase = sanitizeCfgModuleName(base);
+   let candidate = cleanBase;
+   let index = 1;
+-  while (await pathExists(resolveCfgPath(configsDir, candidate))) {
++  while (await pathExists(resolveCfgPath(flow, configsDir, candidate))) {
+     candidate = `${cleanBase}_${index++}`;
+   }
+   return candidate;
+@@ -312,13 +320,15 @@ export function toFlowConfigFileInfo(filePath: string, stat: vscode.FileStat): F
+   }
+ 
+   const [oriModuleKey, version] = getVersionFromModuleName(moduleName);
++  // const workDir = version ? path.join(workPath, version, oriModuleKey) : path.join(workPath, moduleName);
++  const workDir = path.join(workPath, version ? oriModuleKey : moduleName);
+ 
+   return {
+     key: moduleName,
+     moduleName,
+     fileName,
+     filePath,
+-    workDir: path.join(workPath, version ? oriModuleKey : moduleName),
++    workDir,
+     updatedAt: stat.mtime,
+     size: stat.size
+   };
+diff --git a/src/services/pipelineRuntimeService.ts b/src/services/pipelineRuntimeService.ts
+index c7ac32b..8c24d34 100644
+--- a/src/services/pipelineRuntimeService.ts
++++ b/src/services/pipelineRuntimeService.ts
+@@ -399,6 +399,7 @@ function buildStepCommands(
+     if (version) {
+       commands.push(`setenv DFT_IDE_MODULE_ORI "${oriModuleKey}"`);
+       commands.push(`setenv DFT_IDE_VERSION "${version}"`);
++      commands.push(`setenv VERSION "${version}"`);
+     }
+     const moduleEnvName = flowKey === 'verification' ? 'DFT_IDE_MODE' : 'DFT_IDE_MODULE';
+     commands.push(`setenv ${moduleEnvName} "${moduleKey}"`);
+diff --git a/src/services/terminalService.ts b/src/services/terminalService.ts
+index 028ee18..ae56325 100644
+--- a/src/services/terminalService.ts
++++ b/src/services/terminalService.ts
+@@ -202,33 +202,6 @@ export async function saveExecutionHistoryRecord(
+         path.join(projectRoot, '.dft-ide', 'local-state'),
+       )
+ 
+-      const entries = await vscode.workspace.fs.readDirectory(
+-        vscode.Uri.file(historyDir),
+-      )
+-      const jsonFiles = entries
+-        .filter((e) => e[1] === vscode.FileType.File && e[0].endsWith('.json'))
+-        .map((e) => e[0])
+-        .sort()
+-      if (jsonFiles.length >= 500) {
+-        const toDelete = jsonFiles.slice(0, jsonFiles.length - 499)
+-        for (const name of toDelete) {
+-          await vscode.workspace.fs.delete(
+-            vscode.Uri.file(path.join(historyDir, name)),
+-          )
+-          const executionDir = path.join(
+-            historyDir,
+-            path.basename(name, '.json'),
+-          )
+-          try {
+-            await vscode.workspace.fs.delete(vscode.Uri.file(executionDir), {
+-              recursive: true,
+-            })
+-          } catch {
+-            // Older history entries may not have a matching execution directory.
+-          }
+-        }
+-      }
+-
+       const logDirectory = path.join(historyDir, id)
+       await vscode.workspace.fs.createDirectory(vscode.Uri.file(logDirectory))
+       const nodes = await attachNodeLogFiles(
+@@ -267,6 +240,59 @@ export async function saveExecutionHistoryRecord(
+   }
+ }
+ 
++export async function deleteExecutionHistoryRecords(
++  flow: unknown,
++  ids: unknown,
++): Promise<number> {
++  const normalizedFlow = normalizeHistoryFlow(flow)
++  const validIds = Array.isArray(ids)
++    ? [...new Set(ids.filter(
++        (id): id is string => typeof id === 'string' && /^exec_\d+_\d+$/.test(id),
++      ))]
++    : []
++  if (validIds.length === 0) {
++    return 0
++  }
++
++  const projectRoot = resolveProjectRoot()
++  if (!projectRoot) {
++    throw new Error('未找到项目根目录')
++  }
++  const historyDir = path.join(
++    projectRoot,
++    '.dft-ide',
++    'local-state',
++    'history',
++    normalizedFlow,
++  )
++
++  let deleted = 0
++  for (const id of validIds) {
++    const pendingWrite = historyWriteQueues.get(path.join(normalizedFlow, id))
++    if (pendingWrite) {
++      await pendingWrite.catch(() => undefined)
++    }
++
++    try {
++      await vscode.workspace.fs.delete(
++        vscode.Uri.file(path.join(historyDir, `${id}.json`)),
++      )
++      deleted += 1
++    } catch {
++      // Missing records are treated as already deleted.
++    }
++    try {
++      await vscode.workspace.fs.delete(
++        vscode.Uri.file(path.join(historyDir, id)),
++        { recursive: true },
++      )
++    } catch {
++      // Older history entries may not have a matching execution directory.
++    }
++  }
++  return deleted
++}
++
+ export async function openExecutionTerminal(options: {
+   title?: string
+   command?: string | string[]
+diff --git a/src/utils.ts b/src/utils.ts
+index 594d0e1..adc40f8 100644
+--- a/src/utils.ts
++++ b/src/utils.ts
+@@ -15,3 +15,31 @@ export function getVersionFromModuleName(moduleKey: string): string[] {
+   }
+   return [oriModuleKey, version];
+ }
++
++export function modifyModuleCfgByVersion(
++  flow: 'hibist' | 'sailor' | 'verification',
++  content: string,
++): string[] {
++  let lines = content.split('\n');
++  const targetPattern = /^set\s+VERSION\s+\$env\(VERSION\)$/;
++  const lineExists = lines.some(line => targetPattern.test(line.trim()));
++  if (!lineExists) {
++    lines.unshift('set VERSION     $env(VERSION)');
++  }
++  if (flow !== 'verification') {
++    lines = lines.map(line => {
++      const workPathRegex = /(-work_path\s+)(\S+)/;
++      if (workPathRegex.test(line)) {
++        return line.replace(workPathRegex, (match, p1, p2) => {
++          if (p2.includes('/$VERSION')) {
++            return match;
++          }
++          const pathWithVersion = p2.replace(/\/?$/, '/$VERSION');
++          return `${p1}${pathWithVersion}`;
++        });
++      }
++      return line;
++    });
++  }
++  return lines;
++}
+diff --git a/src/webview/components/Welcome.tsx b/src/webview/components/Welcome.tsx
+index 8ca5a8e..b4eca06 100644
+--- a/src/webview/components/Welcome.tsx
++++ b/src/webview/components/Welcome.tsx
+@@ -666,7 +666,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers,
+     } else {
+       fetchProjectData();
+     }
+-  }, [projectForm, currentUser, closeProjectModal, fetchProjectData, initProjectDomain]);
++  }, [projectForm, closeProjectModal, fetchProjectData, initProjectDomain]);
+ 
+   const syncCtmpData = useCallback(async () => {
+     setCtmpDataSyncing(true);
+@@ -679,7 +679,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers,
+     } finally {
+       setCtmpDataSyncing(false);
+     }
+-  }, []);
++  }, [fetchProjectData]);
+ 
+   return (
+     <div>
+diff --git a/src/webview/components/design/Step1_CommonConfig.tsx b/src/webview/components/design/Step1_CommonConfig.tsx
+index b3d23c1..1d40200 100644
+--- a/src/webview/components/design/Step1_CommonConfig.tsx
++++ b/src/webview/components/design/Step1_CommonConfig.tsx
+@@ -181,8 +181,15 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+         open={historyOpen}
+         onCancel={() => { setHistoryOpen(false) }}
+         footer={null}
+-        width={1600}
+-        style={{ top: 40 }}
++        width="90vw"
++        styles={{
++          body: {
++            maxHeight: 'calc(88vh - 92px)',
++            overflowY: 'auto',
++            overflowX: 'hidden',
++            paddingTop: 12,
++          },
++        }}
+         destroyOnHidden
+       >
+         <div style={{ marginTop: 12, marginBottom: 20 }}>
+diff --git a/src/webview/components/design/Step2_ToolConfig.tsx b/src/webview/components/design/Step2_ToolConfig.tsx
+index 0709b0b..ffdb7b0 100644
+--- a/src/webview/components/design/Step2_ToolConfig.tsx
++++ b/src/webview/components/design/Step2_ToolConfig.tsx
+@@ -10,6 +10,7 @@ import {
+   Tabs,
+   Badge,
+   Spin,
++  Tooltip,
+ } from 'antd';
+ import {
+   PlusOutlined,
+@@ -146,16 +147,18 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, onModuleS
+           </Col>
+           <Col flex="0 0 30px">
+             <Form.Item label=" ">
+-              <Button
+-                danger
+-                icon={<ClearOutlined />}
+-                onClick={() => {
+-                  taskForm.setFieldsValue({
+-                    clusterGroup: '',
+-                    clusterQueue: '',
+-                  });
+-                }}
+-              />
++              <Tooltip title="清空">
++                <Button
++                  danger
++                  icon={<ClearOutlined />}
++                  onClick={() => {
++                    taskForm.setFieldsValue({
++                      clusterGroup: '',
++                      clusterQueue: '',
++                    });
++                  }}
++                />
++              </Tooltip>
+             </Form.Item>
+           </Col>
+         </Row>
+diff --git a/src/webview/components/design/Step4_Result.tsx b/src/webview/components/design/Step4_Result.tsx
+index 024d9c9..9e82b60 100644
+--- a/src/webview/components/design/Step4_Result.tsx
++++ b/src/webview/components/design/Step4_Result.tsx
+@@ -70,6 +70,12 @@ const Step4Result: React.FC<Props> = ({ onNext, onPrev, category }) => {
+     setHistoryDetail(record);
+   };
+ 
++  const handleHistoryDeleted = (ids: string[]) => {
++    setHistoryRecords((records) => records.filter((record) => !ids.includes(record.id)));
++    setActiveRecord((record) => record && ids.includes(record.id) ? null : record);
++    setHistoryDetail((record) => record && ids.includes(record.id) ? null : record);
++  };
++
+   return (
+     <div style={{ padding: '16px 0' }}>
+       <Tabs
+@@ -81,7 +87,9 @@ const Step4Result: React.FC<Props> = ({ onNext, onPrev, category }) => {
+             children: (
+               <ExecutionHistoryList
+                 history={historyRecords}
++                flow={flowKey}
+                 onOpenPipeline={viewHistoryDetail}
++                onDeleted={handleHistoryDeleted}
+               />
+             ),
+           },
+diff --git a/src/webview/components/shared/DesignTreePanel.tsx b/src/webview/components/shared/DesignTreePanel.tsx
+index c9f4057..d7825a6 100644
+--- a/src/webview/components/shared/DesignTreePanel.tsx
++++ b/src/webview/components/shared/DesignTreePanel.tsx
+@@ -13,6 +13,7 @@ import {
+   Tooltip,
+   Typography,
+   message,
++  Form,
+ } from 'antd';
+ import {
+   BranchesOutlined,
+@@ -863,12 +864,18 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+         onOk={confirmRename}
+         onCancel={() => setRenameOpen(false)}
+       >
+-        <Input
+-          placeholder="请输入新的模块名称"
+-          value={renameValue}
+-          onChange={(event) => setRenameValue(event.target.value)}
+-          onPressEnter={confirmRename}
+-        />
++        <Form layout="vertical">
++          <Form.Item
++            extra="使用@表示版本，例如：module@v1。"
++          >
++            <Input
++              placeholder="请输入新的模块名称"
++              value={renameValue}
++              onChange={(event) => setRenameValue(event.target.value)}
++              onPressEnter={confirmRename}
++            />
++          </Form.Item>
++        </Form>
+       </Modal>
+ 
+       <Modal
+diff --git a/src/webview/components/shared/ExecutionHistoryDetail.tsx b/src/webview/components/shared/ExecutionHistoryDetail.tsx
+index c3ddcb1..b279aaa 100644
+--- a/src/webview/components/shared/ExecutionHistoryDetail.tsx
++++ b/src/webview/components/shared/ExecutionHistoryDetail.tsx
+@@ -182,7 +182,7 @@ const ExecutionHistoryDetail: React.FC<Props> = ({ record, onClose }) => {
+               padding: '10px 12px',
+             }}
+           >
+-            <Descriptions size="small" column={5} colon={false}>
++            <Descriptions size="small" column={6} colon={false}>
+               <Descriptions.Item label="执行 ID">{record.id}</Descriptions.Item>
+               <Descriptions.Item label={record.mode ? 'Mode' : 'Module'}>
+                 {record.mode || record.module || record.moduleKey || '-'}
+@@ -195,8 +195,11 @@ const ExecutionHistoryDetail: React.FC<Props> = ({ record, onClose }) => {
+               <Descriptions.Item label="开始时间">
+                 {new Date(record.startedAt || record.executedAt).toLocaleString()}
+               </Descriptions.Item>
++              <Descriptions.Item label="结束时间">
++                {record.finishedAt ? new Date(record.finishedAt).toLocaleString() : '-'}
++              </Descriptions.Item>
+               <Descriptions.Item label="耗时">{duration}</Descriptions.Item>
+-              <Descriptions.Item label="日志目录" span={5}>
++              <Descriptions.Item label="日志目录" span={6}>
+                 <Typography.Text copyable ellipsis={{ tooltip: logDirectory }}>
+                   {logDirectory || '-'}
+                 </Typography.Text>
+diff --git a/src/webview/components/shared/ExecutionHistoryList.tsx b/src/webview/components/shared/ExecutionHistoryList.tsx
+index acedf44..8be8a3d 100644
+--- a/src/webview/components/shared/ExecutionHistoryList.tsx
++++ b/src/webview/components/shared/ExecutionHistoryList.tsx
+@@ -1,18 +1,21 @@
+-import React, { useMemo } from 'react';
+-import { Button, Input, Table, Tag } from 'antd';
++import React, { useMemo, useState } from 'react';
++import { Button, Input, message, Popconfirm, Select, Space, Table, Tag } from 'antd';
+ import type { ColumnsType } from 'antd/es/table';
+ import {
+   CheckCircleOutlined,
+   ClockCircleOutlined,
+   CloseCircleOutlined,
++  DeleteOutlined,
+   EyeOutlined,
+   SearchOutlined,
+ } from '@ant-design/icons';
+-import { ExecutionHistoryRecord } from '../../utils/ipc';
++import { deleteExecutionHistory, ExecutionHistoryRecord } from '../../utils/ipc';
+ 
+ interface Props {
+   history: ExecutionHistoryRecord[];
++  flow: string;
+   onOpenPipeline: (record: ExecutionHistoryRecord) => void;
++  onDeleted: (ids: string[]) => void;
+ }
+ 
+ const statusMeta = {
+@@ -42,13 +45,47 @@ const getStartedAt = (record: ExecutionHistoryRecord) => record.startedAt ?? rec
+ const getConfigTarget = (record: ExecutionHistoryRecord) => (
+   record.mode || record.module || record.moduleKey || '-'
+ );
++const formatTime = (timestamp?: number) => (
++  timestamp ? new Date(timestamp).toLocaleString() : '-'
++);
+ 
+-const ExecutionHistoryList: React.FC<Props> = ({ history, onOpenPipeline }) => {
++const ExecutionHistoryList: React.FC<Props> = ({ history, flow, onOpenPipeline, onDeleted }) => {
++  const [configKeyword, setConfigKeyword] = useState('');
++  const [statusFilter, setStatusFilter] = useState<ExecutionHistoryRecord['status']>();
++  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
++  const [deleting, setDeleting] = useState(false);
+   const dataSource = useMemo(
+-    () => [...history].sort((a, b) => getStartedAt(b) - getStartedAt(a)),
+-    [history],
++    () => {
++      const keyword = configKeyword.trim().toLocaleLowerCase();
++      return [...history]
++        .filter((record) => (
++          (!keyword || getConfigTarget(record).toLocaleLowerCase().includes(keyword))
++          && (!statusFilter || record.status === statusFilter)
++        ))
++        .sort((a, b) => getStartedAt(b) - getStartedAt(a));
++    },
++    [configKeyword, history, statusFilter],
+   );
+ 
++  const handleDelete = async (ids: string[]) => {
++    if (ids.length === 0 || deleting) return;
++    setDeleting(true);
++    try {
++      const response = await deleteExecutionHistory(flow, ids);
++      if (!response.success) {
++        message.error(response.error || '删除执行历史失败');
++        return;
++      }
++      onDeleted(ids);
++      setSelectedRowKeys((current) => current.filter((key) => !ids.includes(String(key))));
++      message.success(ids.length === 1 ? '执行历史已删除' : `已删除 ${ids.length} 条执行历史`);
++    } catch (error) {
++      message.error(`删除执行历史失败：${error instanceof Error ? error.message : String(error)}`);
++    } finally {
++      setDeleting(false);
++    }
++  };
++
+   const columns: ColumnsType<ExecutionHistoryRecord> = [
+     {
+       title: '配置',
+@@ -56,33 +93,6 @@ const ExecutionHistoryList: React.FC<Props> = ({ history, onOpenPipeline }) => {
+       width: 220,
+       ellipsis: true,
+       render: (_, record) => getConfigTarget(record),
+-      filterDropdown: ({ setSelectedKeys, selectedKeys, confirm }) => (
+-        <div style={{ padding: 8 }}>
+-          <Input.Search
+-            allowClear
+-            autoFocus
+-            size='small'
+-            placeholder='搜索配置'
+-            value={selectedKeys[0] ?? ''}
+-            onChange={(event) => {
+-              const value = event.target.value;
+-              setSelectedKeys(value ? [value] : []);
+-              if (!value) {
+-                confirm();
+-              }
+-            }}
+-            onPressEnter={() => confirm()}
+-            onSearch={() => confirm()}
+-            style={{ width: 200 }}
+-          />
+-        </div>
+-      ),
+-      filterIcon: (filtered) => (
+-        <SearchOutlined style={{ color: filtered ? '#1677ff' : undefined }} />
+-      ),
+-      onFilter: (value, record) => getConfigTarget(record)
+-        .toLocaleLowerCase()
+-        .includes(String(value).trim().toLocaleLowerCase()),
+     },
+     {
+       title: '执行 ID',
+@@ -109,7 +119,13 @@ const ExecutionHistoryList: React.FC<Props> = ({ history, onOpenPipeline }) => {
+       title: '开始时间',
+       key: 'startedAt',
+       width: 240,
+-      render: (_, record) => new Date(getStartedAt(record)).toLocaleString(),
++      render: (_, record) => formatTime(getStartedAt(record)),
++    },
++    {
++      title: '结束时间',
++      key: 'finishedAt',
++      width: 240,
++      render: (_, record) => formatTime(record.finishedAt),
+     },
+     {
+       title: '查看',
+@@ -127,23 +143,88 @@ const ExecutionHistoryList: React.FC<Props> = ({ history, onOpenPipeline }) => {
+         </Button>
+       ),
+     },
++    {
++      title: '删除',
++      key: 'delete',
++      width: 100,
++      align: 'center',
++      render: (_, record) => (
++        <Popconfirm
++          title='删除这条执行历史？'
++          description='对应的历史 JSON 和日志目录也会被删除。'
++          okText='删除'
++          cancelText='取消'
++          okButtonProps={{ danger: true }}
++          onConfirm={() => handleDelete([record.id])}
++        >
++          <Button type='link' danger size='small' icon={<DeleteOutlined />} loading={deleting}>
++            删除
++          </Button>
++        </Popconfirm>
++      ),
++    },
+   ];
+ 
+   return (
+-    <Table
+-      rowKey="id"
+-      columns={columns}
+-      dataSource={dataSource}
+-      pagination={{
+-        pageSize: 10,
+-        showSizeChanger: true,
+-        pageSizeOptions: [10, 20, 50],
+-        showTotal: (total) => `共 ${total} 条`,
+-      }}
+-      locale={{ emptyText: '暂无历史执行记录' }}
+-      scroll={{ x: 1010 }}
+-      size="middle"
+-    />
++    <Space direction="vertical" size={12} style={{ width: '100%' }}>
++      <Space wrap>
++        <Input
++          allowClear
++          prefix={<SearchOutlined />}
++          placeholder="搜索配置"
++          value={configKeyword}
++          onChange={(event) => setConfigKeyword(event.target.value)}
++          style={{ width: 240 }}
++        />
++        <Select<ExecutionHistoryRecord['status']>
++          allowClear
++          placeholder="全部状态"
++          value={statusFilter}
++          onChange={setStatusFilter}
++          options={Object.entries(statusMeta).map(([value, meta]) => ({
++            value: value as ExecutionHistoryRecord['status'],
++            label: meta.label,
++          }))}
++          style={{ width: 160 }}
++        />
++        <Popconfirm
++          title={`删除选中的 ${selectedRowKeys.length} 条执行历史？`}
++          description='对应的历史 JSON 和日志目录也会被删除。'
++          okText='批量删除'
++          cancelText='取消'
++          okButtonProps={{ danger: true }}
++          disabled={selectedRowKeys.length === 0}
++          onConfirm={() => handleDelete(selectedRowKeys.map(String))}
++        >
++          <Button
++            danger
++            icon={<DeleteOutlined />}
++            disabled={selectedRowKeys.length === 0}
++            loading={deleting}
++          >
++            批量删除{selectedRowKeys.length > 0 ? ` (${selectedRowKeys.length})` : ''}
++          </Button>
++        </Popconfirm>
++      </Space>
++      <Table
++        rowKey="id"
++        columns={columns}
++        dataSource={dataSource}
++        rowSelection={{
++          selectedRowKeys,
++          onChange: setSelectedRowKeys,
++        }}
++        pagination={{
++          pageSize: 10,
++          showSizeChanger: true,
++          pageSizeOptions: [10, 20, 50],
++          showTotal: (total) => `共 ${total} 条`,
++        }}
++        locale={{ emptyText: '暂无历史执行记录' }}
++        scroll={{ x: 1250 }}
++        size="middle"
++      />
++    </Space>
+   );
+ };
+ 
+diff --git a/src/webview/components/shared/TransformHistory.tsx b/src/webview/components/shared/TransformHistory.tsx
+index de39098..c20dc26 100644
+--- a/src/webview/components/shared/TransformHistory.tsx
++++ b/src/webview/components/shared/TransformHistory.tsx
+@@ -1,7 +1,8 @@
+-import React, { useEffect, useState } from 'react';
++import React, { useEffect, useMemo, useState } from 'react';
+ import { Alert, Button, Empty, Space, Table, Tag, Tooltip, Typography } from 'antd';
+ import { ReloadOutlined } from '@ant-design/icons';
+ import { fetchTransformLogs, openFileReadonly, type TransformLog } from '../../utils/ipc';
++import { ColumnsType } from 'antd/es/table';
+ 
+ const { Link } = Typography;
+ 
+@@ -10,11 +11,130 @@ interface Props {
+   historyOpen: boolean;
+ }
+ 
++function getColumns(flowKey: string): ColumnsType<TransformLog> {
++  return flowKey == 'verification' ? [
++    { title: '#', width: 48, render: (_value, _record, index) => index + 1 },
++    {
++      title: '状态',
++      dataIndex: 'success',
++      width: 90,
++      render: (_value: boolean | undefined) => (
++        <Tag color={_value ? 'success' : 'error'}>{_value ? '成功' : '失败'}</Tag>
++      ),
++    },
++    {
++      title: '时间',
++      dataIndex: 'timestamp',
++      width: 180,
++      render: (_value: string | undefined) => _value ?? '-',
++    },
++    {
++      title: 'Stage',
++      width: 150,
++      dataIndex: 'stage',
++      render: (_value: unknown, record) => record.stage ?? '-'
++    },
++    {
++      title: '所属领域',
++      width: 150,
++      dataIndex: 'domain',
++      render: (_value: string | undefined) => _value,
++    },
++    {
++      title: '执行脚本',
++      dataIndex: 'scriptPath',
++      ellipsis: true,
++      render: (value?: string) => value
++        ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
++        : '-',
++    },
++    {
++      title: 'LANDER_ASSISTANT.json',
++      dataIndex: 'landerAssistant',
++      ellipsis: true,
++      render: (value?: string) => value
++        ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
++        : '-',
++    },
++    {
++      title: '日志',
++      dataIndex: 'logFile',
++      ellipsis: true,
++      render: (value?: string) => value
++        ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
++        : '-',
++    },
++  ] : [
++      { title: '#', width: 48, render: (_value, _record, index) => index + 1 },
++      {
++        title: '状态',
++        dataIndex: 'success',
++        width: 90,
++        render: (_value: boolean | undefined) => (
++          <Tag color={_value ? 'success' : 'error'}>{_value ? '成功' : '失败'}</Tag>
++        ),
++      },
++      {
++        title: '时间',
++        dataIndex: 'timestamp',
++        width: 180,
++        render: (_value: string | undefined) => _value ?? '-',
++      },
++      {
++        title: 'Module',
++        dataIndex: 'module',
++        width: 150,
++        ellipsis: true,
++        render: (_value: string | undefined) => _value ?? '-',
++      },
++      {
++        title: '所属领域',
++        width: 150,
++        dataIndex: 'domain',
++        render: (_value: string | undefined) => _value,
++      },
++      {
++        title: '执行脚本',
++        dataIndex: 'scriptPath',
++        ellipsis: true,
++        render: (value?: string) => value
++          ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
++          : '-',
++      },
++      {
++        title: 'Design Tree',
++        dataIndex: 'designTree',
++        ellipsis: true,
++        render: (value?: string) => value
++          ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
++          : '-',
++      },
++      {
++        title: '归一化表格',
++        dataIndex: 'normTable',
++        ellipsis: true,
++        render: (value?: string) => value
++          ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
++          : '-',
++      },
++      {
++        title: '日志',
++        dataIndex: 'logFile',
++        ellipsis: true,
++        render: (value?: string) => value
++          ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
++          : '-',
++      },
++    ]
++}
++
+ const TransformHistory: React.FC<Props> = ({ flowKey, historyOpen }) => {
+   const [logs, setLogs] = useState<TransformLog[]>([]);
+   const [loading, setLoading] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+ 
++  const columns = useMemo(() => getColumns(flowKey), [flowKey])
++
+   const loadLogs = async () => {
+     if (!['hibist', 'sailor', 'verification'].includes(flowKey)) {
+       setLogs([]);
+@@ -50,26 +170,6 @@ const TransformHistory: React.FC<Props> = ({ flowKey, historyOpen }) => {
+ 
+   return (
+     <Space direction="vertical" size={12} style={{ width: '100%' }}>
+-      <style>
+-        {`
+-          .multiline-ellipsis .multiline-content {
+-            display: -webkit-box;
+-            -webkit-line-clamp: 3;       
+-            -webkit-box-orient: vertical;
+-            overflow: hidden;
+-            text-overflow: ellipsis;
+-            line-height: 1.5;            
+-            max-height: 4.5em;           
+-            white-space: normal;       
+-            word-break: break-word;
+-          }
+-
+-          .ant-tooltip-inner {
+-            max-width: 600px;     
+-            white-space: pre-wrap;
+-          }
+-        `}
+-      </style>
+       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+         <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={loadLogs}>
+           刷新
+@@ -83,75 +183,7 @@ const TransformHistory: React.FC<Props> = ({ flowKey, historyOpen }) => {
+         dataSource={logs}
+         locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无历史记录" /> }}
+         pagination={{ pageSize: 6, size: 'small' }}
+-        columns={[
+-          {
+-            title: '状态',
+-            dataIndex: 'success',
+-            width: 90,
+-            render: (success: boolean | undefined) => (
+-              <Tag color={success ? 'success' : 'error'}>{success ? '成功' : '失败'}</Tag>
+-            ),
+-          },
+-          {
+-            title: '时间',
+-            dataIndex: 'timestamp',
+-            width: 180,
+-            render: (_value: string | undefined, record) => record.timestamp ?? '-',
+-          },
+-          {
+-            title: 'Module / Stage',
+-            width: 150,
+-            className: 'multiline-ellipsis',
+-            render: (_value: unknown, record) => {
+-              const text = record.module ?? record.stage ?? '-';
+-              return (
+-                <Tooltip title={text} placement="topLeft" mouseEnterDelay={0.3}>
+-                  <div className="multiline-content">{text}</div>
+-                </Tooltip>
+-              );
+-            },
+-          },
+-          {
+-            title: '执行脚本',
+-            dataIndex: 'scriptPath',
+-            ellipsis: true,
+-            render: (value?: string) => value
+-              ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+-              : '-',
+-          },
+-          {
+-            title: 'Design Tree',
+-            dataIndex: 'designTree',
+-            ellipsis: true,
+-            render: (value?: string) => value
+-              ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+-              : '-',
+-          },
+-          {
+-            title: '归一化表格',
+-            dataIndex: 'normTable',
+-            ellipsis: true,
+-            render: (value?: string) => value
+-              ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+-              : '-',
+-          },
+-          {
+-            title: 'LANDER_ASSISTANT.json',
+-            dataIndex: 'landerAssistant',
+-            ellipsis: true,
+-            render: (value?: string) => value
+-              ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+-              : '-',
+-          },
+-          {
+-            title: '日志',
+-            dataIndex: 'logFile',
+-            ellipsis: true,
+-            render: (value?: string) => value
+-              ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+-              : '-',
+-          },
+-        ]}
++        columns={columns}
+       />
+     </Space>
+   );
+diff --git a/src/webview/components/verification/Step1_CommonConfig.tsx b/src/webview/components/verification/Step1_CommonConfig.tsx
+index 9a37289..e175c7a 100644
+--- a/src/webview/components/verification/Step1_CommonConfig.tsx
++++ b/src/webview/components/verification/Step1_CommonConfig.tsx
+@@ -185,8 +185,15 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey }) => {
+         open={historyOpen}
+         onCancel={() => { setHistoryOpen(false) }}
+         footer={null}
+-        width={1600}
+-        style={{ top: 40 }}
++        width="90vw"
++        styles={{
++          body: {
++            maxHeight: 'calc(88vh - 92px)',
++            overflowY: 'auto',
++            overflowX: 'hidden',
++            paddingTop: 12,
++          },
++        }}
+         destroyOnHidden
+       >
+         <div style={{ marginTop: 12, marginBottom: 20 }}>
+diff --git a/src/webview/components/verification/Step2_ToolConfig.tsx b/src/webview/components/verification/Step2_ToolConfig.tsx
+index 286c91b..b05ee62 100644
+--- a/src/webview/components/verification/Step2_ToolConfig.tsx
++++ b/src/webview/components/verification/Step2_ToolConfig.tsx
+@@ -11,6 +11,7 @@ import {
+   Badge,
+   Spin,
+   Select,
++  Tooltip,
+ } from 'antd';
+ import {
+   PlusOutlined,
+@@ -142,16 +143,18 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, onModuleS
+           </Col>
+           <Col flex="0 0 30px">
+             <Form.Item label=" ">
+-              <Button
+-                danger
+-                icon={<ClearOutlined />}
+-                onClick={() => {
+-                  taskForm.setFieldsValue({
+-                    clusterGroup: '',
+-                    clusterQueue: '',
+-                  });
+-                }}
+-              />
++              <Tooltip title="清空">
++                <Button
++                  danger
++                  icon={<ClearOutlined />}
++                  onClick={() => {
++                    taskForm.setFieldsValue({
++                      clusterGroup: '',
++                      clusterQueue: '',
++                    });
++                  }}
++                />
++              </Tooltip>
+             </Form.Item>
+           </Col>
+         </Row>
+diff --git a/src/webview/components/verification/Step3_Result.tsx b/src/webview/components/verification/Step3_Result.tsx
+index cf277af..ef4e447 100644
+--- a/src/webview/components/verification/Step3_Result.tsx
++++ b/src/webview/components/verification/Step3_Result.tsx
+@@ -68,6 +68,12 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
+     setHistoryDetail(record);
+   };
+ 
++  const handleHistoryDeleted = (ids: string[]) => {
++    setHistoryRecords((records) => records.filter((record) => !ids.includes(record.id)));
++    setActiveRecord((record) => record && ids.includes(record.id) ? null : record);
++    setHistoryDetail((record) => record && ids.includes(record.id) ? null : record);
++  };
++
+   return (
+     <div style={{ padding: '16px 0' }}>
+       <Tabs
+@@ -79,7 +85,9 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
+             children: (
+               <ExecutionHistoryList
+                 history={historyRecords}
++                flow='verification'
+                 onOpenPipeline={viewHistoryDetail}
++                onDeleted={handleHistoryDeleted}
+               />
+             ),
+           },
+diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
+index a512ed9..f2c79b3 100644
+--- a/src/webview/utils/ipc.ts
++++ b/src/webview/utils/ipc.ts
+@@ -933,6 +933,12 @@ const executionHistoryResponseSchema = z.object({
+   error: z.string().optional(),
+ })
+ 
++const deleteExecutionHistoryResponseSchema = z.object({
++  success: z.boolean(),
++  deleted: z.number().int().nonnegative().default(0),
++  error: z.string().optional(),
++})
++
+ /**
+  * 保存执行记录到本地 .dft-ide/local-state/history。
+  */
+@@ -945,7 +951,7 @@ export async function saveExecutionHistory(
+ }
+ 
+ /**
+- * 获取某个流程的历史执行记录列表（最多返回最新的 500 条）。
++ * 获取某个流程的历史执行记录列表（最多返回最新的 300 条）。
+  */
+ export async function getExecutionHistory(flow: string): Promise<{
+   success: boolean
+@@ -963,6 +969,21 @@ export async function getExecutionHistory(flow: string): Promise<{
+       }
+ }
+ 
++export async function deleteExecutionHistory(
++  flow: string,
++  ids: string[],
++): Promise<{ success: boolean; deleted: number; error?: string }> {
++  const res = await ipcRequest('deleteExecutionHistory', { flow, ids })
++  const parsed = deleteExecutionHistoryResponseSchema.safeParse(res)
++  return parsed.success
++    ? parsed.data
++    : {
++        success: false,
++        deleted: 0,
++        error: 'Invalid delete execution history response',
++      }
++}
++
+ export async function getPipelineRuntimes(): Promise<{
+   success: boolean
+   snapshots: unknown[]
+diff --git a/tests/configService.spec.ts b/tests/configService.spec.ts
+index 09dc904..6d32437 100644
+--- a/tests/configService.spec.ts
++++ b/tests/configService.spec.ts
+@@ -46,27 +46,27 @@ describe('configService', () => {
+ 
+   describe('resolveCfgPath', () => {
+     it('should return resolved .cfg path', () => {
+-      const p = resolveCfgPath('/mock/configs', 'my-module');
++      const p = resolveCfgPath('hibist', '/mock/configs', 'my-module');
+       expect(p).toBe('/mock/configs/my-module.cfg');
+     });
+   });
+ 
+   describe('makeUniqueCfgModuleName', () => {
+     it('should return base if it does not exist', async () => {
+-      const name = await makeUniqueCfgModuleName('/mock/configs', 'mod');
++      const name = await makeUniqueCfgModuleName('hibist', '/mock/configs', 'mod');
+       expect(name).toBe('mod');
+     });
+ 
+     it('should return suffixed name if name exists', async () => {
+       mockFilesystem.set('/mock/configs/mod.cfg', 'module = mod');
+-      const name = await makeUniqueCfgModuleName('/mock/configs', 'mod');
++      const name = await makeUniqueCfgModuleName('hibist', '/mock/configs', 'mod');
+       expect(name).toBe('mod_1');
+     });
+ 
+     it('should continue suffixing until unique name is found', async () => {
+       mockFilesystem.set('/mock/configs/mod.cfg', 'module = mod');
+       mockFilesystem.set('/mock/configs/mod_1.cfg', 'module = mod_1');
+-      const name = await makeUniqueCfgModuleName('/mock/configs', 'mod');
++      const name = await makeUniqueCfgModuleName('hibist', '/mock/configs', 'mod');
+       expect(name).toBe('mod_2');
+     });
+   });
+@@ -76,7 +76,8 @@ describe('configService', () => {
+       const stat: vscode.FileStat = {
+         type: 1,
+         mtime: 1234567,
+-        size: 99
++        size: 99,
++        ctime:1234567,
+       };
+       const info = toFlowConfigFileInfo('/mock/project/root/configs/mod.cfg', stat);
+       expect(info.key).toBe('mod');
+@@ -113,7 +114,7 @@ describe('configService', () => {
+ 
+     beforeEach(() => {
+       // Create configs dir structure
+-      mockFilesystem.set(resolveCfgPath(configsDir, 'existing'), '# content');
++      mockFilesystem.set(resolveCfgPath('hibist', configsDir, 'existing'), '# content');
+     });
+ 
+     it('should create flow config file', async () => {
+@@ -139,13 +140,13 @@ describe('configService', () => {
+     it('should rename config file', async () => {
+       const info = await renameFlowConfigFile('hibist', 'existing', 'new-name');
+       expect(info.moduleName).toBe('new-name');
+-      expect(mockFilesystem.has(resolveCfgPath(configsDir, 'existing'))).toBe(false);
+-      expect(mockFilesystem.has(resolveCfgPath(configsDir, 'new-name'))).toBe(true);
++      expect(mockFilesystem.has(resolveCfgPath('hibist', configsDir, 'existing'))).toBe(false);
++      expect(mockFilesystem.has(resolveCfgPath('hibist', configsDir, 'new-name'))).toBe(true);
+     });
+ 
+     it('should delete config file', async () => {
+       await deleteFlowConfigFile('hibist', 'existing');
+-      expect(mockFilesystem.has(resolveCfgPath(configsDir, 'existing'))).toBe(false);
++      expect(mockFilesystem.has(resolveCfgPath('hibist', configsDir, 'existing'))).toBe(false);
+     });
+   });
+ });
