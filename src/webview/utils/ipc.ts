@@ -933,6 +933,12 @@ const executionHistoryResponseSchema = z.object({
   error: z.string().optional(),
 })
 
+const deleteExecutionHistoryResponseSchema = z.object({
+  success: z.boolean(),
+  deleted: z.number().int().nonnegative().default(0),
+  error: z.string().optional(),
+})
+
 /**
  * 保存执行记录到本地 .dft-ide/local-state/history。
  */
@@ -945,7 +951,7 @@ export async function saveExecutionHistory(
 }
 
 /**
- * 获取某个流程的历史执行记录列表（最多返回最新的 500 条）。
+ * 获取某个流程的历史执行记录列表（最多返回最新的 300 条）。
  */
 export async function getExecutionHistory(flow: string): Promise<{
   success: boolean
@@ -960,6 +966,21 @@ export async function getExecutionHistory(flow: string): Promise<{
         success: false,
         history: [],
         error: 'Invalid execution history response',
+      }
+}
+
+export async function deleteExecutionHistory(
+  flow: string,
+  ids: string[],
+): Promise<{ success: boolean; deleted: number; error?: string }> {
+  const res = await ipcRequest('deleteExecutionHistory', { flow, ids })
+  const parsed = deleteExecutionHistoryResponseSchema.safeParse(res)
+  return parsed.success
+    ? parsed.data
+    : {
+        success: false,
+        deleted: 0,
+        error: 'Invalid delete execution history response',
       }
 }
 

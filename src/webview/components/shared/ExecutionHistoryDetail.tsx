@@ -182,7 +182,7 @@ const ExecutionHistoryDetail: React.FC<Props> = ({ record, onClose }) => {
               padding: '10px 12px',
             }}
           >
-            <Descriptions size="small" column={5} colon={false}>
+            <Descriptions size="small" column={6} colon={false}>
               <Descriptions.Item label="执行 ID">{record.id}</Descriptions.Item>
               <Descriptions.Item label={record.mode ? 'Mode' : 'Module'}>
                 {record.mode || record.module || record.moduleKey || '-'}
@@ -195,8 +195,11 @@ const ExecutionHistoryDetail: React.FC<Props> = ({ record, onClose }) => {
               <Descriptions.Item label="开始时间">
                 {new Date(record.startedAt || record.executedAt).toLocaleString()}
               </Descriptions.Item>
+              <Descriptions.Item label="结束时间">
+                {record.finishedAt ? new Date(record.finishedAt).toLocaleString() : '-'}
+              </Descriptions.Item>
               <Descriptions.Item label="耗时">{duration}</Descriptions.Item>
-              <Descriptions.Item label="日志目录" span={5}>
+              <Descriptions.Item label="日志目录" span={6}>
                 <Typography.Text copyable ellipsis={{ tooltip: logDirectory }}>
                   {logDirectory || '-'}
                 </Typography.Text>

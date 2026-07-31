@@ -181,8 +181,15 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
         open={historyOpen}
         onCancel={() => { setHistoryOpen(false) }}
         footer={null}
-        width={1600}
-        style={{ top: 40 }}
+        width="90vw"
+        styles={{
+          body: {
+            maxHeight: 'calc(88vh - 92px)',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            paddingTop: 12,
+          },
+        }}
         destroyOnHidden
       >
         <div style={{ marginTop: 12, marginBottom: 20 }}>

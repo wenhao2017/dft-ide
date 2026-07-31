@@ -12,7 +12,7 @@ import {
   type TransformLog, resolveLocalConfigDirectory,
 } from './workspaceService';
 import { obsTrackingService } from './obsTrackingService';
-import { getVersionFromModuleName } from '../utils';
+import { getVersionFromModuleName, modifyModuleCfgByVersion } from '../utils';
 
 export interface FlowConfigFileInfo {
   key: string;
@@ -66,7 +66,7 @@ export async function listFlowConfigFiles(flow: 'hibist' | 'sailor' | 'verificat
 
   for (const [name, type] of entries) {
     if (type !== vscode.FileType.Directory) continue;
-    const filePath = resolveCfgPath(configsDir, name);
+    const filePath = resolveCfgPath(flow, configsDir, name);
     if (!await pathExists(filePath)) continue;
     const stat = await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
     configs.push({
@@ -85,7 +85,7 @@ export async function createFlowConfigFile(
   moduleName: string
 ): Promise<FlowConfigFileInfo> {
   const configsDir = await getFlowConfigsDirectory(flow);
-  const target = resolveCfgPath(configsDir, moduleName);
+  const target = resolveCfgPath(flow, configsDir, moduleName);
   if (await pathExists(target)) {
     throw new Error(`Config already exists: ${path.basename(target)}`);
   }
@@ -106,15 +106,15 @@ export async function duplicateFlowConfigFile(
   moduleName: string
 ): Promise<FlowConfigFileInfo> {
   const configsDir = await getFlowConfigsDirectory(flow);
-  const source = resolveCfgPath(configsDir, moduleName);
+  const source = resolveCfgPath(flow, configsDir, moduleName);
   const sourceDir = path.dirname(source);
   const stat = await vscode.workspace.fs.stat(vscode.Uri.file(source));
   if (stat.type !== vscode.FileType.File) {
     throw new Error(`Config is not a file: ${moduleName}`);
   }
 
-  const targetModule = await makeUniqueCfgModuleName(configsDir, `${path.basename(moduleName, '.cfg')}@copy`);
-  const target = resolveCfgPath(configsDir, targetModule);
+  const targetModule = await makeUniqueCfgModuleName(flow, configsDir, `${path.basename(moduleName, '.cfg')}_copy`);
+  const target = resolveCfgPath(flow, configsDir, targetModule);
   const targetDir = path.dirname(target);
   await vscode.workspace.fs.copy(vscode.Uri.file(sourceDir), vscode.Uri.file(targetDir), { overwrite: false });
   await vscode.workspace.fs.rename(
@@ -132,8 +132,8 @@ export async function renameFlowConfigFile(
   nextModuleName: string
 ): Promise<FlowConfigFileInfo> {
   const configsDir = await getFlowConfigsDirectory(flow);
-  const source = resolveCfgPath(configsDir, moduleName);
-  const target = resolveCfgPath(configsDir, nextModuleName);
+  const source = resolveCfgPath(flow, configsDir, moduleName);
+  const target = resolveCfgPath(flow, configsDir, nextModuleName);
   const sourceDir = path.dirname(source);
   const targetDir = path.dirname(target);
   if (path.resolve(source).toLowerCase() === path.resolve(target).toLowerCase()) {
@@ -150,6 +150,14 @@ export async function renameFlowConfigFile(
       vscode.Uri.file(target),
       { overwrite: false }
     );
+
+    const [oriModuleKey, version] = getVersionFromModuleName(nextModuleName);
+    if (version) {
+      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+      const content = Buffer.from(bytes).toString('utf-8');
+      const lines = modifyModuleCfgByVersion(flow, content);
+      await vscode.workspace.fs.writeFile(vscode.Uri.file(target), Buffer.from(lines.join('\n'), 'utf-8'));
+    }
   } catch (error) {
     await vscode.workspace.fs.rename(vscode.Uri.file(targetDir), vscode.Uri.file(sourceDir), { overwrite: false });
     throw error;
@@ -164,7 +172,7 @@ export async function deleteFlowConfigFile(
 ): Promise<void> {
   const configsDir = await getFlowConfigsDirectory(flow);
   await vscode.workspace.fs.delete(
-    vscode.Uri.file(path.dirname(resolveCfgPath(configsDir, moduleName))),
+    vscode.Uri.file(path.dirname(resolveCfgPath(flow, configsDir, moduleName))),
     { recursive: true }
   );
 }
@@ -185,7 +193,7 @@ export async function getObsScriptConfig(
   domain: string
 ): Promise<ObsScriptPathConfig> {
   const scriptSpace = 'DFT_IDE';
-  const remoteScriptPath = domain ? `EXCEL2CFG/${domain}` : 'EXCEL2CFG/Network';
+  const remoteScriptPath = `EXCEL2CFG/${domain}`;
   const remoteScriptFiles = [{ fileName: flow == 'verification' ? 'lander_env' : 'sailor_env', fileType: 2 }];
   return { scriptSpace, remoteScriptPath, remoteScriptFiles };
 }
@@ -277,9 +285,9 @@ export async function copyFileLF(sourceScript: string, targetPath: string) {
   await fs.promises.writeFile(targetPath, content, 'utf8');
 }
 
-export function resolveCfgPath(configsDir: string, moduleName: string): string {
+export function resolveCfgPath(flow: 'hibist' | 'sailor' | 'verification', configsDir: string, moduleName: string): string {
   const clean = sanitizeCfgModuleName(moduleName);
-  return path.join(configsDir, clean, `${clean}.sailor.cfg`);
+  return path.join(configsDir, clean, `${clean}${flow === 'sailor' ? '.sailor' : ''}.cfg`);
 }
 
 export function sanitizeCfgModuleName(value: string): string {
@@ -290,11 +298,11 @@ export function sanitizeCfgModuleName(value: string): string {
   return clean;
 }
 
-export async function makeUniqueCfgModuleName(configsDir: string, base: string): Promise<string> {
+export async function makeUniqueCfgModuleName(flow: 'hibist' | 'sailor' | 'verification', configsDir: string, base: string): Promise<string> {
   const cleanBase = sanitizeCfgModuleName(base);
   let candidate = cleanBase;
   let index = 1;
-  while (await pathExists(resolveCfgPath(configsDir, candidate))) {
+  while (await pathExists(resolveCfgPath(flow, configsDir, candidate))) {
     candidate = `${cleanBase}_${index++}`;
   }
   return candidate;
@@ -312,13 +320,15 @@ export function toFlowConfigFileInfo(filePath: string, stat: vscode.FileStat): F
   }
 
   const [oriModuleKey, version] = getVersionFromModuleName(moduleName);
+  // const workDir = version ? path.join(workPath, version, oriModuleKey) : path.join(workPath, moduleName);
+  const workDir = path.join(workPath, version ? oriModuleKey : moduleName);
 
   return {
     key: moduleName,
     moduleName,
     fileName,
     filePath,
-    workDir: path.join(workPath, version ? oriModuleKey : moduleName),
+    workDir,
     updatedAt: stat.mtime,
     size: stat.size
   };

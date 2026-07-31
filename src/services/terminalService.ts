@@ -202,33 +202,6 @@ export async function saveExecutionHistoryRecord(
         path.join(projectRoot, '.dft-ide', 'local-state'),
       )
 
-      const entries = await vscode.workspace.fs.readDirectory(
-        vscode.Uri.file(historyDir),
-      )
-      const jsonFiles = entries
-        .filter((e) => e[1] === vscode.FileType.File && e[0].endsWith('.json'))
-        .map((e) => e[0])
-        .sort()
-      if (jsonFiles.length >= 500) {
-        const toDelete = jsonFiles.slice(0, jsonFiles.length - 499)
-        for (const name of toDelete) {
-          await vscode.workspace.fs.delete(
-            vscode.Uri.file(path.join(historyDir, name)),
-          )
-          const executionDir = path.join(
-            historyDir,
-            path.basename(name, '.json'),
-          )
-          try {
-            await vscode.workspace.fs.delete(vscode.Uri.file(executionDir), {
-              recursive: true,
-            })
-          } catch {
-            // Older history entries may not have a matching execution directory.
-          }
-        }
-      }
-
       const logDirectory = path.join(historyDir, id)
       await vscode.workspace.fs.createDirectory(vscode.Uri.file(logDirectory))
       const nodes = await attachNodeLogFiles(
@@ -265,6 +238,59 @@ export async function saveExecutionHistoryRecord(
       historyWriteQueues.delete(queueKey)
     }
   }
+}
+
+export async function deleteExecutionHistoryRecords(
+  flow: unknown,
+  ids: unknown,
+): Promise<number> {
+  const normalizedFlow = normalizeHistoryFlow(flow)
+  const validIds = Array.isArray(ids)
+    ? [...new Set(ids.filter(
+        (id): id is string => typeof id === 'string' && /^exec_\d+_\d+$/.test(id),
+      ))]
+    : []
+  if (validIds.length === 0) {
+    return 0
+  }
+
+  const projectRoot = resolveProjectRoot()
+  if (!projectRoot) {
+    throw new Error('未找到项目根目录')
+  }
+  const historyDir = path.join(
+    projectRoot,
+    '.dft-ide',
+    'local-state',
+    'history',
+    normalizedFlow,
+  )
+
+  let deleted = 0
+  for (const id of validIds) {
+    const pendingWrite = historyWriteQueues.get(path.join(normalizedFlow, id))
+    if (pendingWrite) {
+      await pendingWrite.catch(() => undefined)
+    }
+
+    try {
+      await vscode.workspace.fs.delete(
+        vscode.Uri.file(path.join(historyDir, `${id}.json`)),
+      )
+      deleted += 1
+    } catch {
+      // Missing records are treated as already deleted.
+    }
+    try {
+      await vscode.workspace.fs.delete(
+        vscode.Uri.file(path.join(historyDir, id)),
+        { recursive: true },
+      )
+    } catch {
+      // Older history entries may not have a matching execution directory.
+    }
+  }
+  return deleted
 }
 
 export async function openExecutionTerminal(options: {

@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Empty, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { fetchTransformLogs, openFileReadonly, type TransformLog } from '../../utils/ipc';
+import { ColumnsType } from 'antd/es/table';
 
 const { Link } = Typography;
 
@@ -10,10 +11,129 @@ interface Props {
   historyOpen: boolean;
 }
 
+function getColumns(flowKey: string): ColumnsType<TransformLog> {
+  return flowKey == 'verification' ? [
+    { title: '#', width: 48, render: (_value, _record, index) => index + 1 },
+    {
+      title: '状态',
+      dataIndex: 'success',
+      width: 90,
+      render: (_value: boolean | undefined) => (
+        <Tag color={_value ? 'success' : 'error'}>{_value ? '成功' : '失败'}</Tag>
+      ),
+    },
+    {
+      title: '时间',
+      dataIndex: 'timestamp',
+      width: 180,
+      render: (_value: string | undefined) => _value ?? '-',
+    },
+    {
+      title: 'Stage',
+      width: 150,
+      dataIndex: 'stage',
+      render: (_value: unknown, record) => record.stage ?? '-'
+    },
+    {
+      title: '所属领域',
+      width: 150,
+      dataIndex: 'domain',
+      render: (_value: string | undefined) => _value,
+    },
+    {
+      title: '执行脚本',
+      dataIndex: 'scriptPath',
+      ellipsis: true,
+      render: (value?: string) => value
+        ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+        : '-',
+    },
+    {
+      title: 'LANDER_ASSISTANT.json',
+      dataIndex: 'landerAssistant',
+      ellipsis: true,
+      render: (value?: string) => value
+        ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+        : '-',
+    },
+    {
+      title: '日志',
+      dataIndex: 'logFile',
+      ellipsis: true,
+      render: (value?: string) => value
+        ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+        : '-',
+    },
+  ] : [
+      { title: '#', width: 48, render: (_value, _record, index) => index + 1 },
+      {
+        title: '状态',
+        dataIndex: 'success',
+        width: 90,
+        render: (_value: boolean | undefined) => (
+          <Tag color={_value ? 'success' : 'error'}>{_value ? '成功' : '失败'}</Tag>
+        ),
+      },
+      {
+        title: '时间',
+        dataIndex: 'timestamp',
+        width: 180,
+        render: (_value: string | undefined) => _value ?? '-',
+      },
+      {
+        title: 'Module',
+        dataIndex: 'module',
+        width: 150,
+        ellipsis: true,
+        render: (_value: string | undefined) => _value ?? '-',
+      },
+      {
+        title: '所属领域',
+        width: 150,
+        dataIndex: 'domain',
+        render: (_value: string | undefined) => _value,
+      },
+      {
+        title: '执行脚本',
+        dataIndex: 'scriptPath',
+        ellipsis: true,
+        render: (value?: string) => value
+          ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+          : '-',
+      },
+      {
+        title: 'Design Tree',
+        dataIndex: 'designTree',
+        ellipsis: true,
+        render: (value?: string) => value
+          ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+          : '-',
+      },
+      {
+        title: '归一化表格',
+        dataIndex: 'normTable',
+        ellipsis: true,
+        render: (value?: string) => value
+          ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+          : '-',
+      },
+      {
+        title: '日志',
+        dataIndex: 'logFile',
+        ellipsis: true,
+        render: (value?: string) => value
+          ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
+          : '-',
+      },
+    ]
+}
+
 const TransformHistory: React.FC<Props> = ({ flowKey, historyOpen }) => {
   const [logs, setLogs] = useState<TransformLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const columns = useMemo(() => getColumns(flowKey), [flowKey])
 
   const loadLogs = async () => {
     if (!['hibist', 'sailor', 'verification'].includes(flowKey)) {
@@ -50,26 +170,6 @@ const TransformHistory: React.FC<Props> = ({ flowKey, historyOpen }) => {
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
-      <style>
-        {`
-          .multiline-ellipsis .multiline-content {
-            display: -webkit-box;
-            -webkit-line-clamp: 3;       
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            line-height: 1.5;            
-            max-height: 4.5em;           
-            white-space: normal;       
-            word-break: break-word;
-          }
-
-          .ant-tooltip-inner {
-            max-width: 600px;     
-            white-space: pre-wrap;
-          }
-        `}
-      </style>
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={loadLogs}>
           刷新
@@ -83,75 +183,7 @@ const TransformHistory: React.FC<Props> = ({ flowKey, historyOpen }) => {
         dataSource={logs}
         locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无历史记录" /> }}
         pagination={{ pageSize: 6, size: 'small' }}
-        columns={[
-          {
-            title: '状态',
-            dataIndex: 'success',
-            width: 90,
-            render: (success: boolean | undefined) => (
-              <Tag color={success ? 'success' : 'error'}>{success ? '成功' : '失败'}</Tag>
-            ),
-          },
-          {
-            title: '时间',
-            dataIndex: 'timestamp',
-            width: 180,
-            render: (_value: string | undefined, record) => record.timestamp ?? '-',
-          },
-          {
-            title: 'Module / Stage',
-            width: 150,
-            className: 'multiline-ellipsis',
-            render: (_value: unknown, record) => {
-              const text = record.module ?? record.stage ?? '-';
-              return (
-                <Tooltip title={text} placement="topLeft" mouseEnterDelay={0.3}>
-                  <div className="multiline-content">{text}</div>
-                </Tooltip>
-              );
-            },
-          },
-          {
-            title: '执行脚本',
-            dataIndex: 'scriptPath',
-            ellipsis: true,
-            render: (value?: string) => value
-              ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
-              : '-',
-          },
-          {
-            title: 'Design Tree',
-            dataIndex: 'designTree',
-            ellipsis: true,
-            render: (value?: string) => value
-              ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
-              : '-',
-          },
-          {
-            title: '归一化表格',
-            dataIndex: 'normTable',
-            ellipsis: true,
-            render: (value?: string) => value
-              ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
-              : '-',
-          },
-          {
-            title: 'LANDER_ASSISTANT.json',
-            dataIndex: 'landerAssistant',
-            ellipsis: true,
-            render: (value?: string) => value
-              ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
-              : '-',
-          },
-          {
-            title: '日志',
-            dataIndex: 'logFile',
-            ellipsis: true,
-            render: (value?: string) => value
-              ? <Link onClick={() => openFileReadonly(value)}>{value}</Link>
-              : '-',
-          },
-        ]}
+        columns={columns}
       />
     </Space>
   );

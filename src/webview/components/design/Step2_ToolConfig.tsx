@@ -10,6 +10,7 @@ import {
   Tabs,
   Badge,
   Spin,
+  Tooltip,
 } from 'antd';
 import {
   PlusOutlined,
@@ -146,16 +147,18 @@ const Step2ToolConfig: React.FC<Props> = ({ onNext, onPrev, moduleKey, onModuleS
           </Col>
           <Col flex="0 0 30px">
             <Form.Item label=" ">
-              <Button
-                danger
-                icon={<ClearOutlined />}
-                onClick={() => {
-                  taskForm.setFieldsValue({
-                    clusterGroup: '',
-                    clusterQueue: '',
-                  });
-                }}
-              />
+              <Tooltip title="清空">
+                <Button
+                  danger
+                  icon={<ClearOutlined />}
+                  onClick={() => {
+                    taskForm.setFieldsValue({
+                      clusterGroup: '',
+                      clusterQueue: '',
+                    });
+                  }}
+                />
+              </Tooltip>
             </Form.Item>
           </Col>
         </Row>

@@ -68,6 +68,12 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
     setHistoryDetail(record);
   };
 
+  const handleHistoryDeleted = (ids: string[]) => {
+    setHistoryRecords((records) => records.filter((record) => !ids.includes(record.id)));
+    setActiveRecord((record) => record && ids.includes(record.id) ? null : record);
+    setHistoryDetail((record) => record && ids.includes(record.id) ? null : record);
+  };
+
   return (
     <div style={{ padding: '16px 0' }}>
       <Tabs
@@ -79,7 +85,9 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
             children: (
               <ExecutionHistoryList
                 history={historyRecords}
+                flow='verification'
                 onOpenPipeline={viewHistoryDetail}
+                onDeleted={handleHistoryDeleted}
               />
             ),
           },

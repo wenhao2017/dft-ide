@@ -399,6 +399,7 @@ function buildStepCommands(
     if (version) {
       commands.push(`setenv DFT_IDE_MODULE_ORI "${oriModuleKey}"`);
       commands.push(`setenv DFT_IDE_VERSION "${version}"`);
+      commands.push(`setenv VERSION "${version}"`);
     }
     const moduleEnvName = flowKey === 'verification' ? 'DFT_IDE_MODE' : 'DFT_IDE_MODULE';
     commands.push(`setenv ${moduleEnvName} "${moduleKey}"`);

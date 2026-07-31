@@ -666,7 +666,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     } else {
       fetchProjectData();
     }
-  }, [projectForm, currentUser, closeProjectModal, fetchProjectData, initProjectDomain]);
+  }, [projectForm, closeProjectModal, fetchProjectData, initProjectDomain]);
 
   const syncCtmpData = useCallback(async () => {
     setCtmpDataSyncing(true);
@@ -679,7 +679,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
     } finally {
       setCtmpDataSyncing(false);
     }
-  }, []);
+  }, [fetchProjectData]);
 
   return (
     <div>

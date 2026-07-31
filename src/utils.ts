@@ -15,3 +15,31 @@ export function getVersionFromModuleName(moduleKey: string): string[] {
   }
   return [oriModuleKey, version];
 }
+
+export function modifyModuleCfgByVersion(
+  flow: 'hibist' | 'sailor' | 'verification',
+  content: string,
+): string[] {
+  let lines = content.split('\n');
+  const targetPattern = /^set\s+VERSION\s+\$env\(VERSION\)$/;
+  const lineExists = lines.some(line => targetPattern.test(line.trim()));
+  if (!lineExists) {
+    lines.unshift('set VERSION     $env(VERSION)');
+  }
+  if (flow !== 'verification') {
+    lines = lines.map(line => {
+      const workPathRegex = /(-work_path\s+)(\S+)/;
+      if (workPathRegex.test(line)) {
+        return line.replace(workPathRegex, (match, p1, p2) => {
+          if (p2.includes('/$VERSION')) {
+            return match;
+          }
+          const pathWithVersion = p2.replace(/\/?$/, '/$VERSION');
+          return `${p1}${pathWithVersion}`;
+        });
+      }
+      return line;
+    });
+  }
+  return lines;
+}

@@ -13,6 +13,7 @@ import {
   Tooltip,
   Typography,
   message,
+  Form,
 } from 'antd';
 import {
   BranchesOutlined,
@@ -863,12 +864,18 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
         onOk={confirmRename}
         onCancel={() => setRenameOpen(false)}
       >
-        <Input
-          placeholder="请输入新的模块名称"
-          value={renameValue}
-          onChange={(event) => setRenameValue(event.target.value)}
-          onPressEnter={confirmRename}
-        />
+        <Form layout="vertical">
+          <Form.Item
+            extra="使用@表示版本，例如：module@v1。"
+          >
+            <Input
+              placeholder="请输入新的模块名称"
+              value={renameValue}
+              onChange={(event) => setRenameValue(event.target.value)}
+              onPressEnter={confirmRename}
+            />
+          </Form.Item>
+        </Form>
       </Modal>
 
       <Modal

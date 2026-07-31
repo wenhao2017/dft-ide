@@ -441,7 +441,7 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
     eco_only_phase = runtime_env.get("DFT_IDE_ECO_ONLY_PHASE")
     if eco_only_phase:
         return run_eco(work_path, runtime_env, source_file, eco_only_phase)
-    cfg_file = Path(cfg).expanduser().resolve() if cfg else work_path / "hibist" / "cfg" / module_name / f"{module_name}.sailor.cfg"
+    cfg_file = Path(cfg).expanduser().resolve() if cfg else work_path / "hibist" / "cfg" / module_name / f"{module_name}.cfg"
     log_folder = resolve_history_folder(work_path, runtime_env)
     dsubrun_prefix = read_dsubrun_prefix(runtime_env)
 

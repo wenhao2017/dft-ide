@@ -70,6 +70,12 @@ const Step4Result: React.FC<Props> = ({ onNext, onPrev, category }) => {
     setHistoryDetail(record);
   };
 
+  const handleHistoryDeleted = (ids: string[]) => {
+    setHistoryRecords((records) => records.filter((record) => !ids.includes(record.id)));
+    setActiveRecord((record) => record && ids.includes(record.id) ? null : record);
+    setHistoryDetail((record) => record && ids.includes(record.id) ? null : record);
+  };
+
   return (
     <div style={{ padding: '16px 0' }}>
       <Tabs
@@ -81,7 +87,9 @@ const Step4Result: React.FC<Props> = ({ onNext, onPrev, category }) => {
             children: (
               <ExecutionHistoryList
                 history={historyRecords}
+                flow={flowKey}
                 onOpenPipeline={viewHistoryDetail}
+                onDeleted={handleHistoryDeleted}
               />
             ),
           },

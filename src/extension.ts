@@ -104,6 +104,7 @@ import {
 import {
   openExecutionTerminal,
   saveExecutionHistoryRecord,
+  deleteExecutionHistoryRecords,
   normalizeHistoryFlow,
 } from './services/terminalService';
 
@@ -118,6 +119,7 @@ import {
 } from './services/obsPreviewService';
 import { parseModuleString } from './services/utils';
 import { DftProject, ProjectDomain } from './webview/services/projectService';
+import { getVersionFromModuleName, modifyModuleCfgByVersion } from './utils';
 
 const execFileAsync = promisify(execFile);
 
@@ -136,6 +138,18 @@ function enqueueConfigTask<T>(task: () => Promise<T>): Promise<T> {
 }
 
 const EXECUTION_HISTORY_READ_CONCURRENCY = 12;
+const EXECUTION_HISTORY_READ_LIMIT = 300;
+const EXECUTION_HISTORY_FILE_PATTERN = /^exec_(\d+)_(\d+)\.json$/;
+
+function compareExecutionHistoryFileNames(left: string, right: string): number {
+  const leftMatch = EXECUTION_HISTORY_FILE_PATTERN.exec(left);
+  const rightMatch = EXECUTION_HISTORY_FILE_PATTERN.exec(right);
+  if (!leftMatch || !rightMatch) {
+    return right.localeCompare(left);
+  }
+  const timestampDifference = Number(rightMatch[1]) - Number(leftMatch[1]);
+  return timestampDifference || Number(rightMatch[2]) - Number(leftMatch[2]);
+}
 
 async function readExecutionHistoryFiles(
   historyDir: string,
@@ -971,6 +985,13 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           }
           if (command === 'renameVerificationModeCfg') {
             await vscode.workspace.fs.rename(vscode.Uri.file(source), vscode.Uri.file(target), { overwrite: false });
+            const [oriModuleKey, version] = getVersionFromModuleName(msg.targetMode);
+            if (version) {
+              const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
+              const content = Buffer.from(bytes).toString('utf-8');
+              const lines = modifyModuleCfgByVersion('verification', content);
+              await vscode.workspace.fs.writeFile(vscode.Uri.file(target), Buffer.from(lines.join('\n'), 'utf-8'));
+            }
           } else {
             await vscode.workspace.fs.copy(vscode.Uri.file(source), vscode.Uri.file(target), { overwrite: false });
           }
@@ -2406,8 +2427,10 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           try {
             const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(historyDir));
             const jsonFiles = entries
-              .filter(e => e[1] === vscode.FileType.File && e[0].endsWith('.json'))
-              .map(e => e[0]);
+              .filter(e => e[1] === vscode.FileType.File && EXECUTION_HISTORY_FILE_PATTERN.test(e[0]))
+              .map(e => e[0])
+              .sort(compareExecutionHistoryFileNames)
+              .slice(0, EXECUTION_HISTORY_READ_LIMIT);
 
             history = await readExecutionHistoryFiles(historyDir, jsonFiles);
             history.sort((a: any, b: any) => (b.executedAt ?? 0) - (a.executedAt ?? 0));
@@ -2415,12 +2438,30 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
 
           currentPanel?.webview.postMessage({
             command: 'getExecutionHistoryResponse', requestId,
-            success: true, history: history.slice(0, 500)
+            success: true, history
           });
         } catch (err) {
           currentPanel?.webview.postMessage({
             command: 'getExecutionHistoryResponse', requestId,
             success: false, error: String(err)
+          });
+        }
+        return;
+      }
+
+      case 'deleteExecutionHistory': {
+        const requestId: string = msg.requestId;
+        const flow = normalizeHistoryFlow(msg.flow);
+        try {
+          const deleted = await deleteExecutionHistoryRecords(flow, msg.ids);
+          currentPanel?.webview.postMessage({
+            command: 'deleteExecutionHistoryResponse', requestId,
+            success: true, deleted
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'deleteExecutionHistoryResponse', requestId,
+            success: false, deleted: 0, error: String(err)
           });
         }
         return;

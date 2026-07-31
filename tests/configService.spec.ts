@@ -46,27 +46,27 @@ describe('configService', () => {
 
   describe('resolveCfgPath', () => {
     it('should return resolved .cfg path', () => {
-      const p = resolveCfgPath('/mock/configs', 'my-module');
+      const p = resolveCfgPath('hibist', '/mock/configs', 'my-module');
       expect(p).toBe('/mock/configs/my-module.cfg');
     });
   });
 
   describe('makeUniqueCfgModuleName', () => {
     it('should return base if it does not exist', async () => {
-      const name = await makeUniqueCfgModuleName('/mock/configs', 'mod');
+      const name = await makeUniqueCfgModuleName('hibist', '/mock/configs', 'mod');
       expect(name).toBe('mod');
     });
 
     it('should return suffixed name if name exists', async () => {
       mockFilesystem.set('/mock/configs/mod.cfg', 'module = mod');
-      const name = await makeUniqueCfgModuleName('/mock/configs', 'mod');
+      const name = await makeUniqueCfgModuleName('hibist', '/mock/configs', 'mod');
       expect(name).toBe('mod_1');
     });
 
     it('should continue suffixing until unique name is found', async () => {
       mockFilesystem.set('/mock/configs/mod.cfg', 'module = mod');
       mockFilesystem.set('/mock/configs/mod_1.cfg', 'module = mod_1');
-      const name = await makeUniqueCfgModuleName('/mock/configs', 'mod');
+      const name = await makeUniqueCfgModuleName('hibist', '/mock/configs', 'mod');
       expect(name).toBe('mod_2');
     });
   });
@@ -76,7 +76,8 @@ describe('configService', () => {
       const stat: vscode.FileStat = {
         type: 1,
         mtime: 1234567,
-        size: 99
+        size: 99,
+        ctime:1234567,
       };
       const info = toFlowConfigFileInfo('/mock/project/root/configs/mod.cfg', stat);
       expect(info.key).toBe('mod');
@@ -113,7 +114,7 @@ describe('configService', () => {
 
     beforeEach(() => {
       // Create configs dir structure
-      mockFilesystem.set(resolveCfgPath(configsDir, 'existing'), '# content');
+      mockFilesystem.set(resolveCfgPath('hibist', configsDir, 'existing'), '# content');
     });
 
     it('should create flow config file', async () => {
@@ -139,13 +140,13 @@ describe('configService', () => {
     it('should rename config file', async () => {
       const info = await renameFlowConfigFile('hibist', 'existing', 'new-name');
       expect(info.moduleName).toBe('new-name');
-      expect(mockFilesystem.has(resolveCfgPath(configsDir, 'existing'))).toBe(false);
-      expect(mockFilesystem.has(resolveCfgPath(configsDir, 'new-name'))).toBe(true);
+      expect(mockFilesystem.has(resolveCfgPath('hibist', configsDir, 'existing'))).toBe(false);
+      expect(mockFilesystem.has(resolveCfgPath('hibist', configsDir, 'new-name'))).toBe(true);
     });
 
     it('should delete config file', async () => {
       await deleteFlowConfigFile('hibist', 'existing');
-      expect(mockFilesystem.has(resolveCfgPath(configsDir, 'existing'))).toBe(false);
+      expect(mockFilesystem.has(resolveCfgPath('hibist', configsDir, 'existing'))).toBe(false);
     });
   });
 });
