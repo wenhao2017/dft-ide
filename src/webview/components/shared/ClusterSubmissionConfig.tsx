@@ -240,6 +240,16 @@ export default function ClusterSubmissionConfigEditor({
           min-width: 0;
           padding: 3px 0;
         }
+        .dft-cluster-config .alias-select .ant-select-selector {
+          min-height: 48px;
+          padding-block: 5px;
+        }
+        .dft-cluster-config .alias-select .ant-select-selection-item,
+        .dft-cluster-config .alias-select .ant-select-selection-placeholder {
+          display: flex;
+          align-items: center;
+          line-height: normal;
+        }
         .dft-cluster-config .alias-option-command {
           overflow: hidden;
           color: ${token.colorTextSecondary};
@@ -314,6 +324,7 @@ export default function ClusterSubmissionConfigEditor({
               <Select
                 showSearch
                 allowClear
+                className="alias-select"
                 style={{ width: '100%' }}
                 value={value.aliasName || undefined}
                 placeholder="选择个人 dsub Alias"
@@ -409,12 +420,9 @@ export default function ClusterSubmissionConfigEditor({
               <ThunderboltOutlined style={{ color: sectionAccent }} />
               <Text strong>最终命令预览</Text>
             </Space>
-            <Space size={6}>
-              <Tag color="processing">DFT_IDE_DSUBRUN_I</Tag>
-              {!validation && preview ? (
-                <Tag icon={<CheckCircleFilled />} color="success">可以运行</Tag>
-              ) : null}
-            </Space>
+            {!validation && preview ? (
+              <Tag icon={<CheckCircleFilled />} color="success">可以运行</Tag>
+            ) : null}
           </div>
           <pre className={`cluster-command${preview ? '' : ' is-placeholder'}`}>
             {preview || '完成上方配置后，这里将显示最终的 dsub -I 命令。'}
