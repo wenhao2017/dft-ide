@@ -1,62 +1,43 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
   <defs>
-    <!-- Background Gradient -->
-    <linearGradient id="bgGrad" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#1A1A1A"/>
-      <stop offset="100%" stop-color="#0D0D0D"/>
+    <linearGradient id="plate" x1="12" y1="8" x2="116" y2="122" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#343b43"/>
+      <stop offset="0.48" stop-color="#171c21"/>
+      <stop offset="1" stop-color="#2a3138"/>
     </linearGradient>
-    
-    <!-- Border Gradient -->
-    <linearGradient id="borderGrad" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#3A3A3A"/>
-      <stop offset="100%" stop-color="#111111"/>
+    <linearGradient id="steel" x1="22" y1="35" x2="108" y2="97" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f7f9fa"/>
+      <stop offset="0.22" stop-color="#aeb7bf"/>
+      <stop offset="0.48" stop-color="#eef1f3"/>
+      <stop offset="0.72" stop-color="#7e8993"/>
+      <stop offset="1" stop-color="#d9dee2"/>
     </linearGradient>
-    
-    <!-- Primary Brand Gradient (matches your React UI Webview design) -->
-    <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1677FF" />
-      <stop offset="100%" stop-color="#722ED1" />
-    </linearGradient>
-
-    <!-- Inverse Brand Gradient -->
-    <linearGradient id="inverseBrandGrad" x1="100%" y1="100%" x2="0%" y2="0%">
-      <stop offset="0%" stop-color="#1677FF" />
-      <stop offset="100%" stop-color="#722ED1" />
-    </linearGradient>
-
-    <!-- Blur/Glow Filter -->
-    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="4" result="blur" />
-      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    <filter id="shadow" x="-10%" y="-20%" width="120%" height="150%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#000" flood-opacity=".65"/>
     </filter>
   </defs>
 
-  <!-- App Icon Base -->
-  <rect x="6" y="6" width="116" height="116" rx="28" fill="url(#bgGrad)" stroke="url(#borderGrad)" stroke-width="2"/>
-  
-  <!-- Subtle inner grid effect (technological feel) -->
-  <path d="M26 64 h76 M64 26 v76" stroke="#ffffff" stroke-opacity="0.05" stroke-width="1" stroke-dasharray="4,4"/>
+  <rect x="4" y="4" width="120" height="120" rx="25" fill="url(#plate)"/>
+  <rect x="4.75" y="4.75" width="118.5" height="118.5" rx="24.25"
+        fill="none" stroke="#c7cdd2" stroke-opacity=".34" stroke-width="1.5"/>
+  <path d="M19 17h90M15 108h98" stroke="#fff" stroke-opacity=".055"/>
 
-  <!-- Core Logo Design -->
-  <g filter="url(#glow)">
-    <!-- Tech node hexagon representing the 'Design' & 'Verification' Flows -->
-    <path d="M64 36 L88 50 L88 78 L64 92 L40 78 L40 50 Z" fill="none" stroke="url(#brandGrad)" stroke-width="6" stroke-linejoin="round"/>
-    
-    <!-- Circuit internal connections -->
-    <path d="M64 54 L64 36 M50 63 L40 50 M78 63 L88 50" stroke="url(#inverseBrandGrad)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <g transform="translate(5 32) scale(.49)" fill="url(#steel)" stroke="url(#steel)" filter="url(#shadow)">
+    <!-- Broken-stem D, matching the supplied department mark. -->
+    <path d="M18 34h38c20 0 31 12 31 31S76 97 56 97H18V55"
+          fill="none" stroke-width="16" stroke-linecap="butt" stroke-linejoin="round"/>
 
-    <!-- Central intelligence/Processing core -->
-    <circle cx="64" cy="64" r="10" fill="url(#brandGrad)" />
-    
-    <!-- Outer orbiting elements representing orchestration -->
-    <circle cx="64" cy="64" r="38" fill="none" stroke="url(#brandGrad)" stroke-width="2" stroke-dasharray="8, 12" opacity="0.6" />
-    
-    <!-- Highlight Dots -->
-    <circle cx="64" cy="26" r="4" fill="#1677FF" />
-    <circle cx="97" cy="45" r="4" fill="#534ED6" />
-    <circle cx="97" cy="83" r="4" fill="#722ED1" />
-    <circle cx="64" cy="102" r="4" fill="#722ED1" />
-    <circle cx="31" cy="83" r="4" fill="#534ED6" />
-    <circle cx="31" cy="45" r="4" fill="#1677FF" />
+    <!-- F shares the visual axis with the D crossbar. -->
+    <path d="M93 96V78M93 59v-6c0-13 8-19 22-19h43M82 68h72"
+          fill="none" stroke-width="16" stroke-linecap="butt" stroke-linejoin="round"/>
+
+    <!-- Descending arm of X. -->
+    <path d="M160 29h20l47 68h-20z" stroke="none"/>
+
+    <!-- Rising arm of X continues into the lower orbital sweep. -->
+    <path d="M45 104c51 22 126-8 170-75h17c-48 79-128 108-184 83z" stroke="none"/>
+
+    <!-- Upper tapered orbit from the original mark. -->
+    <path d="M94 28c41-24 99-22 112 8 4 9 4 18 1 25 0-34-50-47-103-27z" stroke="none"/>
   </g>
 </svg>
