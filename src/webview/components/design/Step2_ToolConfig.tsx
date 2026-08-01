@@ -19,7 +19,6 @@ import {
   type ClusterSubmissionConfig,
 } from '../../../shared/clusterSubmission'
 import ClusterSubmissionConfigEditor from '../shared/ClusterSubmissionConfig'
-import ExecutionContextBridge from '../shared/ExecutionContextBridge'
 import PipelineExecutionOverview from '../shared/PipelineExecutionOverview'
 import ToolConfigEditor from '../shared/ToolConfigEditor'
 import { DESIGN_FLOW_ACCENTS } from '../../flowTheme'
@@ -121,8 +120,7 @@ const Step2ToolConfig: React.FC<Props> = ({
             key: 'execution',
             label: <Space><AppstoreOutlined />配置执行</Space>,
             children: (
-              <div className="dft-execution-view" style={{ paddingTop: 12 }}>
-                <ExecutionContextBridge scope="Module" accent={accent} />
+              <div style={{ paddingTop: 12 }}>
                 <PipelineExecutionOverview
                   flowKey={repo}
                   flowLabel={flowLabel}
