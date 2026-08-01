@@ -27,7 +27,6 @@ import {
   ArrowRightOutlined,
   FileSyncOutlined,
   PullRequestOutlined,
-  SaveOutlined,
   SwapOutlined,
   SyncOutlined,
   UploadOutlined,
@@ -170,7 +169,7 @@ const CommonFlow: React.FC = () => {
   const canManageMembers = activeProject
     ? activeProject.id !== '0' && (activeProject.canManageMembers ?? activeProject.role?.toUpperCase() === 'DFTM')
     : false;
-  const { savedData, loading, saving, uploading, syncing, hasUnsaved, handleSave, debouncedSave, markDirty } =
+  const { savedData, loading, uploading, syncing, hasUnsaved, handleSave, debouncedSave, markDirty } =
     useFlowConfig('common');
 
   const selectedDataInfo = repoInfo[selectedDataRepo];
@@ -1378,11 +1377,6 @@ const CommonFlow: React.FC = () => {
 
             <Space size="small" wrap>
               <TemporaryObsBrowser defaultSpaceName={obsSpaceName} />
-              <Badge dot={hasUnsaved} offset={[-4, 4]}>
-                <Button icon={<SaveOutlined />} loading={saving} onClick={() => handleSave(collectFormData())}>
-                  保存路径配置
-                </Button>
-              </Badge>
               <Button
                 type="primary"
                 icon={<SyncOutlined />}

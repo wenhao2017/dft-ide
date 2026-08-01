@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Col, Empty, Input, List, Modal, Row, Space, Spin, Tag, Typography, message } from 'antd';
+import { Button, Col, Empty, Input, List, Modal, Row, Space, Spin, Tag, Typography, message } from 'antd';
 import { CloudServerOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { DonauAccount, DonauQueue, getDonauResources } from '../../utils/ipc';
 
@@ -11,20 +11,14 @@ interface Props {
   onChange: (value: { account: string; queue: string }) => void;
 }
 
-const defaultAccount = 'ug_dft.HIS-HIS-ASIC-HISC-DFT-PLAT-WS';
-const defaultQueue = 'normal';
-
 const DonauResourcePicker: React.FC<Props> = ({ account, queue, onChange }) => {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [accounts, setAccounts] = useState<DonauAccount[]>([]);
   const [queues, setQueues] = useState<DonauQueue[]>([]);
-  const [selectedAccount, setSelectedAccount] = useState(account || defaultAccount);
-  const [selectedQueue, setSelectedQueue] = useState(queue || defaultQueue);
+  const [selectedAccount, setSelectedAccount] = useState(account || '');
+  const [selectedQueue, setSelectedQueue] = useState(queue || '');
   const [keyword, setKeyword] = useState('');
-  const [source, setSource] = useState<'mock' | 'real'>('mock');
-  const [notice, setNotice] = useState<string>();
-  const [error, setError] = useState<string>();
 
   useEffect(() => {
     if (account) {
@@ -40,22 +34,21 @@ const DonauResourcePicker: React.FC<Props> = ({ account, queue, onChange }) => {
 
   const loadResources = async () => {
     setLoading(true);
-    setError(undefined);
     try {
       const result = await getDonauResources();
-      setSource(result.source);
-      setAccounts(result.accounts);
-      setQueues(result.queues);
-      setNotice(result.fallbackReason);
-      if (!result.success) {
-        setError(result.error ?? 'Donau resource loading failed.');
-      }
-      const nextAccount = account || selectedAccount || defaultAccount;
-      const nextQueue = queue || selectedQueue || defaultQueue;
-      setSelectedAccount(result.accounts.some((item) => item.submitName === nextAccount) ? nextAccount : result.accounts[0]?.submitName ?? nextAccount);
-      setSelectedQueue(result.queues.some((item) => item.submitName === nextQueue) ? nextQueue : result.queues[0]?.submitName ?? nextQueue);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const nextAccounts = result.success ? result.accounts : [];
+      const nextQueues = result.success ? result.queues : [];
+      setAccounts(nextAccounts);
+      setQueues(nextQueues);
+      const nextAccount = account || selectedAccount;
+      const nextQueue = queue || selectedQueue;
+      setSelectedAccount(nextAccounts.some((item) => item.submitName === nextAccount) ? nextAccount : nextAccounts[0]?.submitName ?? '');
+      setSelectedQueue(nextQueues.some((item) => item.submitName === nextQueue) ? nextQueue : nextQueues[0]?.submitName ?? '');
+    } catch {
+      setAccounts([]);
+      setQueues([]);
+      setSelectedAccount('');
+      setSelectedQueue('');
     } finally {
       setLoading(false);
     }
@@ -78,9 +71,7 @@ const DonauResourcePicker: React.FC<Props> = ({ account, queue, onChange }) => {
 
   const openPicker = () => {
     setOpen(true);
-    if (accounts.length === 0 && queues.length === 0) {
-      void loadResources();
-    }
+    void loadResources();
   };
 
   return (
@@ -94,6 +85,7 @@ const DonauResourcePicker: React.FC<Props> = ({ account, queue, onChange }) => {
         width={980}
         onCancel={() => setOpen(false)}
         onOk={confirm}
+        okButtonProps={{ disabled: !selectedAccount || !selectedQueue }}
         okText="确认"
         cancelText="取消"
       >
@@ -113,13 +105,7 @@ const DonauResourcePicker: React.FC<Props> = ({ account, queue, onChange }) => {
                 刷新
               </Button>
             </Col>
-            <Col>
-              <Text type="secondary">{source === 'mock' ? 'Mock 数据' : 'Real Donau'}</Text>
-            </Col>
           </Row>
-
-          {notice ? <Alert type="warning" showIcon message="已 fallback 到 mock 数据" description={notice} /> : null}
-          {error ? <Alert type="error" showIcon message="Donau 资源获取失败" description={error} /> : null}
 
           <Row gutter={16} style={{ padding: '2px 0 4px' }}>
             <Col span={12}>

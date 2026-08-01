@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react'
 import {
-  Badge,
   Button,
   Card,
   Form,
@@ -13,7 +12,6 @@ import {
   AppstoreOutlined,
   LeftOutlined,
   RightOutlined,
-  SaveOutlined,
   SettingOutlined,
   ToolOutlined,
 } from '@ant-design/icons'
@@ -58,10 +56,7 @@ const Step2ToolConfig: React.FC<Props> = ({
   const {
     savedData,
     loading,
-    saving,
-    hasUnsaved,
-    handleSave,
-    markDirty,
+    debouncedSave,
   } = useFlowConfig(repo)
 
   useEffect(() => {
@@ -77,10 +72,9 @@ const Step2ToolConfig: React.FC<Props> = ({
     })
   }, [form, savedData])
 
-  const save = async () => {
-    const values = form.getFieldsValue(true) as Record<string, unknown>
+  const autoSave = (values: Record<string, unknown>) => {
     const previousStep2 = (savedData?.step2 as Record<string, unknown> | undefined) ?? {}
-    await handleSave({
+    debouncedSave({
       step2: {
         ...previousStep2,
         step2Task: values,
@@ -101,9 +95,8 @@ const Step2ToolConfig: React.FC<Props> = ({
             children: (
               <Form
                 form={form}
-                className="dft-step2-compact"
                 layout="vertical"
-                onValuesChange={markDirty}
+                onValuesChange={(_changed, values) => autoSave(values)}
                 style={{ paddingTop: 12 }}
               >
                 <Card
@@ -148,11 +141,6 @@ const Step2ToolConfig: React.FC<Props> = ({
         borderTop: '1px solid var(--vscode-panel-border)',
       }}>
         <Button onClick={onPrev} icon={<LeftOutlined />}>上一页</Button>
-        <Badge dot={hasUnsaved} offset={[-4, 4]}>
-          <Button icon={<SaveOutlined />} loading={saving} onClick={() => void save()}>
-            保存 Flow 配置
-          </Button>
-        </Badge>
         <Button type="primary" onClick={onNext}>
           下一页 <RightOutlined />
         </Button>

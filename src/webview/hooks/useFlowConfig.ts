@@ -49,6 +49,7 @@ export interface FlowConfigState {
   savedData: Record<string, unknown> | null;
   /** 是否正在加载配置 */
   loading: boolean;
+  loaded: boolean;
   /** 是否正在保存中 */
   uploading: boolean;
   /** 是否正在反向同步中 */
@@ -88,6 +89,7 @@ export interface FlowConfigState {
 export function useFlowConfig(flow: FlowType): FlowConfigState {
   const [savedData, setSavedData] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadedFlow, setLoadedFlow] = useState<FlowType | null>(null);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -99,15 +101,25 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
   // 避免组件卸载后还回调 setState
   const mountedRef = useRef(true);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pendingSaveRef = useRef<{ flow: FlowType; data: Record<string, unknown> } | null>(null);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
     };
   }, []);
+
+  useEffect(() => () => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = undefined;
+    }
+    const pending = pendingSaveRef.current;
+    if (pending?.flow === flow) {
+      pendingSaveRef.current = null;
+      void saveConfig(pending.flow, pending.data);
+    }
+  }, [flow]);
 
   // ── 挂载时读取配置文件 ─────────────────────────────
   useEffect(() => {
@@ -115,9 +127,11 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
     if (!isReadableFlow(flow)) {
       setSavedData(null);
       setLoading(false);
+      setLoadedFlow(flow);
       return () => { cancelled = true; };
     }
     setLoading(true);
+    setLoadedFlow(null);
     loadConfig(flow)
       .then((data) => {
         if (!cancelled && mountedRef.current) {
@@ -128,13 +142,21 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
         // 读取失败时静默处理，保持 savedData 为 null（相当于首次使用）
       })
       .finally(() => {
-        if (!cancelled && mountedRef.current) setLoading(false);
+        if (!cancelled && mountedRef.current) {
+          setLoading(false);
+          setLoadedFlow(flow);
+        }
       });
     return () => { cancelled = true; };
   }, [flow]);
 
   // ── 保存配置 ──────────────────────────────────────
   const handleSave = useCallback(async (data: Record<string, unknown>): Promise<boolean> => {
+    if (pendingSaveRef.current?.flow === flow) {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = undefined;
+      pendingSaveRef.current = null;
+    }
     setSaving(true);
     try {
       const result = await saveConfig(flow, data);
@@ -167,12 +189,16 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
+    const pendingSave = { flow, data };
+    pendingSaveRef.current = pendingSave;
     debounceTimerRef.current = setTimeout(async () => {
+      debounceTimerRef.current = undefined;
       if (!mountedRef.current) return;
       try {
-        const result = await saveConfig(flow, data);
+        const result = await saveConfig(pendingSave.flow, pendingSave.data);
         if (result.success && mountedRef.current) {
-          const merged = { ...(configCache.get(flow) ?? {}), ...data };
+          if (pendingSaveRef.current === pendingSave) pendingSaveRef.current = null;
+          const merged = { ...(configCache.get(flow) ?? {}), ...pendingSave.data };
           setSavedData(merged);
           configCache.set(flow, merged);
           // 自动保存成功后标记已保存（但保留 hasUnsaved = true 直到手动 sync）
@@ -195,6 +221,11 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
     commitMessage?: string,
     push = false
   ): Promise<boolean> => {
+    if (pendingSaveRef.current?.flow === flow) {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = undefined;
+      pendingSaveRef.current = null;
+    }
     setSyncing(true);
     try {
       // 先保存到本地
@@ -230,5 +261,17 @@ export function useFlowConfig(flow: FlowType): FlowConfigState {
     }
   }, [flow, clearDirtyStore]);
 
-  return { savedData, loading, uploading, saving, syncing, hasUnsaved, handleSave, debouncedSave, handleSync, markDirty };
+  return {
+    savedData,
+    loading,
+    loaded: loadedFlow === flow,
+    uploading,
+    saving,
+    syncing,
+    hasUnsaved,
+    handleSave,
+    debouncedSave,
+    handleSync,
+    markDirty,
+  };
 }

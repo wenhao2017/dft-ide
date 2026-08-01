@@ -5,7 +5,6 @@ import {
   FileSyncOutlined,
   HistoryOutlined,
   RightOutlined,
-  SaveOutlined,
 } from '@ant-design/icons';
 
 const { Text, Title } = Typography;
@@ -16,9 +15,7 @@ interface Props {
   branch: string;
   description: string;
   scopeLabel: string;
-  saving: boolean;
   generating: boolean;
-  onSave: () => void;
   onGenerate: () => void;
   onHistory: () => void;
   onNext?: () => void;
@@ -31,9 +28,7 @@ const TransformConfigPanel: React.FC<Props> = ({
   branch,
   description,
   scopeLabel,
-  saving,
   generating,
-  onSave,
   onGenerate,
   onHistory,
   onNext,
@@ -187,9 +182,6 @@ const TransformConfigPanel: React.FC<Props> = ({
         }}
       >
         <Space wrap>
-          <Button icon={<SaveOutlined />} loading={saving} onClick={onSave}>
-            保存配置
-          </Button>
           <Button icon={<HistoryOutlined />} onClick={onHistory}>
             转换历史
           </Button>

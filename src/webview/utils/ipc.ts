@@ -126,20 +126,18 @@ export interface DonauQueue {
 
 export async function getDonauResources(): Promise<{
   success: boolean
-  source: 'mock' | 'real'
+  source: 'real'
   accounts: DonauAccount[]
   queues: DonauQueue[]
-  fallbackReason?: string
   error?: string
   cancelled?: boolean
 }> {
   const res = await ipcRequest('getDonauResources', {}, 120_000)
   return res as unknown as {
     success: boolean
-    source: 'mock' | 'real'
+    source: 'real'
     accounts: DonauAccount[]
     queues: DonauQueue[]
-    fallbackReason?: string
     error?: string
     cancelled?: boolean
   }

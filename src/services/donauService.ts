@@ -24,40 +24,12 @@ export interface DonauQueue {
 
 export interface DonauResourcesResult {
   success: boolean;
-  source: 'mock' | 'real';
+  source: 'real';
   accounts: DonauAccount[];
   queues: DonauQueue[];
-  fallbackReason?: string;
   error?: string;
   cancelled?: boolean;
 }
-
-const mockAccounts: DonauAccount[] = [
-  { name: 'root', submitName: 'root', runningJobsLimit: -1, runningJobsCount: 82590, pendingJobsLimit: -1, pendingJobsCount: 22627, sstoppedJobsCount: 0 },
-  { name: 'root.ug_5031', submitName: 'ug_5031', runningJobsLimit: -1, runningJobsCount: 1379, pendingJobsLimit: -1, pendingJobsCount: 299, sstoppedJobsCount: 0 },
-  { name: 'root.ug_5031.HIS-PandasV200-COTS', submitName: 'ug_5031.HIS-PandasV200-COTS', runningJobsLimit: -1, runningJobsCount: 35, pendingJobsLimit: -1, pendingJobsCount: 181, sstoppedJobsCount: 0 },
-  { name: 'root.ug_5031.flowxSClass', submitName: 'ug_5031.flowxSClass', runningJobsLimit: -1, runningJobsCount: 7, pendingJobsLimit: -1, pendingJobsCount: 1, sstoppedJobsCount: 0 },
-  { name: 'root.ug_cot', submitName: 'ug_cot', runningJobsLimit: -1, runningJobsCount: 286, pendingJobsLimit: -1, pendingJobsCount: 1, sstoppedJobsCount: 0 },
-  { name: 'root.ug_cot.HIS-ASIC-DFT-staff-WS', submitName: 'ug_cot.HIS-ASIC-DFT-staff-WS', runningJobsLimit: -1, runningJobsCount: 5, pendingJobsLimit: -1, pendingJobsCount: 1, sstoppedJobsCount: 0 },
-  { name: 'root.ug_dft', submitName: 'ug_dft', runningJobsLimit: -1, runningJobsCount: 3584, pendingJobsLimit: -1, pendingJobsCount: 558, sstoppedJobsCount: 0 },
-  { name: 'root.ug_dft.HIS-HIS-ASIC-HISC-DFT-PLAT-WS', submitName: 'ug_dft.HIS-HIS-ASIC-HISC-DFT-PLAT-WS', runningJobsLimit: -1, runningJobsCount: 279, pendingJobsLimit: -1, pendingJobsCount: 10, sstoppedJobsCount: 0 },
-  { name: 'root.ug_dft.PLAT_SClass', submitName: 'ug_dft.PLAT_SClass', runningJobsLimit: -1, runningJobsCount: 5, pendingJobsLimit: -1, pendingJobsCount: 0, sstoppedJobsCount: 0 },
-];
-
-const mockQueues: DonauQueue[] = [
-  { name: 'root.short', submitName: 'short', status: 'OPEN,ACTIVE', runningJobsLimit: 60000, runningJobsCount: 13482, pendingJobsCount: 23366, sstoppedJobsCount: 0, description: 'short queue, suitable for short jobs' },
-  { name: 'root.normal', submitName: 'normal', status: 'OPEN,ACTIVE', runningJobsLimit: 80000, runningJobsCount: 57049, pendingJobsCount: 11281, sstoppedJobsCount: 0, description: 'normal queue, suitable for common jobs' },
-  { name: 'root.middle', submitName: 'middle', status: 'OPEN,ACTIVE', runningJobsLimit: 90000, runningJobsCount: 4191, pendingJobsCount: 9812, sstoppedJobsCount: 0, description: 'middle queue, suitable for longer jobs' },
-  { name: 'root.long', submitName: 'long', status: 'OPEN,ACTIVE', runningJobsLimit: 90000, runningJobsCount: 2841, pendingJobsCount: 1242, sstoppedJobsCount: 0, description: 'long queue, suitable for very long jobs' },
-  { name: 'root.bigmem', submitName: 'bigmem', status: 'OPEN,ACTIVE', runningJobsLimit: 90000, runningJobsCount: 3880, pendingJobsCount: 802, sstoppedJobsCount: 0, description: 'big memory queue' },
-  { name: 'root.hugemem', submitName: 'hugemem', status: 'OPEN,ACTIVE', runningJobsLimit: 90000, runningJobsCount: 605, pendingJobsCount: 72, sstoppedJobsCount: 0, description: 'huge memory queue' },
-  { name: 'root.debug', submitName: 'debug', status: 'OPEN,ACTIVE', runningJobsLimit: 90000, runningJobsCount: 23, pendingJobsCount: 0, sstoppedJobsCount: 0, description: 'debug queue' },
-  { name: 'root.formal', submitName: 'formal', status: 'OPEN,ACTIVE', runningJobsLimit: 90000, runningJobsCount: 73, pendingJobsCount: 0, sstoppedJobsCount: 0, description: 'formal queue' },
-  { name: 'root.gpu', submitName: 'gpu', status: 'OPEN,ACTIVE', runningJobsLimit: 90000, runningJobsCount: 0, pendingJobsCount: 0, sstoppedJobsCount: 0, description: 'gpu queue' },
-  { name: 'root.nile', submitName: 'nile', status: 'OPEN,ACTIVE', runningJobsLimit: 90000, runningJobsCount: 0, pendingJobsCount: 0, sstoppedJobsCount: 0, description: 'nile queue' },
-  { name: 'root.normal_send', submitName: 'normal_send', status: 'OPEN,ACTIVE', runningJobsLimit: 80000, runningJobsCount: 0, pendingJobsCount: 0, sstoppedJobsCount: 0, description: 'normal send queue' },
-  { name: 'root.short_kill', submitName: 'short_kill', status: 'OPEN,ACTIVE', runningJobsLimit: 120000, runningJobsCount: 0, pendingJobsCount: 0, sstoppedJobsCount: 0, description: 'short kill queue' },
-];
 
 export function submitJob(payload: unknown): string {
   const jobId = `Job-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -77,34 +49,12 @@ export function queryJobStatus(jobId: string): {
 }
 
 export async function getDonauResources(): Promise<DonauResourcesResult> {
-  const config = vscode.workspace.getConfiguration('dftIde');
-  const mode = config.get<'mock' | 'real' | 'auto'>('donau.mode', 'mock');
-
-  if (mode === 'mock') {
-    return getMockResources();
-  }
-
   try {
     return await getRealResources();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (isCommandUnavailable(message) || mode === 'auto') {
-      vscode.window.showWarningMessage(`Donau commands are unavailable; using mock resources. ${message}`);
-      return getMockResources(message);
-    }
-    vscode.window.showErrorMessage(message);
     return { success: false, source: 'real', accounts: [], queues: [], error: message };
   }
-}
-
-function getMockResources(fallbackReason?: string): DonauResourcesResult {
-  return {
-    success: true,
-    source: 'mock',
-    accounts: mockAccounts,
-    queues: mockQueues,
-    fallbackReason,
-  };
 }
 
 async function getRealResources(): Promise<DonauResourcesResult> {
@@ -131,7 +81,6 @@ async function getRealResources(): Promise<DonauResourcesResult> {
     const dconfigOutput = await runDconfig(password);
     if (!/get token successfully/i.test(dconfigOutput)) {
       const error = dconfigOutput.trim() || 'dconfig failed. Check ~/.user_cre permissions with: ls -l ~/.user_cre; chmod 600 ~/.user_cre';
-      vscode.window.showErrorMessage(error);
       return { success: false, source: 'real', accounts: [], queues: [], error };
     }
 
@@ -191,10 +140,6 @@ function isInvalidToken(output: string): boolean {
   return /invalid token/i.test(output) && /dconfig/i.test(output);
 }
 
-function isCommandUnavailable(message: string): boolean {
-  return /enoent|not recognized|command not found|no such file/i.test(message);
-}
-
 function parseAccounts(output: string): DonauAccount[] {
   const accounts = output
     .split(/\r?\n/)
@@ -214,7 +159,7 @@ function parseAccounts(output: string): DonauAccount[] {
       };
     });
 
-  return accounts.length > 0 ? accounts : mockAccounts;
+  return accounts;
 }
 
 function parseQueues(output: string): DonauQueue[] {
@@ -237,7 +182,7 @@ function parseQueues(output: string): DonauQueue[] {
       };
     });
 
-  return queues.length > 0 ? queues : mockQueues;
+  return queues;
 }
 
 function simplifyDonauName(name: string): string {

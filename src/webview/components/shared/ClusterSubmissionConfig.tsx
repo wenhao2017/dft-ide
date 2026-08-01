@@ -22,7 +22,6 @@ import {
   CloudServerOutlined,
   CodeOutlined,
   ReloadOutlined,
-  SafetyCertificateOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
 
@@ -63,7 +62,6 @@ export default function ClusterSubmissionConfigEditor({
   const { token } = theme.useToken()
   const [aliases, setAliases] = useState<DsubAliasOption[]>([])
   const [loadingAliases, setLoadingAliases] = useState(false)
-  const [aliasError, setAliasError] = useState<string>()
   const [lastAliasName, setLastAliasName] = useState(
     value.mode === 'alias' ? value.aliasName : '',
   )
@@ -73,16 +71,14 @@ export default function ClusterSubmissionConfigEditor({
 
   const loadAliases = async (showSuccess = false) => {
     setLoadingAliases(true)
-    setAliasError(undefined)
     try {
       const nextAliases = await getDsubAliases()
       setAliases(nextAliases)
       if (showSuccess) {
         message.success(`已加载 ${nextAliases.length} 个 dsub Alias`)
       }
-    } catch (error) {
+    } catch {
       setAliases([])
-      setAliasError(error instanceof Error ? error.message : String(error))
     } finally {
       setLoadingAliases(false)
     }
@@ -150,23 +146,6 @@ export default function ClusterSubmissionConfigEditor({
           --cluster-border: ${token.colorBorderSecondary};
           --cluster-surface: ${token.colorBgContainer};
           --cluster-soft: ${token.colorFillQuaternary};
-          font-size: 12px;
-        }
-        .dft-step2-compact,
-        .dft-step2-compact .ant-typography,
-        .dft-step2-compact .ant-card-head-title,
-        .dft-step2-compact .ant-form-item-label > label,
-        .dft-step2-compact .ant-btn,
-        .dft-step2-compact .ant-input,
-        .dft-step2-compact .ant-select {
-          font-size: 12px;
-        }
-        .dft-step2-compact .ant-card-head {
-          min-height: 44px;
-        }
-        .dft-step2-compact .ant-card-head-title,
-        .dft-step2-compact .ant-card-extra {
-          padding-block: 10px;
         }
         .dft-cluster-config .cluster-hero {
           position: relative;
@@ -206,9 +185,10 @@ export default function ClusterSubmissionConfigEditor({
         }
         .dft-cluster-config .cluster-preview {
           margin-top: 14px;
-          border: 1px solid ${token.colorBorderSecondary};
+          border: 1px solid ${token.colorPrimaryBorder};
           border-radius: 12px;
           background: ${token.colorBgElevated};
+          box-shadow: 0 8px 22px rgba(0, 0, 0, .10);
           overflow: hidden;
         }
         .dft-cluster-config .cluster-preview-bar {
@@ -217,8 +197,8 @@ export default function ClusterSubmissionConfigEditor({
           justify-content: space-between;
           gap: 12px;
           padding: 9px 13px;
-          border-bottom: 1px solid ${token.colorBorderSecondary};
-          background: ${token.colorFillQuaternary};
+          border-bottom: 1px solid ${token.colorPrimaryBorder};
+          background: ${token.colorPrimaryBg};
         }
         .dft-cluster-config .cluster-command {
           min-height: 56px;
@@ -227,9 +207,12 @@ export default function ClusterSubmissionConfigEditor({
           white-space: pre-wrap;
           overflow-wrap: anywhere;
           font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Consolas, monospace);
-          font-size: 11px;
-          line-height: 1.65;
-          color: ${token.colorText};
+          font-size: 12px;
+          font-weight: 550;
+          line-height: 1.7;
+          color: ${token.colorBgBase};
+          background: ${token.colorText};
+          box-shadow: inset 4px 0 0 ${token.colorPrimary};
         }
         .dft-cluster-config .alias-option {
           display: grid;
@@ -252,9 +235,8 @@ export default function ClusterSubmissionConfigEditor({
           <Space size={8} align="center">
             <CloudServerOutlined style={{ color: token.colorPrimary, fontSize: 19 }} />
             <Title level={5} style={{ margin: 0, fontSize: 16 }}>Donau集群提交策略</Title>
-            <Tag icon={<SafetyCertificateOutlined />} color="processing">强制交互模式 -I</Tag>
           </Space>
-          <Paragraph type="secondary" style={{ margin: 0, maxWidth: 760, fontSize: 12 }}>
+          <Paragraph type="secondary" style={{ margin: 0, maxWidth: 760 }}>
             使用个人 csh Alias，或独立选择 Donau 资源。两种方式都会生成完整命令，
             并通过 <Text code>DFT_IDE_DSUBRUN_I</Text> 下发给 run_flow。
           </Paragraph>
@@ -313,12 +295,7 @@ export default function ClusterSubmissionConfigEditor({
                   searchText: `${alias.name} ${alias.command}`,
                   label: (
                     <div className="alias-option">
-                      <Space size={8}>
-                        <Text strong>{alias.name}</Text>
-                        {alias.originallyInteractive
-                          ? <Tag color="success">已有 -I</Tag>
-                          : <Tag color="blue">IDE补充 -I</Tag>}
-                      </Space>
+                      <Text strong>{alias.name}</Text>
                       <div className="alias-option-command">{alias.command}</div>
                     </div>
                   ),
@@ -330,14 +307,6 @@ export default function ClusterSubmissionConfigEditor({
               />
             )}
 
-            {aliasError ? (
-              <Alert
-                showIcon
-                type="warning"
-                message="无法读取用户 Alias"
-                description={`${aliasError}。请确认流水线 Shell 配置可执行，并且该 Shell 能加载 ~/.cshrc。`}
-              />
-            ) : null}
           </Space>
         ) : (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>

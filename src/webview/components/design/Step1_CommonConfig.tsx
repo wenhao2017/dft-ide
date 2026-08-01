@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Form, Space, Spin, Modal, message } from 'antd';
 import { useVscodePath } from '../../hooks/useVscodePath';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
@@ -34,8 +34,9 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
   const updatePayload = useWizardStore((state) => state.updatePayload);
   const flowModulesStore = useFlowModulesStore();
 
-  const { savedData, loading, saving, handleSave } =
+  const { savedData, loading, loaded, debouncedSave } =
     useFlowConfig(moduleKey ? `${flowKey}/${moduleKey}/config` : flowKey);
+  const hydratingRef = useRef(false);
 
   const activeProject = useWizardStore((s) => s.activeProject);
 
@@ -55,14 +56,21 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
   }, [updatePayload, flowKey]);
 
   useEffect(() => {
-    clearForm();
-    if (!savedData) return;
-    const source = (savedData.step1 as Record<string, unknown> | undefined) ?? savedData;
-    if (source.project) project.setValue(String(source.project));
-    if (Array.isArray(source.selectedModules)) {
-      setSelectedModules(source.selectedModules.filter((item): item is string => typeof item === 'string'));
-    }
-  }, [savedData, moduleKey]);
+    if (!loaded) return;
+    hydratingRef.current = true;
+    const source = (savedData?.step1 as Record<string, unknown> | undefined) ?? savedData ?? {};
+    project.setValue(String(source.project ?? ''));
+    setSelectedModules(
+      Array.isArray(source.selectedModules)
+        ? source.selectedModules.filter((item): item is string => typeof item === 'string')
+        : [],
+    );
+    const timer = setTimeout(() => { hydratingRef.current = false; }, 0);
+    return () => {
+      clearTimeout(timer);
+      hydratingRef.current = false;
+    };
+  }, [loaded, savedData, moduleKey]);
 
   useEffect(() => {
     // 获取归一化表格的模块
@@ -97,19 +105,24 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
     };
   };
 
-  const onSave = () => {
+  useEffect(() => {
+    if (!loaded || hydratingRef.current) return;
+    const source = (savedData?.step1 as Record<string, unknown> | undefined) ?? savedData ?? {};
+    const savedModules = Array.isArray(source.selectedModules)
+      ? source.selectedModules.filter((item): item is string => typeof item === 'string')
+      : [];
+    const unchanged = String(source.project ?? '') === project.value
+      && savedModules.length === selectedModules.length
+      && savedModules.every((item, index) => item === selectedModules[index]);
+    if (unchanged) return;
+
     const data = collectFormData();
     if (!moduleKey) {
-      void handleSave(data);
+      debouncedSave(data);
       return;
     }
-    void handleSave({ moduleKey, step1: data });
-  };
-
-  const clearForm = () => {
-    project.setValue("");
-    setSelectedModules([]);
-  };
+    debouncedSave({ moduleKey, step1: data });
+  }, [debouncedSave, loaded, moduleKey, project.value, savedData, selectedModules]);
 
   const onGenerateDefaults = async () => {
     if (selectedModules.length === 0) {
@@ -145,9 +158,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
           branch={currentBranch}
           description="读取归一化表格中的模块信息，为选中的设计模块生成默认 CFG 配置。"
           scopeLabel="选择设计模块"
-          saving={saving}
           generating={generating}
-          onSave={onSave}
           onGenerate={onGenerateDefaults}
           onHistory={() => setHistoryOpen(true)}
           onNext={onNext}

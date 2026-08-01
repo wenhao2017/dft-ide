@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Form, Space, Spin, Modal, message } from 'antd';
 import { useVscodePath } from '../../hooks/useVscodePath';
 import { useFlowConfig } from '../../hooks/useFlowConfig';
@@ -27,8 +27,9 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey }) => {
   const [historyOpen, setHistoryOpen] = useState(false);
   const updatePayload = useWizardStore((state) => state.updatePayload);
 
-  const { savedData, loading, saving, handleSave } =
+  const { savedData, loading, loaded, debouncedSave } =
     useFlowConfig(moduleKey ? `${flowKey}/${moduleKey}/config` : flowKey);
+  const hydratingRef = useRef(false);
 
   const activeProject = useWizardStore((s) => s.activeProject);
 
@@ -48,13 +49,18 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey }) => {
   }, [updatePayload, flowKey]);
 
   useEffect(() => {
-    clearForm();
-    if (!savedData) return;
-    const source = (savedData.step1 as Record<string, unknown> | undefined) ?? savedData;
-    if (source.project) project.setValue(String(source.project));
-    if (source.landerAssistant) landerAssistant.setValue(String(source.landerAssistant));
-    if (source.stage) setStage(String(source.stage));
-  }, [savedData, moduleKey]);
+    if (!loaded) return;
+    hydratingRef.current = true;
+    const source = (savedData?.step1 as Record<string, unknown> | undefined) ?? savedData ?? {};
+    project.setValue(String(source.project ?? ''));
+    landerAssistant.setValue(String(source.landerAssistant ?? ''));
+    setStage(String(source.stage ?? ''));
+    const timer = setTimeout(() => { hydratingRef.current = false; }, 0);
+    return () => {
+      clearTimeout(timer);
+      hydratingRef.current = false;
+    };
+  }, [loaded, savedData, moduleKey]);
 
   const collectFormData = () => {
     const source = savedData
@@ -68,20 +74,21 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey }) => {
     };
   };
 
-  const onSave = () => {
+  useEffect(() => {
+    if (!loaded || hydratingRef.current) return;
+    const source = (savedData?.step1 as Record<string, unknown> | undefined) ?? savedData ?? {};
+    const unchanged = String(source.project ?? '') === project.value
+      && String(source.landerAssistant ?? '') === landerAssistant.value
+      && String(source.stage ?? '') === stage;
+    if (unchanged) return;
+
     const data = collectFormData();
     if (!moduleKey) {
-      void handleSave(data);
+      debouncedSave(data);
       return;
     }
-    void handleSave({ moduleKey, step1: data });
-  };
-
-  const clearForm = () => {
-    project.setValue("");
-    landerAssistant.setValue("");
-    setStage("");
-  };
+    debouncedSave({ moduleKey, step1: data });
+  }, [debouncedSave, landerAssistant.value, loaded, moduleKey, project.value, savedData, stage]);
 
   const onGenerateDefaults = async () => {
     if (!stage) {
@@ -137,9 +144,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey }) => {
           branch={currentBranch}
           description="结合 Stage 与 LANDER_ASSISTANT.json，将归一化数据转换为验证流程所需的 CFG 配置。"
           scopeLabel="选择验证 Stage"
-          saving={saving}
           generating={generating}
-          onSave={onSave}
           onGenerate={onGenerateDefaults}
           onHistory={() => setHistoryOpen(true)}
           onNext={onNext}
