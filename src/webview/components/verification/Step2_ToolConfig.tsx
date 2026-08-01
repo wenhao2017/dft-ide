@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect } from 'react'
 import {
   Button,
-  Card,
+  Col,
   Form,
+  Row,
   Space,
   Spin,
+  Tag,
   Tabs,
   Typography,
 } from 'antd'
@@ -13,7 +15,6 @@ import {
   LeftOutlined,
   RightOutlined,
   SettingOutlined,
-  ToolOutlined,
 } from '@ant-design/icons'
 
 import { useFlowConfig } from '../../hooks/useFlowConfig'
@@ -22,6 +23,7 @@ import {
   type ClusterSubmissionConfig,
 } from '../../../shared/clusterSubmission'
 import ClusterSubmissionConfigEditor from '../shared/ClusterSubmissionConfig'
+import ExecutionContextBridge from '../shared/ExecutionContextBridge'
 import PipelineExecutionOverview from '../shared/PipelineExecutionOverview'
 import ToolConfigEditor from '../shared/ToolConfigEditor'
 import type { LanderStep } from './mode/types'
@@ -35,6 +37,8 @@ interface Props {
   moduleKeys: string[]
   moduleWorkDirs?: Record<string, string>
   defaultStepsByModule?: Record<string, LanderStep[]>
+  activeTab: 'environment' | 'execution'
+  onActiveTabChange: (tab: 'environment' | 'execution') => void
 }
 
 const DEFAULT_CLUSTER: ClusterSubmissionConfig = {
@@ -50,8 +54,9 @@ const Step2ToolConfig: React.FC<Props> = ({
   moduleKeys,
   moduleWorkDirs,
   defaultStepsByModule,
+  activeTab,
+  onActiveTabChange,
 }) => {
-  const [activeTab, setActiveTab] = useState('environment')
   const [form] = Form.useForm()
   const { stage } = useVerificationStageConfig()
   const flowLabel = stage ? `Lander / ${stage}` : 'Lander'
@@ -88,12 +93,17 @@ const Step2ToolConfig: React.FC<Props> = ({
     <Spin spinning={loading} tip="正在读取 Verification Flow 配置...">
       <Tabs
         activeKey={activeTab}
-        onChange={setActiveTab}
+        onChange={(tab) => onActiveTabChange(tab as 'environment' | 'execution')}
         type="card"
         items={[
           {
             key: 'environment',
-            label: <Space><SettingOutlined />工具与集群</Space>,
+            label: (
+              <Space size={7}>
+                <SettingOutlined />工具与集群
+                <Tag color="purple" bordered={false} style={{ margin: 0, fontSize: 11 }}>Flow 级</Tag>
+              </Space>
+            ),
             children: (
               <Form
                 form={form}
@@ -101,35 +111,50 @@ const Step2ToolConfig: React.FC<Props> = ({
                 onValuesChange={(_changed, values) => autoSave(values)}
                 style={{ paddingTop: 12 }}
               >
-                <Card
-                  title={<Space><ToolOutlined />工具配置</Space>}
-                  extra={<Typography.Text type="secondary">Flow 级配置 · 所有 Mode 共用</Typography.Text>}
-                  style={{ marginBottom: 16 }}
-                >
-                  <Form.Item name="tools" noStyle>
-                    <ToolConfigEditor />
-                  </Form.Item>
-                </Card>
-
-                <Form.Item name="cluster" noStyle>
-                  <ClusterSubmissionConfigEditor />
-                </Form.Item>
+                <div style={{ marginBottom: 14 }}>
+                  <Typography.Text strong>Flow 运行环境</Typography.Text>
+                  <div>
+                    <Typography.Text type="secondary">
+                      工具与集群策略是两个独立的 Flow 级配置项，修改后自动保存并对所有 Mode 生效。
+                    </Typography.Text>
+                  </div>
+                </div>
+                <Row gutter={[16, 16]} align="stretch">
+                  <Col xs={24} xl={12} style={{ display: 'flex' }}>
+                    <Form.Item name="tools" noStyle>
+                      <ToolConfigEditor section scopeLabel="配置工具版本或本地路径，当前 Flow 的所有 Mode 共用。" />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} xl={12} style={{ display: 'flex' }}>
+                    <Form.Item name="cluster" noStyle>
+                      <ClusterSubmissionConfigEditor />
+                    </Form.Item>
+                  </Col>
+                </Row>
               </Form>
             ),
           },
           {
             key: 'execution',
-            label: <Space><AppstoreOutlined />配置执行</Space>,
+            label: (
+              <Space size={7}>
+                <AppstoreOutlined />配置执行
+                <Tag color="processing" bordered={false} style={{ margin: 0, fontSize: 11 }}>Mode 级</Tag>
+              </Space>
+            ),
             children: (
-              <PipelineExecutionOverview
-                flowKey="verification"
-                flowLabel={flowLabel}
-                moduleKeys={moduleKeys}
-                moduleWorkDirs={moduleWorkDirs}
-                defaultTasksByModule={defaultStepsByModule}
-                activeModuleKey={moduleKey}
-                onActiveModuleChange={onModuleSelect}
-              />
+              <div className="dft-execution-view" style={{ paddingTop: 12 }}>
+                <ExecutionContextBridge scope="Mode" accent="#059669" />
+                <PipelineExecutionOverview
+                  flowKey="verification"
+                  flowLabel={flowLabel}
+                  moduleKeys={moduleKeys}
+                  moduleWorkDirs={moduleWorkDirs}
+                  defaultTasksByModule={defaultStepsByModule}
+                  activeModuleKey={moduleKey}
+                  onActiveModuleChange={onModuleSelect}
+                />
+              </div>
             ),
           },
         ]}

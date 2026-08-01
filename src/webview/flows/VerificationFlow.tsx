@@ -18,6 +18,7 @@ import usePipelineRuntimeStore from '../store/pipelineRuntimeStore'
 
 const VerificationFlow: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(0)
+  const [step2Tab, setStep2Tab] = useState<'environment' | 'execution'>('environment')
   const [selectedModule, setSelectedModule] = useState('')
   const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>([])
   const [moduleWorkDirs] = useState<Record<string, string>>({})
@@ -75,13 +76,13 @@ const VerificationFlow: React.FC = () => {
 
   const steps = [
     {
-      title: '公共配置',
-      description: '环境与出口',
+      title: '环境配置',
+      description: '路径与模块',
       content: <Step1CommonConfig onNext={nextStep} />,
     },
     {
-      title: '工具配置',
-      description: '仿真工具链',
+      title: '配置执行',
+      description: '版本与资源',
       content: (
         <Step2ToolConfig
           moduleKey={selectedModule}
@@ -91,17 +92,19 @@ const VerificationFlow: React.FC = () => {
           moduleKeys={executionModuleKeys}
           moduleWorkDirs={moduleWorkDirs}
           defaultStepsByModule={defaultStepsByMode}
+          activeTab={step2Tab}
+          onActiveTabChange={setStep2Tab}
         />
       ),
     },
     {
-      title: '结果页',
-      description: '日志与报告',
+      title: '结果查看',
+      description: '报告与日志',
       content: <Step3Result onNext={nextStep} onPrev={prevStep} />,
     },
     {
       title: '端云协同',
-      description: '共享与复用',
+      description: '提交与归档',
       content: <Step4Cloud onPrev={prevStep} />,
     },
   ]
@@ -116,12 +119,12 @@ const VerificationFlow: React.FC = () => {
       current={currentStep}
       onStepChange={setCurrentStep}
       sidebar={
-        currentStep !== 0 ? (
+        currentStep === 1 && step2Tab === 'execution' ? (
           <ModePanel
-            key={currentStep}
+            key="execution-sidebar"
             accent="#059669"
             initialTab="mode"
-            initialCollapsed={currentStep >= 2}
+            initialCollapsed={false}
             title="模式与参数配置"
             onSelect={handleSelect}
             onCheckedChange={handleCheckedChange}

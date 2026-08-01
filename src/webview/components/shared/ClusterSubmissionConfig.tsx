@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Button,
-  Card,
   Col,
   Empty,
   Input,
@@ -33,8 +32,9 @@ import {
 } from '../../../shared/clusterSubmission'
 import { getDsubAliases } from '../../utils/ipc'
 import DonauResourcePicker from './DonauResourcePicker'
+import FlowConfigSection from './FlowConfigSection'
 
-const { Paragraph, Text, Title } = Typography
+const { Text } = Typography
 
 const EMPTY_ALIAS: ClusterSubmissionConfig = {
   mode: 'alias',
@@ -146,30 +146,12 @@ export default function ClusterSubmissionConfigEditor({
           --cluster-border: ${token.colorBorderSecondary};
           --cluster-surface: ${token.colorBgContainer};
           --cluster-soft: ${token.colorFillQuaternary};
-        }
-        .dft-cluster-config .cluster-hero {
-          position: relative;
-          overflow: hidden;
-          border: 1px solid var(--cluster-border);
-          background:
-            radial-gradient(circle at 96% 0%, ${token.colorPrimaryBg} 0, transparent 36%),
-            linear-gradient(145deg, ${token.colorBgContainer}, ${token.colorFillQuaternary});
-        }
-        .dft-cluster-config .cluster-hero::after {
-          content: "";
-          position: absolute;
-          width: 180px;
-          height: 180px;
-          right: -90px;
-          top: -105px;
-          border: 24px solid ${token.colorPrimaryBorder};
-          border-radius: 50%;
-          opacity: .22;
-          pointer-events: none;
+          width: 100%;
+          height: 100%;
         }
         .dft-cluster-config .cluster-mode {
           padding: 4px;
-          border-radius: 12px;
+          border-radius: 10px;
           background: ${token.colorFillQuaternary};
         }
         .dft-cluster-config .cluster-mode .ant-segmented-item {
@@ -180,15 +162,16 @@ export default function ClusterSubmissionConfigEditor({
         }
         .dft-cluster-config .cluster-editor {
           margin-top: 14px;
-          border-color: var(--cluster-border);
-          box-shadow: 0 10px 30px rgba(0, 0, 0, .06);
+          padding: 16px;
+          border: 1px solid var(--cluster-border);
+          border-radius: 10px;
+          background: ${token.colorFillQuaternary};
         }
         .dft-cluster-config .cluster-preview {
           margin-top: 14px;
-          border: 1px solid ${token.colorPrimaryBorder};
-          border-radius: 12px;
-          background: ${token.colorBgElevated};
-          box-shadow: 0 8px 22px rgba(0, 0, 0, .10);
+          border: 1px solid ${token.colorBorderSecondary};
+          border-radius: 10px;
+          background: var(--vscode-textCodeBlock-background, ${token.colorFillQuaternary});
           overflow: hidden;
         }
         .dft-cluster-config .cluster-preview-bar {
@@ -196,9 +179,28 @@ export default function ClusterSubmissionConfigEditor({
           align-items: center;
           justify-content: space-between;
           gap: 12px;
-          padding: 9px 13px;
-          border-bottom: 1px solid ${token.colorPrimaryBorder};
-          background: ${token.colorPrimaryBg};
+          padding: 8px 12px;
+          border-bottom: 1px solid ${token.colorBorderSecondary};
+          background: ${token.colorFillQuaternary};
+        }
+        .dft-cluster-config .terminal-lights {
+          display: inline-flex;
+          gap: 5px;
+        }
+        .dft-cluster-config .terminal-light {
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: ${token.colorBorder};
+        }
+        .dft-cluster-config .terminal-light:first-child {
+          background: ${token.colorError};
+        }
+        .dft-cluster-config .terminal-light:nth-child(2) {
+          background: ${token.colorWarning};
+        }
+        .dft-cluster-config .terminal-light:nth-child(3) {
+          background: ${token.colorSuccess};
         }
         .dft-cluster-config .cluster-command {
           min-height: 56px;
@@ -208,11 +210,15 @@ export default function ClusterSubmissionConfigEditor({
           overflow-wrap: anywhere;
           font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Consolas, monospace);
           font-size: 12px;
-          font-weight: 550;
+          font-weight: 500;
           line-height: 1.7;
-          color: ${token.colorBgBase};
-          background: ${token.colorText};
-          box-shadow: inset 4px 0 0 ${token.colorPrimary};
+          color: var(--vscode-editor-foreground, ${token.colorText});
+          background: var(--vscode-textCodeBlock-background, color-mix(in srgb, ${token.colorText} 5%, ${token.colorBgContainer}));
+        }
+        .dft-cluster-config .cluster-command.is-placeholder {
+          color: ${token.colorTextSecondary};
+          font-family: var(--vscode-font-family, sans-serif);
+          font-weight: 400;
         }
         .dft-cluster-config .alias-option {
           display: grid;
@@ -230,37 +236,32 @@ export default function ClusterSubmissionConfigEditor({
         }
       `}</style>
 
-      <Card className="cluster-hero" styles={{ body: { padding: 16 } }}>
-        <Space direction="vertical" size={4} style={{ width: '100%', position: 'relative', zIndex: 1 }}>
-          <Space size={8} align="center">
-            <CloudServerOutlined style={{ color: token.colorPrimary, fontSize: 19 }} />
-            <Title level={5} style={{ margin: 0, fontSize: 16 }}>Donau集群提交策略</Title>
-          </Space>
-          <Paragraph type="secondary" style={{ margin: 0, maxWidth: 760 }}>
-            使用个人 csh Alias，或独立选择 Donau 资源。两种方式都会生成完整命令，
-            并通过 <Text code>DFT_IDE_DSUBRUN_I</Text> 下发给 run_flow。
-          </Paragraph>
-        </Space>
-      </Card>
+      <FlowConfigSection
+        index="02"
+        icon={<CloudServerOutlined />}
+        title="Donau集群提交策略"
+        description="使用个人 csh Alias，或独立选择 Donau 资源，生成流水线最终提交命令。"
+        meta="Flow 级配置"
+        accent={token.colorPrimary}
+      >
+        <Segmented
+          block
+          className="cluster-mode"
+          value={value.mode}
+          onChange={(mode) => switchMode(mode as 'alias' | 'custom')}
+          options={[
+            {
+              value: 'alias',
+              label: <Space><CodeOutlined />使用个人 Alias</Space>,
+            },
+            {
+              value: 'custom',
+              label: <Space><CloudServerOutlined />独立配置集群</Space>,
+            },
+          ]}
+        />
 
-      <Segmented
-        block
-        className="cluster-mode"
-        value={value.mode}
-        onChange={(mode) => switchMode(mode as 'alias' | 'custom')}
-        options={[
-          {
-            value: 'alias',
-            label: <Space><CodeOutlined />使用个人 Alias</Space>,
-          },
-          {
-            value: 'custom',
-            label: <Space><CloudServerOutlined />独立配置集群</Space>,
-          },
-        ]}
-      />
-
-      <Card className="cluster-editor" styles={{ body: { padding: 16 } }}>
+        <div className="cluster-editor">
         {value.mode === 'alias' ? (
           <Space direction="vertical" size={14} style={{ width: '100%' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start' }}>
@@ -372,6 +373,11 @@ export default function ClusterSubmissionConfigEditor({
         <div className="cluster-preview">
           <div className="cluster-preview-bar">
             <Space size={8}>
+              <span className="terminal-lights" aria-hidden="true">
+                <i className="terminal-light" />
+                <i className="terminal-light" />
+                <i className="terminal-light" />
+              </span>
               <ThunderboltOutlined style={{ color: token.colorPrimary }} />
               <Text strong>最终命令预览</Text>
             </Space>
@@ -382,7 +388,7 @@ export default function ClusterSubmissionConfigEditor({
               ) : null}
             </Space>
           </div>
-          <pre className="cluster-command">
+          <pre className={`cluster-command${preview ? '' : ' is-placeholder'}`}>
             {preview || '完成上方配置后，这里将显示最终的 dsub -I 命令。'}
           </pre>
         </div>
@@ -395,7 +401,8 @@ export default function ClusterSubmissionConfigEditor({
             message={validation}
           />
         ) : null}
-      </Card>
+        </div>
+      </FlowConfigSection>
     </section>
   )
 }

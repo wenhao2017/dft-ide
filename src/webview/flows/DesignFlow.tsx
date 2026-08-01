@@ -15,13 +15,14 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
   const repo = category.toLowerCase() === 'sailor' ? 'sailor' : 'hibist';
   const accent = repo === 'sailor' ? '#0ea5e9' : '#7c3aed';
   const [currentStep, setCurrentStep] = useState(0);
+  const [step2Tab, setStep2Tab] = useState<'environment' | 'execution'>('environment');
   const [selectedModule, setSelectedModule] = useState('');
   const [executionModuleKeys, setExecutionModuleKeys] = useState<string[]>([]);
   const [moduleWorkDirs, setModuleWorkDirs] = useState<Record<string, string>>({});
   const startRuntime = usePipelineRuntimeStore((state) => state.startRuntime);
   const stopRuntime = usePipelineRuntimeStore((state) => state.stopRuntime);
   const runtimeLabel = repo === 'sailor' ? 'Sailor' : 'Hibist';
-  const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
+  const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 3));
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 0));
 
   const handleTreeRun = (keys: string[], selectedTaskIds?: string[]) => {
@@ -68,6 +69,8 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
           category={category}
           moduleKeys={executionModuleKeys}
           moduleWorkDirs={moduleWorkDirs}
+          activeTab={step2Tab}
+          onActiveTabChange={setStep2Tab}
         />
       ),
     },
@@ -93,14 +96,14 @@ const DesignFlow: React.FC<Props> = ({ category }) => {
       current={currentStep}
       onStepChange={setCurrentStep}
       sidebar={
-        currentStep !== 0 ? (
+        currentStep === 1 && step2Tab === 'execution' ? (
           <DesignTreePanel
-            key={currentStep}
+            key="execution-sidebar"
             accent={accent}
             flow={repo}
             flowLabel={category}
             enableRun={currentStep === 1}
-            initialCollapsed={currentStep >= 2}
+            initialCollapsed={false}
             selectedKey={selectedModule}
             onSelect={setSelectedModule}
             onExecutionSelectionChange={setExecutionModuleKeys}
