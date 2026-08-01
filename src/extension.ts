@@ -518,7 +518,7 @@ class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
     const item = new vscode.TreeItem(cfg.label, vscode.TreeItemCollapsibleState.None);
 
     let colorId = 'charts.blue';
-    if (cfg.category === 'Hibist') colorId = 'charts.purple';
+    if (cfg.category === 'Hibist') colorId = 'charts.blue';
     else if (cfg.category === 'Sailor') colorId = 'charts.blue';
     else if (cfg.category === 'Verification') colorId = 'charts.green';
     else if (cfg.category === 'Formal' || cfg.category === 'STA') colorId = 'descriptionForeground';

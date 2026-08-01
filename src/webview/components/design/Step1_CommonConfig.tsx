@@ -9,6 +9,7 @@ import TransformHistory from '../shared/TransformHistory';
 import ModuleSelect from '../shared/TransformModuleSelect';
 import TransformConfigPanel from '../shared/TransformConfigPanel';
 import { useFlowModulesStore } from '../../store/moduleStore';
+import { DESIGN_FLOW_ACCENTS } from '../../flowTheme';
 
 interface Props {
   onNext?: () => void;
@@ -153,7 +154,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
     <Spin spinning={loading} tip="读取配置中...">
       <Form layout="vertical">
         <TransformConfigPanel
-          accent={flowKey === 'sailor' ? '#0ea5e9' : '#7c3aed'}
+          accent={DESIGN_FLOW_ACCENTS[flowKey]}
           flowLabel={category}
           branch={currentBranch}
           description="读取归一化表格中的模块信息，为选中的设计模块生成默认 CFG 配置。"

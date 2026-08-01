@@ -6,6 +6,7 @@ import Step5Cloud from '../components/design/Step5_Cloud';
 import FlowShell from '../components/shared/FlowShell';
 import DesignTreePanel from '../components/shared/DesignTreePanel';
 import usePipelineRuntimeStore from '../store/pipelineRuntimeStore';
+import { DESIGN_FLOW_ACCENTS } from '../flowTheme';
 
 interface Props {
   category: string;
@@ -13,7 +14,7 @@ interface Props {
 
 const DesignFlow: React.FC<Props> = ({ category }) => {
   const repo = category.toLowerCase() === 'sailor' ? 'sailor' : 'hibist';
-  const accent = repo === 'sailor' ? '#0ea5e9' : '#7c3aed';
+  const accent = DESIGN_FLOW_ACCENTS[repo];
   const [currentStep, setCurrentStep] = useState(0);
   const [step2Tab, setStep2Tab] = useState<'environment' | 'execution'>('environment');
   const [selectedModule, setSelectedModule] = useState('');

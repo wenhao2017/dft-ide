@@ -57,6 +57,7 @@ import {
   fetchDomains,
   syncCtmpProjects,
 } from '../services/projectService';
+import { FLOW_ACCENTS } from '../flowTheme';
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -74,7 +75,7 @@ const flows = [
     title: '公共配置与数据协同',
     desc: '维护四仓路径与 Design Tree，管理公共文件同步、差异确认及 Git 状态。',
     icon: <SettingOutlined />,
-    accent: '#2563eb',
+    accent: FLOW_ACCENTS.Common,
     status: 'Ready',
   },
   {
@@ -83,7 +84,7 @@ const flows = [
     title: 'DFT 设计 (Hibist)',
     desc: '按 Design Tree 模块配置环境、工具与 Donau 资源，运行设计任务并查看、提交结果。',
     icon: <RocketOutlined />,
-    accent: '#7c3aed',
+    accent: FLOW_ACCENTS.Hibist,
     status: 'Ready',
   },
   {
@@ -92,7 +93,7 @@ const flows = [
     title: 'DFT 设计 (Sailor)',
     desc: '按 Design Tree 模块配置环境、工具与 Donau 资源，完成任务执行、结果查看和端云协同。',
     icon: <ThunderboltOutlined />,
-    accent: '#0ea5e9',
+    accent: FLOW_ACCENTS.Sailor,
     status: 'Ready',
   },
   {
@@ -101,7 +102,7 @@ const flows = [
     title: '仿真与验证 (Lander)',
     desc: '管理 Stage 与 Lander 配置转换，按 Mode/Step 编排仿真参数、工具和 Donau 资源，并追踪执行日志与历史。',
     icon: <CheckCircleOutlined />,
-    accent: '#059669',
+    accent: FLOW_ACCENTS.Verification,
     status: 'Ready',
   },
   {

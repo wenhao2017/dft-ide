@@ -22,6 +22,7 @@ import ClusterSubmissionConfigEditor from '../shared/ClusterSubmissionConfig'
 import ExecutionContextBridge from '../shared/ExecutionContextBridge'
 import PipelineExecutionOverview from '../shared/PipelineExecutionOverview'
 import ToolConfigEditor from '../shared/ToolConfigEditor'
+import { DESIGN_FLOW_ACCENTS } from '../../flowTheme'
 
 interface Props {
   onNext: () => void
@@ -53,7 +54,7 @@ const Step2ToolConfig: React.FC<Props> = ({
 }) => {
   const repo = category.toLowerCase() === 'sailor' ? 'sailor' : 'hibist'
   const flowLabel = repo === 'sailor' ? 'Sailor' : 'Hibist'
-  const accent = repo === 'sailor' ? '#0ea5e9' : '#7c3aed'
+  const accent = DESIGN_FLOW_ACCENTS[repo]
   const [form] = Form.useForm()
   const {
     savedData,
