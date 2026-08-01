@@ -20,6 +20,7 @@ import {
   CheckCircleFilled,
   CloudServerOutlined,
   CodeOutlined,
+  EditOutlined,
   ReloadOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
@@ -30,7 +31,7 @@ import {
   type CustomClusterSubmissionConfig,
   type DsubAliasOption,
 } from '../../../shared/clusterSubmission'
-import { getDsubAliases } from '../../utils/ipc'
+import { getDsubAliases, openUserCshrc } from '../../utils/ipc'
 import DonauResourcePicker from './DonauResourcePicker'
 import FlowConfigSection from './FlowConfigSection'
 
@@ -53,13 +54,16 @@ const EMPTY_CUSTOM: CustomClusterSubmissionConfig = {
 export interface ClusterSubmissionConfigProps {
   value?: ClusterSubmissionConfig
   onChange?: (value: ClusterSubmissionConfig) => void
+  accent?: string
 }
 
 export default function ClusterSubmissionConfigEditor({
   value = EMPTY_ALIAS,
   onChange,
+  accent,
 }: ClusterSubmissionConfigProps) {
   const { token } = theme.useToken()
+  const sectionAccent = accent ?? token.colorPrimary
   const [aliases, setAliases] = useState<DsubAliasOption[]>([])
   const [loadingAliases, setLoadingAliases] = useState(false)
   const [lastAliasName, setLastAliasName] = useState(
@@ -86,6 +90,17 @@ export default function ClusterSubmissionConfigEditor({
 
   useEffect(() => {
     void loadAliases()
+  }, [])
+
+  useEffect(() => {
+    const handleCshrcSaved = (event: MessageEvent) => {
+      const data = event.data as Record<string, unknown>
+      if (data?.command === 'dsubAliasesChanged') {
+        void loadAliases(true)
+      }
+    }
+    window.addEventListener('message', handleCshrcSaved)
+    return () => window.removeEventListener('message', handleCshrcSaved)
   }, [])
 
   useEffect(() => {
@@ -147,12 +162,11 @@ export default function ClusterSubmissionConfigEditor({
           --cluster-surface: ${token.colorBgContainer};
           --cluster-soft: ${token.colorFillQuaternary};
           width: 100%;
-          height: 100%;
         }
         .dft-cluster-config .cluster-mode {
           padding: 4px;
           border-radius: 10px;
-          background: ${token.colorFillQuaternary};
+          background: color-mix(in srgb, ${sectionAccent} 7%, ${token.colorBgContainer});
         }
         .dft-cluster-config .cluster-mode .ant-segmented-item {
           min-height: 38px;
@@ -165,7 +179,7 @@ export default function ClusterSubmissionConfigEditor({
           padding: 16px;
           border: 1px solid var(--cluster-border);
           border-radius: 10px;
-          background: ${token.colorFillQuaternary};
+          background: color-mix(in srgb, ${sectionAccent} 3%, ${token.colorBgContainer});
         }
         .dft-cluster-config .cluster-preview {
           margin-top: 14px;
@@ -240,9 +254,9 @@ export default function ClusterSubmissionConfigEditor({
         index="02"
         icon={<CloudServerOutlined />}
         title="Donau集群提交策略"
-        description="使用个人 csh Alias，或独立选择 Donau 资源，生成流水线最终提交命令。"
-        meta="Flow 级配置"
-        accent={token.colorPrimary}
+        description="运行流水线前需选择个人 csh Alias，或独立配置 Donau 资源。"
+        accent={sectionAccent}
+        defaultExpanded
       >
         <Segmented
           block
@@ -269,15 +283,29 @@ export default function ClusterSubmissionConfigEditor({
                 <Text strong>从 ~/.cshrc 选择 dsub Alias</Text>
                 <div><Text type="secondary">IDE只加载定义中包含独立 dsub 命令的 Alias。</Text></div>
               </div>
-              <Tooltip title="重新读取当前运行环境中的 ~/.cshrc">
-                <Button
-                  icon={<ReloadOutlined />}
-                  loading={loadingAliases}
-                  onClick={() => void loadAliases(true)}
-                >
-                  刷新 Alias
-                </Button>
-              </Tooltip>
+              <Space size={8}>
+                <Tooltip title="在 VS Code 中编辑当前用户的 ~/.cshrc，保存后自动刷新 Alias">
+                  <Button
+                    icon={<EditOutlined />}
+                    onClick={() => {
+                      void openUserCshrc().catch((error) => {
+                        message.error(error instanceof Error ? error.message : String(error))
+                      })
+                    }}
+                  >
+                    编辑 ~/.cshrc
+                  </Button>
+                </Tooltip>
+                <Tooltip title="重新读取当前运行环境中的 ~/.cshrc">
+                  <Button
+                    icon={<ReloadOutlined />}
+                    loading={loadingAliases}
+                    onClick={() => void loadAliases(true)}
+                  >
+                    刷新 Alias
+                  </Button>
+                </Tooltip>
+              </Space>
             </div>
 
             {loadingAliases && aliases.length === 0 ? (
@@ -378,7 +406,7 @@ export default function ClusterSubmissionConfigEditor({
                 <i className="terminal-light" />
                 <i className="terminal-light" />
               </span>
-              <ThunderboltOutlined style={{ color: token.colorPrimary }} />
+              <ThunderboltOutlined style={{ color: sectionAccent }} />
               <Text strong>最终命令预览</Text>
             </Space>
             <Space size={6}>

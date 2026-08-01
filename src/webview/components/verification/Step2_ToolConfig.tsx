@@ -1,14 +1,10 @@
 import React, { useEffect } from 'react'
 import {
   Button,
-  Col,
   Form,
-  Row,
   Space,
   Spin,
-  Tag,
   Tabs,
-  Typography,
 } from 'antd'
 import {
   AppstoreOutlined,
@@ -98,12 +94,7 @@ const Step2ToolConfig: React.FC<Props> = ({
         items={[
           {
             key: 'environment',
-            label: (
-              <Space size={7}>
-                <SettingOutlined />工具与集群
-                <Tag color="purple" bordered={false} style={{ margin: 0, fontSize: 11 }}>Flow 级</Tag>
-              </Space>
-            ),
+            label: <Space><SettingOutlined />工具与集群</Space>,
             children: (
               <Form
                 form={form}
@@ -111,37 +102,24 @@ const Step2ToolConfig: React.FC<Props> = ({
                 onValuesChange={(_changed, values) => autoSave(values)}
                 style={{ paddingTop: 12 }}
               >
-                <div style={{ marginBottom: 14 }}>
-                  <Typography.Text strong>Flow 运行环境</Typography.Text>
+                <div style={{ display: 'grid', gap: 14 }}>
                   <div>
-                    <Typography.Text type="secondary">
-                      工具与集群策略是两个独立的 Flow 级配置项，修改后自动保存并对所有 Mode 生效。
-                    </Typography.Text>
+                    <Form.Item name="tools" noStyle>
+                      <ToolConfigEditor section accent="#059669" scopeLabel="按需配置工具版本或本地路径；未指定时沿用当前运行环境。" />
+                    </Form.Item>
+                  </div>
+                  <div>
+                    <Form.Item name="cluster" noStyle>
+                      <ClusterSubmissionConfigEditor accent="#059669" />
+                    </Form.Item>
                   </div>
                 </div>
-                <Row gutter={[16, 16]} align="stretch">
-                  <Col xs={24} xl={12} style={{ display: 'flex' }}>
-                    <Form.Item name="tools" noStyle>
-                      <ToolConfigEditor section scopeLabel="配置工具版本或本地路径，当前 Flow 的所有 Mode 共用。" />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} xl={12} style={{ display: 'flex' }}>
-                    <Form.Item name="cluster" noStyle>
-                      <ClusterSubmissionConfigEditor />
-                    </Form.Item>
-                  </Col>
-                </Row>
               </Form>
             ),
           },
           {
             key: 'execution',
-            label: (
-              <Space size={7}>
-                <AppstoreOutlined />配置执行
-                <Tag color="processing" bordered={false} style={{ margin: 0, fontSize: 11 }}>Mode 级</Tag>
-              </Space>
-            ),
+            label: <Space><AppstoreOutlined />配置执行</Space>,
             children: (
               <div className="dft-execution-view" style={{ paddingTop: 12 }}>
                 <ExecutionContextBridge scope="Mode" accent="#059669" />

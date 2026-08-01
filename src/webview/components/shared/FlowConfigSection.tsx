@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react'
-import { Card, Space, Typography, theme } from 'antd'
+import { useState, type ReactNode } from 'react'
+import { DownOutlined } from '@ant-design/icons'
+import { Card, ConfigProvider, Space, Typography, theme } from 'antd'
 
 const { Text, Title } = Typography
 
@@ -8,8 +9,8 @@ interface Props {
   icon: ReactNode
   title: string
   description: string
-  meta: string
   accent?: string
+  defaultExpanded?: boolean
   children: ReactNode
 }
 
@@ -18,28 +19,39 @@ export default function FlowConfigSection({
   icon,
   title,
   description,
-  meta,
   accent,
+  defaultExpanded = true,
   children,
 }: Props) {
   const { token } = theme.useToken()
   const sectionAccent = accent ?? token.colorPrimary
+  const [expanded, setExpanded] = useState(defaultExpanded)
 
   return (
-    <Card
-      className="dft-flow-config-section"
-      style={{ width: '100%', height: '100%', borderColor: token.colorBorderSecondary, overflow: 'hidden' }}
-      styles={{ body: { height: '100%', padding: 0, display: 'flex', flexDirection: 'column' } }}
-    >
-      <div
+    <ConfigProvider theme={{ token: { colorPrimary: sectionAccent } }}>
+      <Card
+        className="dft-flow-config-section"
+        style={{ width: '100%', borderColor: token.colorBorderSecondary, overflow: 'hidden' }}
+        styles={{ body: { padding: 0 } }}
+      >
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
         style={{
+          width: '100%',
           display: 'flex',
-          alignItems: 'flex-start',
+          alignItems: 'center',
           justifyContent: 'space-between',
           gap: 16,
-          padding: '16px 18px',
-          borderBottom: `1px solid ${token.colorBorderSecondary}`,
+          padding: '14px 18px',
+          color: token.colorText,
+          textAlign: 'left',
+          border: 0,
+          borderBottom: expanded ? `1px solid ${token.colorBorderSecondary}` : '1px solid transparent',
           background: `linear-gradient(135deg, color-mix(in srgb, ${sectionAccent} 10%, ${token.colorBgContainer}) 0%, ${token.colorBgContainer} 72%)`,
+          cursor: 'pointer',
+          transition: 'border-color 180ms ease',
         }}
       >
         <Space align="start" size={12} style={{ minWidth: 0 }}>
@@ -60,27 +72,48 @@ export default function FlowConfigSection({
             {icon}
           </div>
           <div style={{ minWidth: 0 }}>
-            <Space size={8} wrap>
-              <Text
-                style={{
-                  color: sectionAccent,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: 0.8,
-                }}
-              >
-                配置项 {index}
-              </Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>{meta}</Text>
-            </Space>
+            <Text
+              style={{
+                color: sectionAccent,
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 0.8,
+              }}
+            >
+              配置项 {index}
+            </Text>
             <Title level={5} style={{ margin: '2px 0 2px', fontSize: 16 }}>{title}</Title>
             <Text type="secondary" style={{ fontSize: 13, lineHeight: 1.55 }}>{description}</Text>
           </div>
         </Space>
+        <DownOutlined
+          style={{
+            flex: '0 0 auto',
+            color: sectionAccent,
+            transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 220ms cubic-bezier(.22, 1, .36, 1)',
+          }}
+        />
+      </button>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateRows: expanded ? '1fr' : '0fr',
+          transition: 'grid-template-rows 240ms cubic-bezier(.22, 1, .36, 1)',
+        }}
+      >
+        <div style={{
+          minHeight: 0,
+          overflow: 'hidden',
+          visibility: expanded ? 'visible' : 'hidden',
+          transition: expanded ? 'visibility 0s' : 'visibility 0s 240ms',
+        }}>
+          <div style={{ padding: 18 }}>
+            {children}
+          </div>
+        </div>
       </div>
-      <div style={{ padding: 18, flex: 1 }}>
-        {children}
-      </div>
-    </Card>
+      </Card>
+    </ConfigProvider>
   )
 }

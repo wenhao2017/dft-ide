@@ -42,7 +42,7 @@ export default function ExecutionContextBridge({ scope, accent }: Props) {
           <Text strong>已进入 {scope} 级执行配置</Text>
           <div>
             <Text type="secondary">
-              从左侧选择 {scope}，在右侧配置并运行；工具与 Donau 策略继续继承 Flow 级配置。
+              从左侧选择 {scope}，在右侧配置并运行；工具与 Donau 策略沿用当前流程配置。
             </Text>
           </div>
         </div>

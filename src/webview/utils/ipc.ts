@@ -187,6 +187,12 @@ export async function getDsubAliases(): Promise<DsubAliasOption[]> {
     : []
 }
 
+export async function openUserCshrc(): Promise<string> {
+  const res = await ipcRequest('openUserCshrc')
+  if (typeof res.error === 'string') throw new Error(res.error)
+  return typeof res.path === 'string' ? res.path : ''
+}
+
 export async function selectVerificationModeCfg(
   stage: string,
 ): Promise<{ path: string; fileName: string; modeName: string; preMode: string } | null> {

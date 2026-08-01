@@ -34,6 +34,7 @@ export interface ToolConfigEditorProps {
   onChange?: (tools: ToolConfig[]) => void
   scopeLabel?: string
   section?: boolean
+  accent?: string
 }
 
 export default function ToolConfigEditor({
@@ -41,8 +42,10 @@ export default function ToolConfigEditor({
   onChange,
   scopeLabel = '为当前 Flow 配置运行时所需的工具版本或本地路径。',
   section = false,
+  accent,
 }: ToolConfigEditorProps) {
   const { token } = theme.useToken()
+  const sectionAccent = accent ?? token.colorPrimary
   const [versionsByTool, setVersionsByTool] = useState<Record<string, string[]>>({})
   const [loadingToolId, setLoadingToolId] = useState<string>()
   const addTool = () => onChange?.([...value, createVersionTool()])
@@ -75,7 +78,7 @@ export default function ToolConfigEditor({
           padding: 12px;
           border: 1px solid ${token.colorBorderSecondary};
           border-radius: 10px;
-          background: ${token.colorFillQuaternary};
+          background: color-mix(in srgb, ${sectionAccent} 3%, ${token.colorBgContainer});
         }
         .dft-tool-editor .tool-index {
           align-self: center;
@@ -84,8 +87,8 @@ export default function ToolConfigEditor({
           width: 28px;
           height: 28px;
           border-radius: 8px;
-          color: #7c3aed;
-          background: color-mix(in srgb, #7c3aed 12%, ${token.colorBgContainer});
+          color: ${sectionAccent};
+          background: color-mix(in srgb, ${sectionAccent} 12%, ${token.colorBgContainer});
           font-size: 11px;
           font-weight: 700;
         }
@@ -215,8 +218,8 @@ export default function ToolConfigEditor({
       icon={<ToolOutlined />}
       title="工具配置"
       description={scopeLabel}
-      meta="Flow 级配置"
-      accent="#7c3aed"
+      accent={sectionAccent}
+      defaultExpanded={false}
     >
       {editor}
     </FlowConfigSection>

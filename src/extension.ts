@@ -298,6 +298,19 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  const userCshrcPath = path.join(os.homedir(), '.cshrc');
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      if (normalizePathForScope(document.uri.fsPath) !== normalizePathForScope(userCshrcPath)) {
+        return;
+      }
+      void currentPanel?.webview.postMessage({
+        command: 'dsubAliasesChanged',
+        path: userCshrcPath,
+      });
+    })
+  );
+
   vscode.window.registerTreeDataProvider('dftIde.views.flows', new DftFlowProvider());
 
   // Register VS Code Commands
@@ -950,6 +963,39 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             command: 'getDsubAliasesResponse',
             requestId,
             aliases: [],
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
+      case 'openUserCshrc': {
+        const requestId: string = msg.requestId;
+        const cshrcPath = path.join(os.homedir(), '.cshrc');
+        try {
+          const uri = vscode.Uri.file(cshrcPath);
+          try {
+            await vscode.workspace.fs.stat(uri);
+          } catch {
+            await vscode.workspace.fs.writeFile(uri, Buffer.from('', 'utf8'));
+          }
+          let document = await vscode.workspace.openTextDocument(uri);
+          if (document.languageId === 'plaintext') {
+            document = await vscode.languages.setTextDocumentLanguage(document, 'shellscript');
+          }
+          await vscode.window.showTextDocument(document, {
+            viewColumn: vscode.ViewColumn.Active,
+            preview: false,
+          });
+          currentPanel?.webview.postMessage({
+            command: 'openUserCshrcResponse',
+            requestId,
+            path: cshrcPath,
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'openUserCshrcResponse',
+            requestId,
             error: err instanceof Error ? err.message : String(err),
           });
         }
