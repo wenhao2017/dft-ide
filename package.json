@@ -1,6 +1,6 @@
 {
   "name": "dft-ide",
-  "displayName": "DFT IDE",
+  "displayName": "HiSalad",
   "description": "A VS Code-based DFT workflow console for project setup, common configuration, design flow, verification flow, and backend integration.",
   "version": "0.0.1",
   "publisher": "w00445630",
@@ -31,7 +31,7 @@
     "customEditors": [
       {
         "viewType": "dftIde.spreadsheet",
-        "displayName": "DFT IDE SpreadSheet Viewer",
+        "displayName": "HiSalad SpreadSheet Viewer",
         "selector": [
           {
             "filenamePattern": "*.xls"
@@ -55,7 +55,7 @@
       "activitybar": [
         {
           "id": "dftIdeExplorer",
-          "title": "DFT IDE",
+          "title": "HiSalad",
           "icon": "assets/activity-bar-icon.svg"
         }
       ]
@@ -71,15 +71,15 @@
     "commands": [
       {
         "command": "dftIde.openWelcome",
-        "title": "DFT IDE: Open Home"
+        "title": "HiSalad: Open Home"
       },
       {
         "command": "dftIde.createWorkspace",
-        "title": "DFT IDE: Open Project"
+        "title": "HiSalad: Open Project"
       },
       {
         "command": "dftIde.createProject",
-        "title": "DFT IDE: Open Project"
+        "title": "HiSalad: Open Project"
       },
       {
         "command": "dftIde.openFlow",
@@ -87,28 +87,28 @@
       },
       {
         "command": "dftIde.applyLayout",
-        "title": "DFT IDE: Apply Layout"
+        "title": "HiSalad: Apply Layout"
       },
       {
         "command": "dftIde.restoreLayout",
-        "title": "DFT IDE: Restore VS Code Layout"
+        "title": "HiSalad: Restore VS Code Layout"
       },
       {
         "command": "dftIde.checkObsUpdates",
-        "title": "DFT IDE: Check OBS File Updates"
+        "title": "HiSalad: Check OBS File Updates"
       },
       {
         "command": "dftIde.manageObsUpdates",
-        "title": "DFT IDE: Manage OBS File Updates"
+        "title": "HiSalad: Manage OBS File Updates"
       }
     ],
     "configuration": {
-      "title": "DFT IDE",
+      "title": "HiSalad",
       "properties": {
         "dftIde.apiBase": {
           "type": "string",
           "default": "http://pandas.hisi.huawei.com/dft-ide-server/",
-          "description": "DFT IDE backend API base URL, for example http://localhost:8080."
+          "description": "HiSalad backend API base URL, for example http://localhost:8080."
         },
         "dftIde.localProjectsRoot": {
           "type": "string",
@@ -223,17 +223,17 @@
         "dftIde.layout.autoApply": {
           "type": "boolean",
           "default": false,
-          "description": "Automatically apply the DFT IDE focused workbench layout on startup. Defaults to off; use the Zen Mode toggle in the webview instead."
+          "description": "Automatically apply the HiSalad focused workbench layout on startup. Defaults to off; use the Zen Mode toggle in the webview instead."
         },
         "dftIde.layout.hideMenuBar": {
           "type": "boolean",
           "default": false,
-          "description": "Hide the VS Code menu bar while using the DFT IDE layout."
+          "description": "Hide the VS Code menu bar while using the HiSalad layout."
         },
         "dftIde.layout.hideActivityBar": {
           "type": "boolean",
           "default": false,
-          "description": "Hide the VS Code Activity Bar while using the DFT IDE layout."
+          "description": "Hide the VS Code Activity Bar while using the HiSalad layout."
         },
         "dftIde.gitlabHost": {
           "type": "string",

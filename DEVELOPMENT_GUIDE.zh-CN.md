@@ -1,6 +1,6 @@
-# DFT IDE 全景开发指南与架构文档
+# HiSalad 全景开发指南与架构文档
 
-本文面向需要阅读、维护或扩展 DFT IDE 的开发人员，描述当前代码库的真实结构、运行边界、主要数据流和常见修改入口。
+本文面向需要阅读、维护或扩展 HiSalad 的开发人员，描述当前代码库的真实结构、运行边界、主要数据流和常见修改入口。
 
 > 文档基线：2026-07-23。若本文与源码不一致，以 `src/`、`scripts/build.mjs` 和 `package.json` 为准。
 
@@ -21,7 +21,7 @@
 
 ## 1. 项目定位与当前能力
 
-DFT IDE 是一个 VS Code 扩展，把本地 DFT 项目管理、公共数据同步、设计流程、验证流程、终端执行、日志诊断以及 OBS、Git、GitLab、Donau 等能力集中到一个 Webview 工作台中。
+HiSalad 是一个 VS Code 扩展，把本地 DFT 项目管理、公共数据同步、设计流程、验证流程、终端执行、日志诊断以及 OBS、Git、GitLab、Donau 等能力集中到一个 Webview 工作台中。
 
 项目当前属于可运行的 demo/foundation，而不是完整生产级 IDE。已有的主要能力包括：
 
@@ -74,7 +74,7 @@ flowchart LR
     Entry <-->|"postMessage + requestId"| IpcClient
     HostServices <-->|"worker_threads"| WorkerEntry
     HostServices --> Files["本地文件 / Git / 终端 / OBS / Donau"]
-    Flows --> Backend["DFT IDE 后端 HTTP API"]
+    Flows --> Backend["HiSalad 后端 HTTP API"]
 ```
 
 ### 2.1 扩展宿主
@@ -612,9 +612,9 @@ npm run build:worker
 ### 11.3 调试
 
 1. 在 VS Code 打开仓库。
-2. 选择 `Run DFT IDE Extension` 启动配置。
+2. 选择 `Run HiSalad Extension` 启动配置。
 3. 启动前会执行 `npm: compile`。
-4. 在 Extension Development Host 中打开 DFT IDE Activity Bar。
+4. 在 Extension Development Host 中打开 HiSalad Activity Bar。
 
 日志位置：
 

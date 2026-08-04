@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 import { Button, Input, Space, Table } from 'antd'
 
-import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
+import { EditOutlined, PlusOutlined } from '@ant-design/icons'
 
 import type { ColumnsType } from 'antd/es/table'
 
@@ -72,10 +72,6 @@ export default function ParamTable({
       return
     }
     onChange([...rows, createRunParamRow()])
-  }
-
-  const deleteRow = (rowId: string) => {
-    onChange(rows.filter((row) => row.id !== rowId))
   }
 
   const openSelector = (rowId: string, field: SelectorField) => {
@@ -162,7 +158,7 @@ export default function ParamTable({
       render: (_, row) => (
         <Input
           allowClear
-          placeholder="??????"
+          placeholder="额外参数"
           value={row.extraArg}
           onChange={(event) => updateRow(row.id, { extraArg: event.target.value })}
         />
@@ -198,19 +194,6 @@ export default function ParamTable({
       ),
     },
 
-    {
-      title: '',
-      width: 56,
-      render: (_, row) => (
-        <Button
-          danger
-          type="text"
-          disabled={rows.length <= 1}
-          icon={<DeleteOutlined />}
-          onClick={() => deleteRow(row.id)}
-        />
-      ),
-    },
   ]
 
   return (

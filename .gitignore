@@ -26,7 +26,7 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 
-# DFT IDE local user state
+# HiSalad local user state
 .dft-ide/
 
 .env

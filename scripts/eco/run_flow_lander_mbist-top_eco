@@ -111,7 +111,7 @@ case "gen_report:after":
     # 在此添加 gen_report 的后置 ECO 命令。
     breaksw
 default:
-    echo "[DFT IDE] 未知的 ECO 调度组合: step=$step phase=$phase"
+    echo "[HiSalad] 未知的 ECO 调度组合: step=$step phase=$phase"
     exit 2
 endsw
 exit 0

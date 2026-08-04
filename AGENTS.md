@@ -4,7 +4,7 @@ This file is a quick orientation guide for AI agents working on this repository.
 
 ## Project Summary
 
-DFT IDE is a VS Code extension that turns VS Code into a local DFT workflow console. It provides:
+HiSalad is a VS Code extension that turns VS Code into a local DFT workflow console. It provides:
 
 - A custom Activity Bar container and Tree View for DFT flows.
 - A React webview home page and flow pages.
@@ -62,7 +62,7 @@ Package VSIX:
 npx @vscode/vsce package
 ```
 
-Debug in VS Code with the `Run DFT IDE Extension` launch config. It runs `npm: compile` before starting the Extension Development Host.
+Debug in VS Code with the `Run HiSalad Extension` launch config. It runs `npm: compile` before starting the Extension Development Host.
 
 ## Repository Layout
 

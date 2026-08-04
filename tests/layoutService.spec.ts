@@ -37,7 +37,7 @@ describe('layoutService', () => {
       );
 
       // Verify info message displayed if not silent
-      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('DFT IDE 布局已应用。');
+      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('HiSalad 布局已应用。');
     });
 
     it('should not display message if silent is true', async () => {

@@ -17,7 +17,7 @@ export function confirmDelete(target: DeleteTarget, names: string[]): Promise<bo
     Modal.confirm({
       centered: true,
       title: `确认删除 ${uniqueNames.length} 个 ${target}？`,
-      content: `删除后无法从 DFT IDE 中恢复：${uniqueNames.join('、')}`,
+      content: `删除后无法从 HiSalad 中恢复：${uniqueNames.join('、')}`,
       okText: `删除 ${uniqueNames.length} 项`,
       okButtonProps: { danger: true },
       cancelText: '取消',

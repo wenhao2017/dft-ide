@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run DFT IDE Extension (Dev)",
+      "name": "Run HiSalad Extension (Dev)",
       "type": "extensionHost",
       "request": "launch",
       "runtimeExecutable": "${execPath}",
@@ -16,7 +16,7 @@
       "preLaunchTask": "npm: compile:dev"
     },
     {
-      "name": "Run DFT IDE Extension",
+      "name": "Run HiSalad Extension",
       "type": "extensionHost",
       "request": "launch",
       "runtimeExecutable": "${execPath}",
@@ -30,7 +30,7 @@
       "preLaunchTask": "npm: compile"
     },
     {
-      "name": "Attach DFT IDE Extension (VSCode 1.85.1)",
+      "name": "Attach HiSalad Extension (VSCode 1.85.1)",
       "type": "extensionHost",
       "request": "attach",
       "port": 9333,

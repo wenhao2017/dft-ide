@@ -62,7 +62,7 @@ function getErrorMessage(error: unknown): string {
 }
 
 /**
- * DFT IDE 使用的 Git 服务接口
+ * HiSalad 使用的 Git 服务接口
  */
 export interface DftGitService {
   initGitRepository(resource?: vscode.Uri): Promise<boolean>;
@@ -265,7 +265,7 @@ function collectChangedFiles(repo: any): GitChangedFile[] {
 }
 
 /**
- * DFT IDE Git Service
+ * HiSalad Git Service
  *
  * 说明：
  * 1. 不重新实现 Git 管理系统

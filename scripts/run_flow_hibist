@@ -66,7 +66,7 @@ class ChineseArgumentParser(argparse.ArgumentParser):
 
 
 def fail(message, code=2):
-    print(f"[DFT IDE] {message}", file=sys.stderr)
+    print(f"[HiSalad] {message}", file=sys.stderr)
     raise SystemExit(code)
 
 
@@ -249,16 +249,16 @@ def clone_command(argv):
     git_prefix = ["git"]
     if credential_helper:
         git_prefix.extend(("-c", f"credential.helper={credential_helper}"))
-        print("[DFT IDE] Git 凭据将在内存中缓存，首次认证后其余仓库无需重复输入。")
+        print("[HiSalad] Git 凭据将在内存中缓存，首次认证后其余仓库无需重复输入。")
 
     def execute_git(command, failure_message):
-        print("[DFT IDE] " + shlex.join(command))
+        print("[HiSalad] " + shlex.join(command))
         try:
             result = subprocess.run(command, check=False)
         except FileNotFoundError:
             fail("找不到 Git 可执行程序", 127)
         if result.returncode != 0:
-            print(f"[DFT IDE] {failure_message}", file=sys.stderr)
+            print(f"[HiSalad] {failure_message}", file=sys.stderr)
         return result.returncode
 
     repo_paths = {}
@@ -276,7 +276,7 @@ def clone_command(argv):
             if status != 0:
                 return status
         elif repo not in selected_refs:
-            print(f"[DFT IDE] 仓库已存在，跳过克隆: {repo_path}")
+            print(f"[HiSalad] 仓库已存在，跳过克隆: {repo_path}")
             continue
 
         selected_ref = selected_refs.get(repo)
@@ -301,7 +301,7 @@ def clone_command(argv):
         )
         if status != 0:
             return status
-        print(f"[DFT IDE] 仓库已切换到 {kind}: {repo} -> {ref_value}")
+        print(f"[HiSalad] 仓库已切换到 {kind}: {repo} -> {ref_value}")
 
     print(f"DFT_IDE_PROJECT_NAME={project_name}")
     print(f"DFT_IDE_PROJECT_ROOT={project_root}")
@@ -394,7 +394,7 @@ def run_eco(work_path, env, source_file, phase):
     print(f"__DFT_IDE_ECO_START__|{run_id}|{marker_task_id}|{phase}", flush=True)
     if not eco_file.is_file():
         status = 2
-        print(f"[DFT IDE] ECO 入口文件不存在: {eco_file}", file=sys.stderr, flush=True)
+        print(f"[HiSalad] ECO 入口文件不存在: {eco_file}", file=sys.stderr, flush=True)
         print(f"__DFT_IDE_ECO_END__|{run_id}|{marker_task_id}|{phase}|{status}", flush=True)
         return status
     eco_env = dict(env)
@@ -451,7 +451,7 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
     if not no_eco:
         before_status = run_eco(work_path, runtime_env, source_file, "before")
         if before_status:
-            print(f"[DFT IDE] {FLOW_LABEL} 前置 ECO 执行失败: step={step} status={before_status}", file=sys.stderr)
+            print(f"[HiSalad] {FLOW_LABEL} 前置 ECO 执行失败: step={step} status={before_status}", file=sys.stderr)
             return before_status
 
     lines = source_lines(source_file)
@@ -459,17 +459,17 @@ def run_step(step, step_args, work_path=None, module=None, cfg=None, env_file=No
     rendered = " ".join(csh_quote(item) for item in command)
     rendered += " |& tee " + csh_quote(str(log_folder / f"{step}.log"))
     lines.append(rendered)
-    print(f"[DFT IDE] {FLOW_LABEL} Step 开始执行: {step}")
+    print(f"[HiSalad] {FLOW_LABEL} Step 开始执行: {step}")
     flow_status = run_csh(lines, runtime_env)
     runtime_env["DFT_IDE_STEP_STATUS"] = str(flow_status)
     after_status = 0 if no_eco else run_eco(work_path, runtime_env, source_file, "after")
     if flow_status:
-        print(f"[DFT IDE] {FLOW_LABEL} Step 执行失败: step={step} status={flow_status}", file=sys.stderr)
+        print(f"[HiSalad] {FLOW_LABEL} Step 执行失败: step={step} status={flow_status}", file=sys.stderr)
         return flow_status
     if after_status:
-        print(f"[DFT IDE] {FLOW_LABEL} 后置 ECO 执行失败: step={step} status={after_status}", file=sys.stderr)
+        print(f"[HiSalad] {FLOW_LABEL} 后置 ECO 执行失败: step={step} status={after_status}", file=sys.stderr)
         return after_status
-    print(f"[DFT IDE] {FLOW_LABEL} Step 执行完成: {step}")
+    print(f"[HiSalad] {FLOW_LABEL} Step 执行完成: {step}")
     return 0
 
 

@@ -1,14 +1,14 @@
-# DFT IDE
+# HiSalad
 
 [English README](README.md)
 
-DFT IDE 是一个 VS Code 扩展，用来把 VS Code 打造成面向 DFT 工作流的本地工作台。它提供项目主页、DFT 流程导航、Common 公共配置、Design (Hibist/Sailor) 和 Verification 工作流页面、项目/工作区打开、本地页面状态持久化、Git 同步辅助、OBS 查看器集成、执行辅助能力，以及预留的后端 API 对接点。
+HiSalad 是一个 VS Code 扩展，用来把 VS Code 打造成面向 DFT 工作流的本地工作台。它提供项目主页、DFT 流程导航、Common 公共配置、Design (Hibist/Sailor) 和 Verification 工作流页面、项目/工作区打开、本地页面状态持久化、Git 同步辅助、OBS 查看器集成、执行辅助能力，以及预留的后端 API 对接点。
 
 当前代码仍是 demo/foundation，不是完整生产级 IDE。代码结构已经按项目驱动方式组织，后续可以让不同项目加载不同的 Common、Hibist、Sailor、Verification、Formal、STA 上下文。
 
 ## 功能概览
 
-- 自定义 DFT IDE Activity Bar 容器和流程 Tree View。
+- 自定义 HiSalad Activity Bar 容器和流程 Tree View。
 - React webview 项目主页，支持项目搜索、项目选择、本地状态目录配置和流程快捷入口。
 - Common 流程用于维护公共路径、设计树路径、归一化表格路径、OBS 公共数据和 Git 同步入口。
 - Design (Hibist/Sailor) / Verification 流程基于共享 `FlowShell`，并通过共享设计树面板选择模块范围。
@@ -92,14 +92,14 @@ npm run watch
 npm run dev
 ```
 
-`npm run compile` 和 `npm run watch` 使用生产环境默认配置；`npm run dev` 使用 Dev 环境默认配置。也可以在 VS Code 中选择 `Run DFT IDE Extension (Dev)` 调试配置。用户或工作区中显式设置的 `dftIde.*` 配置仍会覆盖对应的环境默认值。
+`npm run compile` 和 `npm run watch` 使用生产环境默认配置；`npm run dev` 使用 Dev 环境默认配置。也可以在 VS Code 中选择 `Run HiSalad Extension (Dev)` 调试配置。用户或工作区中显式设置的 `dftIde.*` 配置仍会覆盖对应的环境默认值。
 
 在 VS Code 中调试：
 
 1. 用 VS Code 打开当前仓库。
 2. 执行 `npm run compile`，或保持 `npm run watch` 运行。
-3. 按 `F5`，使用 `Run DFT IDE Extension` 启动配置。
-4. 在 DFT IDE Activity Bar 视图中打开 Home、Common、Hibist、Sailor 或 Verification。
+3. 按 `F5`，使用 `Run HiSalad Extension` 启动配置。
+4. 在 HiSalad Activity Bar 视图中打开 Home、Common、Hibist、Sailor 或 Verification。
 
 打包 VSIX：
 
@@ -257,7 +257,7 @@ POST {apiBase}/api/dft-ide/projects/{projectId}/executions
 
 ## 布局模式
 
-扩展提供面向 DFT IDE 的专注工作台布局设置：
+扩展提供面向 HiSalad 的专注工作台布局设置：
 
 ```json
 "dftIde.layout.autoApply": false,
@@ -267,8 +267,8 @@ POST {apiBase}/api/dft-ide/projects/{projectId}/executions
 
 命令：
 
-- `DFT IDE: Apply Layout`
-- `DFT IDE: Restore VS Code Layout`
+- `HiSalad: Apply Layout`
+- `HiSalad: Restore VS Code Layout`
 
 webview 也可以通过 IPC 切换专注布局。扩展在应用布局前会备份已有全局设置，恢复时尽量还原。
 
@@ -293,7 +293,7 @@ deploy/README.zh-CN.md
 deploy/package_ide.py
 ```
 
-推荐交付方式是 VS Code Portable Mode：以官方 VS Code ZIP/TAR.GZ 为底座，创建 portable `data/` 目录，把当前扩展打成 VSIX 并安装到该 VS Code 中，写入默认 DFT IDE 设置，最后交付整个可直接启动的 IDE 目录。
+推荐交付方式是 VS Code Portable Mode：以官方 VS Code ZIP/TAR.GZ 为底座，创建 portable `data/` 目录，把当前扩展打成 VSIX 并安装到该 VS Code 中，写入默认 HiSalad 设置，最后交付整个可直接启动的 IDE 目录。
 
 ## 开发注意事项
 

@@ -2,7 +2,7 @@
 
 ## 0.0.1
 
-- Added the DFT IDE Activity Bar container, flow Tree View, and reusable webview panel.
+- Added the HiSalad Activity Bar container, flow Tree View, and reusable webview panel.
 - Added project home page with mock/backend project dashboard, project selection, project workspace opening, and local-state path configuration.
 - Added Common, Design, and Verification workflow pages with shared flow shell patterns.
 - Added shared design tree editing/selection, design-tree persistence, and module-scoped Design/Verification config skeleton generation.

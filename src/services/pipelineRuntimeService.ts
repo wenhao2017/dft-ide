@@ -16,6 +16,7 @@ import {
   applyDsubCommandOverrides,
   type DonauSubmissionOverride,
 } from '../shared/clusterSubmission';
+import { inspectPipelineStepLogs } from './pipelineLogStatus';
 
 export type PipelineFlowKey = 'hibist' | 'sailor' | 'verification';
 export type PipelineRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
@@ -442,10 +443,10 @@ function buildStepCommands(
     ? buildVerificationExecutionCommands(projectPath, task)
     : [buildPipelineStepExecutionCommand(projectPath, stepCommand)];
   commands.push(`echo "__DFT_IDE_STEP_START__|${runId}|${markerTaskId}"`);
-  commands.push(`echo "=== [DFT IDE] Step: ${task.name || task.id} ==="`);
+  commands.push(`echo "=== [HiSalad] Step: ${task.name || task.id} ==="`);
   commands.push('set dft_ide_step_status = 0');
   for (const executionCommand of executionCommands) {
-    commands.push(`echo '[DFT IDE] 执行命令: ${executionCommand}'`);
+    commands.push(`echo '[HiSalad] 执行命令: ${executionCommand}'`);
     commands.push(executionCommand);
     commands.push('set dft_ide_step_status = $status');
     commands.push('if ($dft_ide_step_status != 0) goto dft_ide_step_end');
@@ -615,7 +616,7 @@ function getYamlPath(flowKey: PipelineFlowKey): string | undefined {
 
 function getDefaultYamlContent(flowKey: PipelineFlowKey): string {
   const flowLabel = flowKey === 'verification' ? 'Lander 仿真验证' : flowKey.toUpperCase();
-  let content = `# DFT IDE ${flowLabel} 流水线配置文件\n`;
+  let content = `# HiSalad ${flowLabel} 流水线配置文件\n`;
   content += `# 修改此文件可以自定义流水线的执行步骤和执行命令\n\n`;
 
   const tasks = DEFAULT_PIPELINE_TASKS[flowKey] || [];
@@ -1138,7 +1139,7 @@ export class PipelineRuntimeService {
     }
     const scriptPath = resolvePipelineScriptPath(projectPath, scriptName);
     const stepName = getRunFlowStepName(task);
-    commands.push(`echo "=== [DFT IDE] ${phase === 'before' ? 'Before' : 'After'} ECO: ${task.name || task.id} ==="`);
+    commands.push(`echo "=== [HiSalad] ${phase === 'before' ? 'Before' : 'After'} ECO: ${task.name || task.id} ==="`);
     commands.push(`echo "__DFT_IDE_ECO_START__|${runId}|${task.id}|${phase}"`);
     commands.push('set dft_ide_eco_status = 0');
     commands.push(
@@ -1215,7 +1216,7 @@ export class PipelineRuntimeService {
       ? buildVerificationExecutionCommands(resolveProjectPath(session.flowKey), task)
       : [buildPipelineStepExecutionCommand(resolveProjectPath(session.flowKey), task.command.trim())];
     const runParameterRows = execution.parameters ? [execution.parameters] : [];
-    console.group(`[DFT IDE] Pipeline Task: ${session.flowLabel} / ${session.moduleKey} / ${task.name} / ${execution.markerTaskId}`);
+    console.group(`[HiSalad] Pipeline Task: ${session.flowLabel} / ${session.moduleKey} / ${task.name} / ${execution.markerTaskId}`);
     console.log('commands:', generatedCommands);
     console.log('groups:', runParameterRows.map((row) => row.groupNames ?? []));
     console.log('tcs:', runParameterRows.map((row) => row.tcNames ?? []));
@@ -1270,7 +1271,7 @@ export class PipelineRuntimeService {
         continue;
       }
       session.seenEnds.add(taskId);
-      this.handleStepEnd(key, taskId, Number(exitCodeText));
+      void this.handleStepEnd(key, taskId, Number(exitCodeText));
     }
 
     const phaseStartRegex = /__DFT_IDE_ECO_START__\|([^|\s]+)\|([^|\r\n]+)\|(before|after)/g;
@@ -1385,7 +1386,7 @@ export class PipelineRuntimeService {
     }
   }
 
-  private handleStepEnd(key: string, taskId: string, exitCode: number): void {
+  private async handleStepEnd(key: string, taskId: string, exitCode: number): Promise<void> {
     const session = this.executionSessions.get(key);
     if (!session || session.stopped) {
       return;
@@ -1395,6 +1396,52 @@ export class PipelineRuntimeService {
     const task = execution?.task ?? session.tasks.find((item) => item.id === taskId);
     const runtimeTaskId = task?.id ?? taskId;
     if (exitCode === 0) {
+      const projectRoot = resolveProjectRoot();
+      if (projectRoot && task) {
+        try {
+          const inspection = await inspectPipelineStepLogs(
+            projectRoot,
+            session.flowKey,
+            session.runId,
+            getRunFlowStepName(task),
+          );
+          const currentSession = this.executionSessions.get(key);
+          if (currentSession !== session || session.stopped) {
+            return;
+          }
+          if (inspection.errors.length > 0) {
+            const firstError = inspection.errors[0];
+            const detail = `${firstError.fileName}:${firstError.lineNumber}: ${firstError.line}`;
+            if (execution?.continueOnFailure) {
+              console.error(`[HiSalad] Step ${task.name || task.id} log contains Error: ${detail}`);
+              this.patchTask(key, runtimeTaskId, {
+                status: 'failed',
+                finishedAt: execution.isLastTaskRun ? nowText() : undefined,
+              });
+              this.startNextSessionTask(key);
+              return;
+            }
+            this.finishRuntimeWithFailure(
+              key,
+              session.logPrefix,
+              runtimeTaskId,
+              1,
+              `Step ${task.name || task.id} log contains Error: ${detail}`,
+            );
+            return;
+          }
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          this.finishRuntimeWithFailure(
+            key,
+            session.logPrefix,
+            runtimeTaskId,
+            -1,
+            `Failed to inspect Step ${task.name || task.id} log: ${detail}`,
+          );
+          return;
+        }
+      }
       this.patchTask(key, runtimeTaskId, (current) => ({
         status: current.status === 'stopped' || current.status === 'failed'
           ? current.status
@@ -1432,7 +1479,7 @@ export class PipelineRuntimeService {
     clearRuntimeTimers(key);
     this.disposeExecutionSession(key);
     if (message) {
-      console.error(`[DFT IDE] ${message}`);
+      console.error(`[HiSalad] ${message}`);
     }
     this.updateRuntime(key, (runtime) => ({
       ...runtime,

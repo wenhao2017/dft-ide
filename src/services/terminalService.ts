@@ -303,7 +303,7 @@ export async function openExecutionTerminal(options: {
   const title =
     typeof options.title === 'string' && options.title.trim()
       ? options.title.trim()
-      : 'DFT IDE Task'
+      : 'HiSalad Task'
 
   let command = ''
   if (typeof options.command === 'string') {
@@ -356,7 +356,7 @@ export async function openExecutionTerminal(options: {
 
   // void runDftLogDiagnosticsDemo(title, command).catch((error) => {
   //   vscode.window.showWarningMessage(
-  //     `DFT IDE log diagnostics demo failed: ${error instanceof Error ? error.message : String(error)}`
+  //     `HiSalad log diagnostics demo failed: ${error instanceof Error ? error.message : String(error)}`
   //   );
   // });
 

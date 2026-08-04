@@ -76,7 +76,7 @@ export async function runDftLogDiagnosticsDemo(
 
   void vscode.commands.executeCommand('workbench.actions.view.problems');
   vscode.window.showInformationMessage(
-    `DFT IDE parsed demo ${tool}.log: ${result.errorCount} errors, ${result.warningCount} warnings.`
+    `HiSalad parsed demo ${tool}.log: ${result.errorCount} errors, ${result.warningCount} warnings.`
   );
 
   return result;
@@ -102,7 +102,7 @@ export async function parseDftExecutionLog(
       `[${options.flow}] ${issue.message}`,
       issue.severity
     );
-    diagnostic.source = 'DFT IDE';
+    diagnostic.source = 'HiSalad';
     diagnostic.code = options.flow;
     diagnostic.relatedInformation = [
       new vscode.DiagnosticRelatedInformation(
@@ -170,7 +170,7 @@ export async function parseDftExecutionLogDirectory(
         `[${options.flow}] ${issue.message}`,
         issue.severity
       );
-      diagnostic.source = 'DFT IDE';
+      diagnostic.source = 'HiSalad';
       diagnostic.code = options.flow;
       diagnostic.relatedInformation = [
         new vscode.DiagnosticRelatedInformation(

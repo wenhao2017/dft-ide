@@ -27,7 +27,7 @@ export async function applyDftIdeLayout(context: vscode.ExtensionContext, silent
   await updateUserSettings(updates);
 
   if (!silent) {
-    vscode.window.showInformationMessage('DFT IDE 布局已应用。');
+    vscode.window.showInformationMessage('HiSalad 布局已应用。');
   }
 }
 

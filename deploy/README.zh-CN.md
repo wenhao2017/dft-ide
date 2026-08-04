@@ -1,6 +1,6 @@
-# DFT IDE 部署说明
+# HiSalad 部署说明
 
-本文说明如何把当前插件源码和原生 VS Code 打包成一个可以直接启动的 DFT IDE 目录。
+本文说明如何把当前插件源码和原生 VS Code 打包成一个可以直接启动的 HiSalad 目录。
 
 ## 推荐方案
 
@@ -9,7 +9,7 @@
 - Windows 使用 VS Code ZIP 版本。
 - Linux 使用 VS Code TAR.GZ 版本。
 - 在 VS Code 解压目录下创建 `data/` 目录后，用户数据、设置和扩展会保存在该目录内。
-- 把 DFT IDE 插件以 VSIX 形式安装到这个 portable VS Code 中。
+- 把 HiSalad 插件以 VSIX 形式安装到这个 portable VS Code 中。
 - 最终交付整个 VS Code 解压目录给用户，用户运行 `Code.exe` 或启动脚本即可。
 
 参考：
@@ -128,7 +128,7 @@ start "" "%~dp0Code.exe"
 保存为：
 
 ```text
-D:\release\dft-ide-vscode\启动 DFT IDE.bat
+D:\release\dft-ide-vscode\启动 HiSalad.bat
 ```
 
 9. 压缩发布目录：
@@ -137,7 +137,7 @@ D:\release\dft-ide-vscode\启动 DFT IDE.bat
 D:\release\dft-ide-vscode.zip
 ```
 
-用户解压后运行 `启动 DFT IDE.bat` 即可。
+用户解压后运行 `启动 HiSalad.bat` 即可。
 
 ## 使用脚本自动部署
 
@@ -169,7 +169,7 @@ python deploy\package_ide.py ^
 5. 创建 portable `data/` 目录。
 6. 写入用户设置。
 7. 使用输出目录里的 VS Code CLI 安装 VSIX。
-8. 生成 `启动 DFT IDE.bat`。
+8. 生成 `启动 HiSalad.bat`。
 
 ## 注意事项
 

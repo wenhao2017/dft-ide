@@ -224,6 +224,12 @@ export default function RunModal({
     }
   }
 
+  const clearRunParams = () => {
+    setRows([createRunParamRow()])
+    setSelectedAlias(undefined)
+    setScenarioAlias('')
+  }
+
   const confirm = () => {
     if (!mode) {
       return
@@ -291,7 +297,9 @@ export default function RunModal({
           <div>
             <Typography.Text strong>运行参数</Typography.Text>
 
-            <Space.Compact block style={{ margin: '10px 0' }}>
+            <Space.Compact block
+              style={{ margin: '10px 0', width: '100%', maxWidth: 720 }}
+            >
               <Select
                 allowClear
                 showSearch
@@ -318,7 +326,7 @@ export default function RunModal({
                 loading={savingParams}
                 onClick={() => void saveCurrentParams()}
               >
-                保存场景
+                保存
               </Button>
               <Popconfirm
                 title={`删除场景“${selectedAlias ?? ''}”？`}
@@ -329,6 +337,9 @@ export default function RunModal({
                   删除
                 </Button>
               </Popconfirm>
+              <Button disabled={savingParams} onClick={clearRunParams}>
+                清除
+              </Button>
             </Space.Compact>
 
             <ParamTable

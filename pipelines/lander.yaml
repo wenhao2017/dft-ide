@@ -1,4 +1,4 @@
-# DFT IDE Lander 仿真验证 流水线配置文件
+# HiSalad Lander 仿真验证 流水线配置文件
 # 修改此文件可以自定义流水线的执行步骤和执行命令
 
 - id: prepare_workspace

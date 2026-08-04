@@ -25,7 +25,7 @@ describe('demoService', () => {
 
   it('should write to clipboard and show information message', async () => {
     await runVscodeDemo('clipboard');
-    expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith('DFT IDE clipboard demo');
+    expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith('HiSalad clipboard demo');
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
       expect.stringContaining('已写入剪贴板')
     );
@@ -33,14 +33,14 @@ describe('demoService', () => {
 
   it('should create and control terminal', async () => {
     await runVscodeDemo('terminal');
-    expect(vscode.window.createTerminal).toHaveBeenCalledWith('DFT IDE Demo');
+    expect(vscode.window.createTerminal).toHaveBeenCalledWith('HiSalad Demo');
   });
 
   it('should open settings page', async () => {
     await runVscodeDemo('settings');
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
       'workbench.action.openSettings',
-      'DFT IDE'
+      'HiSalad'
     );
   });
 

@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 export async function runVscodeDemo(action: unknown): Promise<void> {
   switch (action) {
     case 'notification':
-      await vscode.window.showInformationMessage('DFT IDE 通知示例：项目状态已刷新。');
+      await vscode.window.showInformationMessage('HiSalad 通知示例：项目状态已刷新。');
       return;
     case 'quickPick': {
       const picked = await vscode.window.showQuickPick(
@@ -16,17 +16,17 @@ export async function runVscodeDemo(action: unknown): Promise<void> {
       return;
     }
     case 'clipboard':
-      await vscode.env.clipboard.writeText('DFT IDE clipboard demo');
+      await vscode.env.clipboard.writeText('HiSalad clipboard demo');
       await vscode.window.showInformationMessage('示例文本已写入剪贴板。');
       return;
     case 'terminal': {
-      const terminal = vscode.window.createTerminal('DFT IDE Demo');
+      const terminal = vscode.window.createTerminal('HiSalad Demo');
       terminal.show();
-      terminal.sendText('echo DFT IDE terminal demo');
+      terminal.sendText('echo HiSalad terminal demo');
       return;
     }
     case 'settings':
-      await vscode.commands.executeCommand('workbench.action.openSettings', 'DFT IDE');
+      await vscode.commands.executeCommand('workbench.action.openSettings', 'HiSalad');
       return;
     case 'external':
       await vscode.env.openExternal(vscode.Uri.parse('https://code.visualstudio.com/api'));

@@ -13,7 +13,7 @@ tools/vscode-1.85.1/
 .\tools\scripts\setup-1.85.1.ps1
 .\tools\scripts\debug-1.85.1.ps1
 
-vscode 运行调试 切换配置（"Attach DFT IDE Extension (VSCode 1.85.1)）
+vscode 运行调试 切换配置（"Attach HiSalad Extension (VSCode 1.85.1)）
 运行Debug
 
 调试的 vscode 中 （ctrl+shift+p -> Restart Extension host）

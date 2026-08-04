@@ -9,14 +9,14 @@
 #   /bin/csh -f "$DFT_IDE_WORK_PATH/eco/project_eco/xxx.csh"
 
 if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE) then
-    echo "[DFT IDE] 未设置 DFT_IDE_STEP 或 DFT_IDE_ECO_PHASE。"
+    echo "[HiSalad] 未设置 DFT_IDE_STEP 或 DFT_IDE_ECO_PHASE。"
     exit 2
 endif
 
 set step = "$DFT_IDE_STEP"
 set phase = "$DFT_IDE_ECO_PHASE"
 if ("$phase" != "before" && "$phase" != "after") then
-    echo "[DFT IDE] 不支持的 Sailor ECO 阶段: $phase"
+    echo "[HiSalad] 不支持的 Sailor ECO 阶段: $phase"
     exit 2
 endif
 
@@ -166,7 +166,7 @@ case "deliver:after":
     # 在此添加 deliver 的后置 ECO 命令。
     breaksw
 default:
-    echo "[DFT IDE] 未知的 ECO 调度组合: step=$step phase=$phase"
+    echo "[HiSalad] 未知的 ECO 调度组合: step=$step phase=$phase"
     exit 2
 endsw
 

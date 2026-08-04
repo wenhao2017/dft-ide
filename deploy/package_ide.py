@@ -81,7 +81,7 @@ setlocal
 cd /d "%~dp0"
 start "" "%~dp0Code.exe"
 """
-    (output_dir / "启动 DFT IDE.bat").write_text(launcher, encoding="utf-8")
+    (output_dir / "启动 HiSalad.bat").write_text(launcher, encoding="utf-8")
 
 
 def install_extension(output_dir: Path, vsix: Path) -> None:
@@ -90,7 +90,7 @@ def install_extension(output_dir: Path, vsix: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Package DFT IDE with a portable VS Code distribution.")
+    parser = argparse.ArgumentParser(description="Package HiSalad with a portable VS Code distribution.")
     parser.add_argument("--vscode-source", required=True, help="Path to extracted VS Code ZIP directory.")
     parser.add_argument("--output", required=True, help="Output directory for the packaged IDE.")
     parser.add_argument("--api-base", default="", help="Backend API base URL, written to dftIde.apiBase.")
@@ -116,9 +116,9 @@ def main() -> None:
     write_launcher(output)
 
     print("")
-    print("DFT IDE package is ready:")
+    print("HiSalad package is ready:")
     print(output)
-    print("Run: 启动 DFT IDE.bat")
+    print("Run: 启动 HiSalad.bat")
 
 
 if __name__ == "__main__":

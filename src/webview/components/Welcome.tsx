@@ -715,7 +715,7 @@ const Welcome: React.FC<Props> = ({ isDark = true, onNavigate, onManageMembers, 
             </Space>
             <div>
               <Title level={1} style={{ margin: 0, fontSize: 40, lineHeight: 1.12 }}>
-                DFT IDE
+                HiSalad
               </Title>
               <Paragraph
                 type="secondary"

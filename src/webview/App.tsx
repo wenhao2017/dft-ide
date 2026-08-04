@@ -577,7 +577,7 @@ const App: React.FC = () => {
                     {activeMeta?.title ?? `${flowContext.category} 工作流配置`}
                   </Title>
                   <Tag color={activeMeta?.accent ?? 'blue'} icon={<ThunderboltOutlined />} style={{ margin: 0 }}>
-                    DFT IDE
+                    HiSalad
                   </Tag>
                   {/* {activeProject && (
                     <>

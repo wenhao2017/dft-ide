@@ -225,7 +225,7 @@ export async function downLoadObsScripts(
     try {
       await fs.promises.chmod(targetPath, 0o755);
     } catch (error) {
-      console.warn(`[DFT IDE] Transform entrance copied but chmod failed: ${targetPath}`, error);
+      console.warn(`[HiSalad] Transform entrance copied but chmod failed: ${targetPath}`, error);
     }
 
     for (const file of obsScriptConfig.remoteScriptFiles) {
@@ -249,12 +249,12 @@ export async function downLoadObsScripts(
       try {
         await fs.promises.chmod(localScriptPath, 0o755);
       } catch (error) {
-        console.warn(`[DFT IDE] OBS script downloaded but chmod failed: ${configsDir}`, error);
+        console.warn(`[HiSalad] OBS script downloaded but chmod failed: ${configsDir}`, error);
       }
     }
     return [configsDir, targetPath];
   } catch (err) {
-    console.warn(`[DFT IDE] 从 OBS 空间 [${obsScriptConfig.scriptSpace}] 下载转换脚本失败:`, err);
+    console.warn(`[HiSalad] 从 OBS 空间 [${obsScriptConfig.scriptSpace}] 下载转换脚本失败:`, err);
     return [];
   }
 }

@@ -393,9 +393,9 @@ function initializeRepoUpdateMonitor(context: vscode.ExtensionContext): void {
     await notifyFriendlyRepoUpdates(context, repos);
   };
   const startup = setTimeout(() => {
-    void check().catch((error) => console.warn('[DFT IDE] Repository update check failed:', error));
+    void check().catch((error) => console.warn('[HiSalad] Repository update check failed:', error));
     interval = setInterval(() => {
-      void check().catch((error) => console.warn('[DFT IDE] Repository update check failed:', error));
+      void check().catch((error) => console.warn('[HiSalad] Repository update check failed:', error));
     }, 5 * 60_000);
   }, 15_000);
   context.subscriptions.push({
@@ -446,7 +446,7 @@ const FLOW_CONFIGS: FlowMenuConfig[] = [
     label: '项目主页',
     icon: 'home',
     description: 'Overview',
-    tooltip: 'DFT IDE 项目管理主页',
+    tooltip: 'HiSalad 项目管理主页',
     category: 'HOME',
     contextValue: 'dftFlow.home',
   },
@@ -533,7 +533,7 @@ class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
       item.command = cfg.category === 'HOME'
         ? {
             command: 'dftIde.openWelcome',
-            title: 'Open DFT IDE Home',
+            title: 'Open HiSalad Home',
           }
         : {
             command: 'dftIde.openFlow',
@@ -550,13 +550,13 @@ class DftFlowProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
 // ============================================================
 
 const CATEGORY_TITLES: Record<string, string> = {
-  HOME: 'DFT IDE — 主页',
-  COMMON: 'DFT IDE — 公共配置',
-  Hibist: 'DFT IDE — Hibist Flow',
-  Sailor: 'DFT IDE — Sailor Flow',
-  Verification: 'DFT IDE — Verification Flow',
-  Formal: 'DFT IDE — Formal',
-  STA: 'DFT IDE — STA',
+  HOME: 'HiSalad — 主页',
+  COMMON: 'HiSalad — 公共配置',
+  Hibist: 'HiSalad — Hibist Flow',
+  Sailor: 'HiSalad — Sailor Flow',
+  Verification: 'HiSalad — Verification Flow',
+  Formal: 'HiSalad — Formal',
+  STA: 'HiSalad — STA',
 };
 
 async function openWebviewFlow(context: vscode.ExtensionContext, category?: string): Promise<void> {
@@ -567,14 +567,14 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
 
   if (currentPanel) {
     currentPanel.reveal(vscode.ViewColumn.One);
-    currentPanel.title = activeCategory ? (CATEGORY_TITLES[activeCategory] ?? `DFT IDE — ${activeCategory}`) : CATEGORY_TITLES.HOME;
+    currentPanel.title = activeCategory ? (CATEGORY_TITLES[activeCategory] ?? `HiSalad — ${activeCategory}`) : CATEGORY_TITLES.HOME;
     currentPanel.webview.postMessage(pendingWebviewCommand);
     return;
   }
 
   currentPanel = vscode.window.createWebviewPanel(
     VIEW_TYPE,
-    activeCategory ? (CATEGORY_TITLES[activeCategory] ?? `DFT IDE — ${activeCategory}`) : CATEGORY_TITLES.HOME,
+    activeCategory ? (CATEGORY_TITLES[activeCategory] ?? `HiSalad — ${activeCategory}`) : CATEGORY_TITLES.HOME,
     vscode.ViewColumn.One,
     {
       enableScripts: true,
@@ -1551,7 +1551,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined;
         const title = typeof msg.title === 'string' && msg.title.trim()
           ? msg.title.trim()
-          : 'DFT IDE Task';
+          : 'HiSalad Task';
         const command = typeof msg.cmd === 'string' ? msg.cmd.trim() : '';
         const requestedCwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
         try {
@@ -1573,7 +1573,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
               error,
             });
           }
-          vscode.window.showErrorMessage(`DFT IDE failed to open terminal: ${error}`);
+          vscode.window.showErrorMessage(`HiSalad failed to open terminal: ${error}`);
         }
         return;
       }
@@ -1587,7 +1587,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           );
           if (Boolean(msg.notifyUpdates)) {
             void notifyFriendlyRepoUpdates(context, repos).catch((error) => {
-              console.warn('[DFT IDE] Failed to notify repository updates:', error);
+              console.warn('[HiSalad] Failed to notify repository updates:', error);
             });
           }
           currentPanel?.webview.postMessage({
@@ -1846,7 +1846,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
 
             if (!content.includes(`${LOCAL_STATE_DIR_NAME}/`)) {
               const prefix = content && !content.endsWith('\n') ? '\n' : '';
-              const next = `${content}${prefix}\n# DFT IDE local user state\n${LOCAL_STATE_DIR_NAME}/\n`;
+              const next = `${content}${prefix}\n# HiSalad local user state\n${LOCAL_STATE_DIR_NAME}/\n`;
 
               await vscode.workspace.fs.writeFile(
                 gitignoreUri,

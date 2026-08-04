@@ -18,7 +18,7 @@ class WebviewErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
-    console.error('[DFT IDE] Webview render failed', error, info);
+    console.error('[HiSalad] Webview render failed', error, info);
   }
 
   render(): React.ReactNode {
@@ -37,7 +37,7 @@ class WebviewErrorBoundary extends React.Component<
           fontFamily: 'var(--vscode-font-family, sans-serif)',
         }}
       >
-        <h2>DFT IDE failed to load</h2>
+        <h2>HiSalad failed to load</h2>
         <p>
           Reload this view. If the problem continues, open Developer Tools and
           inspect the console error.

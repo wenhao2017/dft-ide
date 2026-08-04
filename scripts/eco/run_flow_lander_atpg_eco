@@ -3,7 +3,7 @@
 # Lander ATPG 项目级 ECO 调度入口。
 
 if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE || ! $?DFT_IDE_STAGE) then
-    echo "[DFT IDE] 未设置 DFT_IDE_STEP、DFT_IDE_ECO_PHASE 或 DFT_IDE_STAGE。"
+    echo "[HiSalad] 未设置 DFT_IDE_STEP、DFT_IDE_ECO_PHASE 或 DFT_IDE_STAGE。"
     exit 2
 endif
 
@@ -11,7 +11,7 @@ set step = "$DFT_IDE_STEP"
 set phase = "$DFT_IDE_ECO_PHASE"
 set stage = "$DFT_IDE_STAGE"
 if ("$phase" != "before" && "$phase" != "after") then
-    echo "[DFT IDE] 不支持的 Lander ATPG ECO 阶段: $phase"
+    echo "[HiSalad] 不支持的 Lander ATPG ECO 阶段: $phase"
     exit 2
 endif
 
@@ -119,7 +119,7 @@ case "run_sim:after":
     # 在此添加 run_sim 的后置 ECO 命令。
     breaksw
 default:
-    echo "[DFT IDE] 未知的 ECO 调度组合: step=$step phase=$phase"
+    echo "[HiSalad] 未知的 ECO 调度组合: step=$step phase=$phase"
     exit 2
 endsw
 

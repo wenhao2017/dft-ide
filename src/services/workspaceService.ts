@@ -239,7 +239,7 @@ export async function createProject(): Promise<void> {
 
   await vscode.workspace.fs.writeFile(
     vscode.Uri.joinPath(legacyRoot, 'README.md'),
-    Buffer.from('# DFT IDE Data Workspace\n')
+    Buffer.from('# HiSalad Data Workspace\n')
   );
 
   await vscode.workspace.fs.writeFile(
@@ -296,7 +296,7 @@ export async function createProject(): Promise<void> {
   );
 
   const action = await vscode.window.showInformationMessage(
-    'DFT IDE 本地项目已创建，是否立即打开？',
+    'HiSalad 本地项目已创建，是否立即打开？',
     '打开'
   );
 
@@ -474,7 +474,7 @@ export async function prepareProjectWorkspace(
   };
   await vscode.workspace.fs.writeFile(workspaceFile, Buffer.from(JSON.stringify(workspaceContent, null, 2)));
 
-  vscode.window.showInformationMessage(`DFT IDE 项目初始化完成：${projectName}`);
+  vscode.window.showInformationMessage(`HiSalad 项目初始化完成：${projectName}`);
 
   return {
     rootPath: projectRoot.fsPath,
@@ -714,7 +714,7 @@ export async function ensureLocalStateIgnored(projectRoot: string, effectivePath
   }
 
   const prefix = content && !content.endsWith('\n') ? '\n' : '';
-  const nextContent = `${content}${prefix}\n# DFT IDE local user state\n${missing.join('\n')}\n`;
+  const nextContent = `${content}${prefix}\n# HiSalad local user state\n${missing.join('\n')}\n`;
   await vscode.workspace.fs.writeFile(gitignoreUri, Buffer.from(nextContent, 'utf-8'));
 }
 
@@ -978,7 +978,7 @@ export async function doConfigTransform(transformLog: TransformLog): Promise<Tra
 
   const marker = `__DFT_IDE_DEFAULT_CONFIG_END__|${transformLog.requestId ?? timemilles}|`;
   const terminal = vscode.window.createTerminal({
-    name: `DFT IDE Default Config / ${transformLog.flow} / ${transformLog.requestId ?? timemilles}`,
+    name: `HiSalad Default Config / ${transformLog.flow} / ${transformLog.requestId ?? timemilles}`,
     cwd: transformLog.configPath,
     shellPath: getPipelineShellPath(),
   });

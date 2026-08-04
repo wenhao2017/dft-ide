@@ -51,7 +51,7 @@ if (watch) {
     selectedTargets.map(([, options]) => esbuild.context({ ...sharedOptions, ...options }))
   );
   await Promise.all(contexts.map((context) => context.watch()));
-  console.log(`[DFT IDE] Watching ${environment} build...`);
+  console.log(`[HiSalad] Watching ${environment} build...`);
 } else {
   await Promise.all(
     selectedTargets.map(([, options]) => esbuild.build({ ...sharedOptions, ...options }))

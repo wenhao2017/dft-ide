@@ -227,7 +227,7 @@ export class ObsTrackingService implements vscode.Disposable {
 
       if (!targetVersion) {
         const versions = await obsService.getFileVersions(spaceName, normalizedRemotePath).catch((error) => {
-          console.warn(`[DFT IDE] Failed to resolve OBS display version: ${normalizedRemotePath}`, error);
+          console.warn(`[HiSalad] Failed to resolve OBS display version: ${normalizedRemotePath}`, error);
           return [];
         });
         const versionRecord = selectVersionRecord(versions, targetVersionId);
@@ -501,9 +501,9 @@ export class ObsTrackingService implements vscode.Disposable {
     }
 
     if (options.manual && failures.length > 0) {
-      console.warn('[DFT IDE] 部分 OBS 更新检查失败:', failures);
+      console.warn('[HiSalad] 部分 OBS 更新检查失败:', failures);
     } else if (failures.length > 0) {
-      console.warn('[DFT IDE] OBS 后台更新检查有部分目录失败:', failures);
+      console.warn('[HiSalad] OBS 后台更新检查有部分目录失败:', failures);
     }
     return updates;
   }
@@ -580,7 +580,7 @@ export class ObsTrackingService implements vscode.Disposable {
       matchOnDescription: true,
       matchOnDetail: true,
       placeHolder: '选择要更新的 OBS 文件',
-      title: 'DFT IDE · OBS 文件更新',
+      title: 'HiSalad · OBS 文件更新',
     });
     if (selected && selected.length > 0) {
       await this.updateFiles(selected.map((item) => item.update));
@@ -740,7 +740,7 @@ export class ObsTrackingService implements vscode.Disposable {
       try {
         await this.persistMetadata(entry);
       } catch (error) {
-        console.warn(`[DFT IDE] Failed to persist OBS MD5 migration: ${entry.metadataPath}`, error);
+        console.warn(`[HiSalad] Failed to persist OBS MD5 migration: ${entry.metadataPath}`, error);
       }
       return false;
     }
@@ -809,7 +809,7 @@ export class ObsTrackingService implements vscode.Disposable {
       this.entries.delete(key);
       this.updateStatusBar();
       this.scheduleFlush();
-      console.warn(`[DFT IDE] 忽略无效的 OBS 元数据文件: ${uri.fsPath}`, error);
+      console.warn(`[HiSalad] 忽略无效的 OBS 元数据文件: ${uri.fsPath}`, error);
     }
   }
 
@@ -897,7 +897,7 @@ export class ObsTrackingService implements vscode.Disposable {
         await vscode.workspace.fs.writeFile(tempUri, Buffer.from(JSON.stringify(content), 'utf-8'));
         await vscode.workspace.fs.rename(tempUri, indexUri, { overwrite: true });
       } catch (error) {
-        console.warn('[DFT IDE] 写入 OBS 本地索引失败:', error);
+        console.warn('[HiSalad] 写入 OBS 本地索引失败:', error);
       }
     }
   }
@@ -934,7 +934,7 @@ export class ObsTrackingService implements vscode.Disposable {
   }
 
   private logBackgroundError(error: unknown): void {
-    console.warn('[DFT IDE] OBS 后台更新检查失败，将在下个周期重试:', error);
+    console.warn('[HiSalad] OBS 后台更新检查失败，将在下个周期重试:', error);
   }
 }
 

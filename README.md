@@ -1,12 +1,12 @@
-# DFT IDE
+# HiSalad
 
-DFT IDE is a VS Code extension that turns VS Code into a local DFT workflow console. It provides a project home page, DFT flow navigation, Common configuration, Design (Hibist/Sailor) and Verification workflow pages, project/workspace opening helpers, local page-state persistence, Git-assisted sync, OBS viewer integration, execution helpers, and reserved backend API integration points.
+HiSalad is a VS Code extension that turns VS Code into a local DFT workflow console. It provides a project home page, DFT flow navigation, Common configuration, Design (Hibist/Sailor) and Verification workflow pages, project/workspace opening helpers, local page-state persistence, Git-assisted sync, OBS viewer integration, execution helpers, and reserved backend API integration points.
 
 The current codebase is still a demo/foundation rather than a complete production IDE. It is structured so different projects can load different Common, Hibist, Sailor, Verification, Formal, and STA contexts over time.
 
 ## Features
 
-- Custom DFT IDE Activity Bar container and flow Tree View.
+- Custom HiSalad Activity Bar container and flow Tree View.
 - React webview home page with project search, selection, local-state path settings, and quick flow entry.
 - Common flow for shared paths, design tree location, normalized table location, OBS common data, and Git sync.
 - Design (Hibist/Sailor) and Verification flows built on a shared `FlowShell`, including module scope selection through a shared design tree panel.
@@ -90,14 +90,14 @@ Watch using the development environment defaults:
 npm run dev
 ```
 
-`npm run compile` and `npm run watch` use production defaults; `npm run dev` uses development defaults. You can also select the `Run DFT IDE Extension (Dev)` launch configuration in VS Code. Explicit user or workspace `dftIde.*` settings continue to override environment defaults.
+`npm run compile` and `npm run watch` use production defaults; `npm run dev` uses development defaults. You can also select the `Run HiSalad Extension (Dev)` launch configuration in VS Code. Explicit user or workspace `dftIde.*` settings continue to override environment defaults.
 
 Run in VS Code:
 
 1. Open this repository in VS Code.
 2. Run `npm run compile`, or keep `npm run watch` running.
-3. Press `F5` and use the `Run DFT IDE Extension` launch config.
-4. Open the DFT IDE Activity Bar view and choose Home, Common, Hibist, Sailor, or Verification.
+3. Press `F5` and use the `Run HiSalad Extension` launch config.
+4. Open the HiSalad Activity Bar view and choose Home, Common, Hibist, Sailor, or Verification.
 
 Package as VSIX:
 
@@ -261,8 +261,8 @@ The extension exposes DFT-focused workbench layout settings:
 
 Commands:
 
-- `DFT IDE: Apply Layout`
-- `DFT IDE: Restore VS Code Layout`
+- `HiSalad: Apply Layout`
+- `HiSalad: Restore VS Code Layout`
 
 The webview can also toggle the focused layout through IPC. The extension backs up existing global settings before applying changes and restores them when requested.
 
@@ -287,7 +287,7 @@ deploy/README.zh-CN.md
 deploy/package_ide.py
 ```
 
-The intended delivery model is VS Code Portable Mode: start from an official VS Code ZIP/TAR.GZ distribution, create a portable `data/` directory, install the generated VSIX into that copy of VS Code, write default DFT IDE settings, and deliver the whole directory as a directly launchable IDE.
+The intended delivery model is VS Code Portable Mode: start from an official VS Code ZIP/TAR.GZ distribution, create a portable `data/` directory, install the generated VSIX into that copy of VS Code, write default HiSalad settings, and deliver the whole directory as a directly launchable IDE.
 
 ## Coding Notes
 

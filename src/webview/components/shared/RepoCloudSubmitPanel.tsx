@@ -219,7 +219,7 @@ const RepoCloudSubmitPanel: React.FC<Props> = ({ repo, accent, onPrev }) => {
                 showIcon
                 type="warning"
                 message="远端版本更新了"
-                description="远端仓库已有新的提交。请先同步远端；如果产生冲突，DFT IDE 会列出冲突文件并引导你继续处理。"
+                description="远端仓库已有新的提交。请先同步远端；如果产生冲突，HiSalad 会列出冲突文件并引导你继续处理。"
                 action={
                   <Button size="small" type="primary" onClick={() => runSubmit(true)}>
                     同步远端后继续
