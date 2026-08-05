@@ -119,7 +119,6 @@ import {
 } from './services/obsPreviewService';
 import { parseModuleString } from './services/utils';
 import { DftProject, ProjectDomain } from './webview/services/projectService';
-import { getVersionFromModuleName, modifyModuleCfgByVersion } from './utils';
 import { attachResolvedClusterSubmission, getDsubAliases } from './services/dsubAliasService';
 
 const execFileAsync = promisify(execFile);
@@ -298,15 +297,14 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  const userCshrcPath = path.join(os.homedir(), '.cshrc');
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument((document) => {
-      if (normalizePathForScope(document.uri.fsPath) !== normalizePathForScope(userCshrcPath)) {
+      if (path.basename(document.uri.fsPath).toLowerCase() !== 'project.cshrc') {
         return;
       }
       void currentPanel?.webview.postMessage({
         command: 'dsubAliasesChanged',
-        path: userCshrcPath,
+        path: document.uri.fsPath,
       });
     })
   );
@@ -702,14 +700,12 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
               ? `${flowKey}/${verificationStage}/${moduleKey}/config`
               : `${flowKey}/${moduleKey}/config`;
             const taskConfig = await readConfig(taskConfigKey);
-            const configuredShell = vscode.workspace
-              .getConfiguration('dftIde')
-              .get<string>('pipeline.shellPath', 'csh')
-              .trim() || 'csh';
+            const projectCshrcPath = path.join(await resolveProjectRepoRoot(flowKey), 'project.cshrc');
             const envConfig = await attachResolvedClusterSubmission(
               savedFlowConfig,
               taskConfig,
-              configuredShell,
+              moduleKey,
+              projectCshrcPath,
             );
             const runParameters = msg.runParameters;
             pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel, selectedTaskIds, cwd, envConfig, taskConfig, selectedTasks, runParameters);
@@ -735,14 +731,12 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
               ? `${flowKey}/${verificationStage}/${moduleKey}/config`
               : `${flowKey}/${moduleKey}/config`;
             const taskConfig = await readConfig(taskConfigKey);
-            const configuredShell = vscode.workspace
-              .getConfiguration('dftIde')
-              .get<string>('pipeline.shellPath', 'csh')
-              .trim() || 'csh';
+            const projectCshrcPath = path.join(await resolveProjectRepoRoot(flowKey), 'project.cshrc');
             const envConfig = await attachResolvedClusterSubmission(
               savedFlowConfig,
               taskConfig,
-              configuredShell,
+              moduleKey,
+              projectCshrcPath,
             );
             const cwd = typeof msg.cwd === 'string' && msg.cwd.trim() ? msg.cwd.trim() : undefined;
             const stepStatus = Number.isFinite(msg.stepStatus) ? Number(msg.stepStatus) : 0;
@@ -948,11 +942,10 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       case 'getDsubAliases': {
         const requestId: string = msg.requestId;
         try {
-          const configuredShell = vscode.workspace
-            .getConfiguration('dftIde')
-            .get<string>('pipeline.shellPath', 'csh')
-            .trim() || 'csh';
-          const aliases = await getDsubAliases(configuredShell);
+          const flow = normalizeConfigFlow(msg.flow);
+          if (!flow) throw new Error('无法确定项目 Alias 所属流程。');
+          const repoRoot = await resolveProjectRepoRoot(flow);
+          const aliases = await getDsubAliases(path.join(repoRoot, 'project.cshrc'));
           currentPanel?.webview.postMessage({
             command: 'getDsubAliasesResponse',
             requestId,
@@ -969,10 +962,13 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         return;
       }
 
-      case 'openUserCshrc': {
+      case 'openProjectCshrc': {
         const requestId: string = msg.requestId;
-        const cshrcPath = path.join(os.homedir(), '.cshrc');
         try {
+          const flow = normalizeConfigFlow(msg.flow);
+          if (!flow) throw new Error('无法确定项目 Alias 所属流程。');
+          const repoRoot = await resolveProjectRepoRoot(flow);
+          const cshrcPath = path.join(repoRoot, 'project.cshrc');
           const uri = vscode.Uri.file(cshrcPath);
           try {
             await vscode.workspace.fs.stat(uri);
@@ -988,13 +984,13 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             preview: false,
           });
           currentPanel?.webview.postMessage({
-            command: 'openUserCshrcResponse',
+            command: 'openProjectCshrcResponse',
             requestId,
             path: cshrcPath,
           });
         } catch (err) {
           currentPanel?.webview.postMessage({
-            command: 'openUserCshrcResponse',
+            command: 'openProjectCshrcResponse',
             requestId,
             error: err instanceof Error ? err.message : String(err),
           });
@@ -1074,13 +1070,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           }
           if (command === 'renameVerificationModeCfg') {
             await vscode.workspace.fs.rename(vscode.Uri.file(source), vscode.Uri.file(target), { overwrite: false });
-            const [oriModuleKey, version] = getVersionFromModuleName(msg.targetMode);
-            if (version) {
-              const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
-              const content = Buffer.from(bytes).toString('utf-8');
-              const lines = modifyModuleCfgByVersion('verification', content);
-              await vscode.workspace.fs.writeFile(vscode.Uri.file(target), Buffer.from(lines.join('\n'), 'utf-8'));
-            }
           } else {
             await vscode.workspace.fs.copy(vscode.Uri.file(source), vscode.Uri.file(target), { overwrite: false });
           }
@@ -2879,6 +2868,9 @@ async function downloadDomainEcoFiles(project: DftProject, domain: ProjectDomain
   const result = await obsTrackingService.downloadDirectory(scriptSpace, `${ecoScr}/${domain.key}`, vscode.Uri.file(domainPath));
   if (result.failedFiles > 0) {
     throw new Error(`${result.failedFiles} OBS files failed to download.`);
+  }
+  if (result.successFiles < 1) {
+    throw new Error('No OBS files to download.');
   }
 
   for (const repo of project.repos) {

@@ -12,7 +12,6 @@ import {
   type TransformLog, resolveLocalConfigDirectory,
 } from './workspaceService';
 import { obsTrackingService } from './obsTrackingService';
-import { getVersionFromModuleName, modifyModuleCfgByVersion } from '../utils';
 
 export interface FlowConfigFileInfo {
   key: string;
@@ -151,13 +150,6 @@ export async function renameFlowConfigFile(
       { overwrite: false }
     );
 
-    const [oriModuleKey, version] = getVersionFromModuleName(nextModuleName);
-    if (version) {
-      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(target));
-      const content = Buffer.from(bytes).toString('utf-8');
-      const lines = modifyModuleCfgByVersion(flow, content);
-      await vscode.workspace.fs.writeFile(vscode.Uri.file(target), Buffer.from(lines.join('\n'), 'utf-8'));
-    }
   } catch (error) {
     await vscode.workspace.fs.rename(vscode.Uri.file(targetDir), vscode.Uri.file(sourceDir), { overwrite: false });
     throw error;
@@ -319,9 +311,7 @@ export function toFlowConfigFileInfo(filePath: string, stat: vscode.FileStat): F
     workPath = path.join(workPath, 'work');
   }
 
-  const [oriModuleKey, version] = getVersionFromModuleName(moduleName);
-  // const workDir = version ? path.join(workPath, version, oriModuleKey) : path.join(workPath, moduleName);
-  const workDir = path.join(workPath, version ? oriModuleKey : moduleName);
+  const workDir = path.join(workPath, moduleName);
 
   return {
     key: moduleName,

@@ -172,8 +172,8 @@ export async function getMavToolVersions(toolName: string): Promise<string[]> {
     : []
 }
 
-export async function getDsubAliases(): Promise<DsubAliasOption[]> {
-  const res = await ipcRequest('getDsubAliases')
+export async function getDsubAliases(flow: RepoKey): Promise<DsubAliasOption[]> {
+  const res = await ipcRequest('getDsubAliases', { flow })
   if (typeof res.error === 'string') throw new Error(res.error)
   return Array.isArray(res.aliases)
     ? res.aliases.filter((value): value is DsubAliasOption => {
@@ -187,8 +187,8 @@ export async function getDsubAliases(): Promise<DsubAliasOption[]> {
     : []
 }
 
-export async function openUserCshrc(): Promise<string> {
-  const res = await ipcRequest('openUserCshrc')
+export async function openProjectCshrc(flow: RepoKey): Promise<string> {
+  const res = await ipcRequest('openProjectCshrc', { flow })
   if (typeof res.error === 'string') throw new Error(res.error)
   return typeof res.path === 'string' ? res.path : ''
 }

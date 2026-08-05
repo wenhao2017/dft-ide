@@ -11,7 +11,7 @@ import type {
   ResourceStore,
 } from '../../types'
 
-import { createCopyName, sameName } from '../utils'
+import { createCopyName, sameName, createVersionName } from '../utils'
 
 interface UseModeCrudProps {
   resources: ResourceStore
@@ -158,6 +158,38 @@ export function useModeCrud({
     [resources, selectItem, updateResources],
   )
 
+  const duplicateVersionItem = useCallback(
+    (item?: ModePanelItem, tab?: ModePanelTab, targetName?: string) => {
+      if (!item) {
+        return false
+      }
+
+      const targetTab = tab ?? 'mode'
+      const duplicatedName = targetName ?? createVersionName(resources[targetTab], item.name)
+      const duplicated: ModePanelItem = {
+        ...item,
+        name: duplicatedName,
+      }
+
+      updateResources((current) => ({
+        ...current,
+        [targetTab]: [...current[targetTab], duplicated],
+        ...(targetTab === 'mode'
+          ? {
+              focusModes: Array.from(
+                new Set([...current.focusModes, duplicated.name]),
+              ),
+            }
+          : {}),
+      }))
+
+      selectItem(targetTab, duplicated)
+      message.success(`已复制 ${item.name}`)
+      return true
+    },
+    [resources, selectItem, updateResources],
+  )
+
   const renameItem = useCallback(
     (item: ModePanelItem, tab: ModePanelTab, nextName: string) => {
       const name = nextName.trim()
@@ -257,6 +289,8 @@ export function useModeCrud({
 
   return {
     createItem,
+
+    duplicateVersionItem,
 
     duplicateItem,
 

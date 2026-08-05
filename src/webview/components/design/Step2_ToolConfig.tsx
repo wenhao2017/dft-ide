@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   Button,
   Form,
@@ -18,10 +18,11 @@ import {
   migrateLegacyClusterSubmission,
   type ClusterSubmissionConfig,
 } from '../../../shared/clusterSubmission'
-import ClusterSubmissionConfigEditor from '../shared/ClusterSubmissionConfig'
 import PipelineExecutionOverview from '../shared/PipelineExecutionOverview'
-import ToolConfigEditor from '../shared/ToolConfigEditor'
+import ScopedEnvironmentConfig, { type ScopedEnvironmentOverride } from '../shared/ScopedEnvironmentConfig'
+import type { ToolConfig } from '../shared/toolConfigTypes'
 import { DESIGN_FLOW_ACCENTS } from '../../flowTheme'
+import { getModules } from '../../utils/ipc'
 
 interface Props {
   onNext: () => void
@@ -55,11 +56,25 @@ const Step2ToolConfig: React.FC<Props> = ({
   const flowLabel = repo === 'sailor' ? 'Sailor' : 'Hibist'
   const accent = DESIGN_FLOW_ACCENTS[repo]
   const [form] = Form.useForm()
+  const [configuredModules, setConfiguredModules] = useState<string[]>([])
+  const tools = (Form.useWatch('tools', { form, preserve: true }) as ToolConfig[] | undefined) ?? []
+  const cluster = (Form.useWatch('cluster', { form, preserve: true }) as ClusterSubmissionConfig | undefined) ?? DEFAULT_CLUSTER
+  const scopedOverrides = (Form.useWatch('scopedOverrides', { form, preserve: true }) as Record<string, ScopedEnvironmentOverride> | undefined) ?? {}
+  const scopeKeys = useMemo(
+    () => Array.from(new Set([...configuredModules, ...moduleKeys])).filter(Boolean),
+    [configuredModules, moduleKeys],
+  )
   const {
     savedData,
     loading,
     debouncedSave,
   } = useFlowConfig(repo)
+
+  useEffect(() => {
+    void getModules(repo).then((result) => {
+      if (result.success) setConfiguredModules(result.modules)
+    }).catch(() => setConfiguredModules([]))
+  }, [repo])
 
   useEffect(() => {
     if (!savedData) {
@@ -71,17 +86,41 @@ const Step2ToolConfig: React.FC<Props> = ({
     form.setFieldsValue({
       ...task,
       cluster: migrateLegacyClusterSubmission(task) ?? DEFAULT_CLUSTER,
+      scopedOverrides: (step2.scopedOverrides as Record<string, ScopedEnvironmentOverride> | undefined) ?? {},
     })
   }, [form, savedData])
 
   const autoSave = (values: Record<string, unknown>) => {
     const previousStep2 = (savedData?.step2 as Record<string, unknown> | undefined) ?? {}
+    const { scopedOverrides: nextOverrides = {}, ...step2Task } = values
     debouncedSave({
       step2: {
         ...previousStep2,
-        step2Task: values,
+        step2Task,
+        scopedOverrides: nextOverrides,
       },
     })
+  }
+
+  const updateField = (name: string, value: unknown) => {
+    form.setFieldValue(name, value)
+    autoSave(form.getFieldsValue(true) as Record<string, unknown>)
+  }
+
+  const handlePrev = () => {
+    if (activeTab === 'execution') {
+      onActiveTabChange('environment')
+      return
+    }
+    onPrev()
+  }
+
+  const handleNext = () => {
+    if (activeTab === 'environment') {
+      onActiveTabChange('execution')
+      return
+    }
+    onNext()
   }
 
   return (
@@ -98,21 +137,20 @@ const Step2ToolConfig: React.FC<Props> = ({
               <Form
                 form={form}
                 layout="vertical"
-                onValuesChange={(_changed, values) => autoSave(values)}
                 style={{ paddingTop: 12 }}
               >
-                <div style={{ display: 'grid', gap: 14 }}>
-                  <div>
-                    <Form.Item name="tools" noStyle>
-                      <ToolConfigEditor section accent={accent} scopeLabel="按需配置工具版本或本地路径；未指定时沿用当前运行环境。" />
-                    </Form.Item>
-                  </div>
-                  <div>
-                    <Form.Item name="cluster" noStyle>
-                      <ClusterSubmissionConfigEditor accent={accent} />
-                    </Form.Item>
-                  </div>
-                </div>
+                <ScopedEnvironmentConfig
+                  flowKey={repo}
+                  scopeLabel="Module"
+                  scopeKeys={scopeKeys}
+                  accent={accent}
+                  defaultTools={tools}
+                  defaultCluster={cluster}
+                  overrides={scopedOverrides}
+                  onDefaultToolsChange={(value) => updateField('tools', value)}
+                  onDefaultClusterChange={(value) => updateField('cluster', value)}
+                  onOverridesChange={(value) => updateField('scopedOverrides', value)}
+                />
               </Form>
             ),
           },
@@ -143,8 +181,8 @@ const Step2ToolConfig: React.FC<Props> = ({
         paddingTop: 16,
         borderTop: '1px solid var(--vscode-panel-border)',
       }}>
-        <Button onClick={onPrev} icon={<LeftOutlined />}>上一页</Button>
-        <Button type="primary" onClick={onNext}>
+        <Button onClick={handlePrev} icon={<LeftOutlined />}>上一页</Button>
+        <Button type="primary" onClick={handleNext}>
           下一页 <RightOutlined />
         </Button>
       </div>

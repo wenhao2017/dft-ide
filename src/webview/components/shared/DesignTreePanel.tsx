@@ -13,7 +13,6 @@ import {
   Tooltip,
   Typography,
   message,
-  Form,
 } from 'antd';
 import {
   BranchesOutlined,
@@ -30,6 +29,7 @@ import {
   RightOutlined,
   SearchOutlined,
   StopOutlined,
+  FileOutlined,
 } from '@ant-design/icons';
 import {
   FlowConfigFileInfo,
@@ -41,6 +41,7 @@ import {
   renameFlowConfigFile,
   saveConfig,
   watchFlowConfigFiles,
+  openFileInEditor,
 } from '../../utils/ipc';
 import { confirmDelete } from '../../utils/confirmDelete';
 import usePipelineRuntimeStore from '../../store/pipelineRuntimeStore';
@@ -420,6 +421,16 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
     await refreshConfigs(result.config.key);
   };
 
+  const openSelected = (moduleName = selectedConfig?.moduleName) => {
+    if (!moduleName) return;
+    const config = configs.find((item) => item.moduleName === moduleName) ?? selectedConfig;
+    if (config?.filePath) {
+      openFileInEditor(config.filePath);
+    } else {
+      message.warning('模块 CFG 路径为空');
+    }
+  };
+
   const openRename = (moduleName = selectedConfig?.moduleName) => {
     if (!moduleName) return;
     selectModule(moduleName);
@@ -651,6 +662,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
                 { key: 'run-select-tasks', icon: <PlayCircleOutlined />, label: '选择任务并运行' },
                 { type: 'divider' as const },
               ] : []),
+              { key: 'open', icon: <FileOutlined />, label: '打开' },
               { key: 'copy', icon: <CopyOutlined />, label: '复制' },
               { key: 'rename', icon: <EditOutlined />, label: '重命名' },
               { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true },
@@ -664,6 +676,7 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
                   onClick: ({ key, domEvent }) => {
                     domEvent.stopPropagation();
                     selectModule(item.key);
+                    if (key === 'open') openSelected(item.moduleName);
                     if (key === 'copy') void duplicateSelected(item.moduleName);
                     if (key === 'rename') openRename(item.moduleName);
                     if (key === 'delete') deleteSelected(item.moduleName);
@@ -864,18 +877,12 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
         onOk={confirmRename}
         onCancel={() => setRenameOpen(false)}
       >
-        <Form layout="vertical">
-          <Form.Item
-            extra="使用@表示版本，例如：module@v1。"
-          >
-            <Input
-              placeholder="请输入新的模块名称"
-              value={renameValue}
-              onChange={(event) => setRenameValue(event.target.value)}
-              onPressEnter={confirmRename}
-            />
-          </Form.Item>
-        </Form>
+        <Input
+          placeholder="请输入新的模块名称"
+          value={renameValue}
+          onChange={(event) => setRenameValue(event.target.value)}
+          onPressEnter={confirmRename}
+        />
       </Modal>
 
       <Modal

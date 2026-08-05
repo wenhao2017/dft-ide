@@ -7,6 +7,7 @@ import {
   FilterOutlined,
   PlusOutlined,
   ReloadOutlined,
+  PlusCircleOutlined,
 } from '@ant-design/icons'
 
 import type { ModePanelTab } from '../../types'
@@ -43,6 +44,8 @@ interface ModeToolbarProps {
 
   onCreate: () => void
 
+  onVersion: () => void
+
   onCopy: () => void
 
   onRename?: () => void
@@ -71,6 +74,7 @@ export default function ModeToolbar({
   accent = 'var(--vscode-focusBorder, #1677ff)',
   onFocusChange,
   onCreate,
+  onVersion,
   onCopy,
   onRename,
   onDelete,
@@ -169,6 +173,15 @@ export default function ModeToolbar({
         <Tooltip title={`新增 ${activeTabLabel}`}>
           <Button size="small" icon={<PlusOutlined />} onClick={onCreate} />
         </Tooltip>
+
+        {activeTab === 'mode' && <Tooltip title="新增版本">
+          <Button
+            size="small"
+            icon={<PlusCircleOutlined />}
+            disabled={!hasSelected}
+            onClick={onVersion}
+          />
+        </Tooltip>}
 
         <Tooltip title="复制当前选择">
           <Button

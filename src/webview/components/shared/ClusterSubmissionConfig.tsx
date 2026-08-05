@@ -31,7 +31,7 @@ import {
   type CustomClusterSubmissionConfig,
   type DsubAliasOption,
 } from '../../../shared/clusterSubmission'
-import { getDsubAliases, openUserCshrc } from '../../utils/ipc'
+import { getDsubAliases, openProjectCshrc, type RepoKey } from '../../utils/ipc'
 import DonauResourcePicker from './DonauResourcePicker'
 import FlowConfigSection from './FlowConfigSection'
 
@@ -55,12 +55,14 @@ export interface ClusterSubmissionConfigProps {
   value?: ClusterSubmissionConfig
   onChange?: (value: ClusterSubmissionConfig) => void
   accent?: string
+  flowKey: Extract<RepoKey, 'hibist' | 'sailor' | 'verification'>
 }
 
 export default function ClusterSubmissionConfigEditor({
   value = EMPTY_ALIAS,
   onChange,
   accent,
+  flowKey,
 }: ClusterSubmissionConfigProps) {
   const { token } = theme.useToken()
   const sectionAccent = accent ?? token.colorPrimary
@@ -76,7 +78,7 @@ export default function ClusterSubmissionConfigEditor({
   const loadAliases = async (showSuccess = false) => {
     setLoadingAliases(true)
     try {
-      const nextAliases = await getDsubAliases()
+      const nextAliases = await getDsubAliases(flowKey)
       setAliases(nextAliases)
       if (showSuccess) {
         message.success(`已加载 ${nextAliases.length} 个 dsub Alias`)
@@ -90,7 +92,7 @@ export default function ClusterSubmissionConfigEditor({
 
   useEffect(() => {
     void loadAliases()
-  }, [])
+  }, [flowKey])
 
   useEffect(() => {
     const handleCshrcSaved = (event: MessageEvent) => {
@@ -101,7 +103,7 @@ export default function ClusterSubmissionConfigEditor({
     }
     window.addEventListener('message', handleCshrcSaved)
     return () => window.removeEventListener('message', handleCshrcSaved)
-  }, [])
+  }, [flowKey])
 
   useEffect(() => {
     if (value.mode === 'alias') setLastAliasName(value.aliasName)
@@ -125,7 +127,7 @@ export default function ClusterSubmissionConfigEditor({
 
   const validation = useMemo(() => {
     if (value.mode === 'alias') {
-      if (!value.aliasName) return '请选择一个包含 dsub 的用户 Alias。'
+      if (!value.aliasName) return '请选择一个包含 dsub 的项目 Alias。'
       if (!selectedAlias && !loadingAliases) return '当前 Alias 不存在，请刷新后重新选择。'
       return undefined
     }
@@ -264,7 +266,7 @@ export default function ClusterSubmissionConfigEditor({
         index="02"
         icon={<CloudServerOutlined />}
         title="Donau集群提交策略"
-        description="运行流水线前需选择个人 csh Alias，或独立配置 Donau 资源。"
+        description="运行流水线前需选择项目 Alias，或独立配置 Donau 资源。"
         accent={sectionAccent}
         defaultExpanded
       >
@@ -276,7 +278,7 @@ export default function ClusterSubmissionConfigEditor({
           options={[
             {
               value: 'alias',
-              label: <Space><CodeOutlined />使用个人 Alias</Space>,
+              label: <Space><CodeOutlined />使用项目 Alias</Space>,
             },
             {
               value: 'custom',
@@ -290,23 +292,23 @@ export default function ClusterSubmissionConfigEditor({
           <Space direction="vertical" size={14} style={{ width: '100%' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start' }}>
               <div>
-                <Text strong>从 ~/.cshrc 选择 dsub Alias</Text>
-                <div><Text type="secondary">IDE只加载定义中包含独立 dsub 命令的 Alias。</Text></div>
+                <Text strong>从项目根目录的 project.cshrc 选择 dsub Alias</Text>
+                <div><Text type="secondary">IDE 只加载定义中包含独立 dsub 命令的 Alias。</Text></div>
               </div>
               <Space size={8}>
-                <Tooltip title="在 VS Code 中编辑当前用户的 ~/.cshrc，保存后自动刷新 Alias">
+                <Tooltip title="在 VS Code 中编辑当前项目的 project.cshrc，保存后自动刷新 Alias">
                   <Button
                     icon={<EditOutlined />}
                     onClick={() => {
-                      void openUserCshrc().catch((error) => {
+                      void openProjectCshrc(flowKey).catch((error) => {
                         message.error(error instanceof Error ? error.message : String(error))
                       })
                     }}
                   >
-                    编辑 ~/.cshrc
+                    编辑 project.cshrc
                   </Button>
                 </Tooltip>
-                <Tooltip title="重新读取当前运行环境中的 ~/.cshrc">
+                <Tooltip title="重新读取当前项目根目录下的 project.cshrc">
                   <Button
                     icon={<ReloadOutlined />}
                     loading={loadingAliases}
@@ -327,7 +329,7 @@ export default function ClusterSubmissionConfigEditor({
                 className="alias-select"
                 style={{ width: '100%' }}
                 value={value.aliasName || undefined}
-                placeholder="选择个人 dsub Alias"
+                placeholder="选择项目 dsub Alias"
                 optionFilterProp="searchText"
                 notFoundContent={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有发现可用的 dsub Alias" />}
                 options={aliases.map((alias) => ({

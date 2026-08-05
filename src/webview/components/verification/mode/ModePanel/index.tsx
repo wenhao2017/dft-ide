@@ -23,7 +23,7 @@ import { useModeSelection } from './hooks/useModeSelection'
 import { useModeCrud } from './hooks/useModeCrud'
 import { useModeRun } from './hooks/useModeRun'
 
-import { createCopyName, sameName } from './utils'
+import { createCopyName, sameName, createVersionName } from './utils'
 import { readSavedParams, updateSavedParamReferences } from '../savedParamUtils'
 
 import {
@@ -386,6 +386,24 @@ export default function ModePanel({
     selection.selectItem(activeTab, undefined)
   }
 
+  const handleVersion = async () => {
+    if (!selectedItem) {
+      return
+    }
+
+    if (activeTab === 'mode') {
+      if (!stage) return
+      const targetName = createVersionName(resources.mode, selectedItem.name)
+      try {
+        await duplicateVerificationModeCfg(stage, selectedItem.name, targetName)
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : 'Mode 配置文件新增版本失败')
+        return
+      }
+      crud.duplicateVersionItem(selectedItem, activeTab, targetName)
+    }
+  }
+
   const handleCopy = async () => {
     if (!selectedItem) {
       return
@@ -574,6 +592,7 @@ export default function ModePanel({
           accent={accentColor}
           onFocusChange={handleFocusChange}
           onCreate={openCreate}
+          onVersion={handleVersion}
           onCopy={handleCopy}
           onRename={handleRename}
           onDelete={handleDelete}

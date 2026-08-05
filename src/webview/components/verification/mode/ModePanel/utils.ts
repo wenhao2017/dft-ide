@@ -67,6 +67,25 @@ export const createCopyName = (
   return candidate
 }
 
+export const createVersionName = (
+  items: ModePanelItem[],
+  sourceName: string,
+): string => {
+  let index = 1
+  let candidate = `${sourceName}@V1`
+
+  while (
+    items.some(
+      (item) => item.name.trim().toLowerCase() === candidate.toLowerCase(),
+    )
+  ) {
+    index += 1
+    candidate = `${sourceName}@V${index}`
+  }
+
+  return candidate
+}
+
 /**
  * 判断两个字符串名称是否相同
  */
