@@ -283,7 +283,7 @@ export async function createProject(): Promise<void> {
       { name: 'sailor', path: 'sailor' },
       { name: 'verification', path: 'verification' },
       { name: 'data', path: 'data' },
-      { name: 'DFT Local State', path: '.dft-ide' }
+      { name: 'dft local state', path: '.dft-ide' }
     ],
     settings: {
       'workbench.startupEditor': 'none'
@@ -411,7 +411,7 @@ export async function initProjectWorkspace(project: DftProject): Promise<string>
   const workspaceContent = {
     folders: [
       ...folders,
-      { name: 'DFT Local State', path: LOCAL_STATE_DIR_NAME },
+      { name: 'dft local state', path: LOCAL_STATE_DIR_NAME },
     ],
     settings: {
       'workbench.startupEditor': 'none'
@@ -466,7 +466,7 @@ export async function prepareProjectWorkspace(
   const workspaceContent = {
     folders: [
       ...PROJECT_REPOS.map((repo) => ({ name: repo, path: repo })),
-      { name: 'DFT Local State', path: LOCAL_STATE_DIR_NAME },
+      { name: 'dft local state', path: LOCAL_STATE_DIR_NAME },
     ],
     settings: {
       'workbench.startupEditor': 'none'
