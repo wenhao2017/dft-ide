@@ -716,7 +716,7 @@ function createIdleRuntime(
 
 function clearRuntimeTimers(key: string) {
   timers.get(key)?.forEach((timer) => clearTimeout(timer));
-  timers.set(key, []);
+  timers.delete(key);
 }
 
 function scheduleRuntime(key: string, delay: number, action: () => void) {

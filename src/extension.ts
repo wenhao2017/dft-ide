@@ -199,6 +199,11 @@ const pipelineRuntimeService = new PipelineRuntimeService({
 const activeJobTimers = new Map<string, ReturnType<typeof setInterval>>();
 const lastNotifiedRepoUpdates = new Map<string, string>();
 
+function clearActiveJobTimers(): void {
+  activeJobTimers.forEach((timer) => clearInterval(timer));
+  activeJobTimers.clear();
+}
+
 async function notifyFriendlyRepoUpdates(
   context: vscode.ExtensionContext,
   repos: Awaited<ReturnType<typeof getRepoGitInfoForWebview>>[]
@@ -280,6 +285,7 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   context.subscriptions.push(dftDiagnostics);
+  context.subscriptions.push({ dispose: clearActiveJobTimers });
   obsTrackingService.initialize(context);
   initializeRepoUpdateMonitor(context);
   context.subscriptions.push(
@@ -589,6 +595,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
   );
 
   currentPanel.onDidDispose(() => {
+    clearActiveJobTimers();
     landerModeWatcher?.dispose();
     landerModeWatcher = undefined;
     flowConfigWatchers.forEach((watcher) => watcher.dispose());
@@ -2998,4 +3005,6 @@ async function pushDomainEcoFiles(project: DftProject, isInit: boolean) {
   }
 }
 
-export function deactivate() {}
+export function deactivate() {
+  clearActiveJobTimers();
+}
