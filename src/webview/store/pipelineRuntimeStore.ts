@@ -52,9 +52,10 @@ interface PipelineRuntimeStore {
     runParameters?: unknown,
   ) => void;
   stopRuntime: (flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string) => void;
-  selectTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string) => void;
-  stopTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string, flowLabel: string) => void;
-  rerunTask: (flowKey: PipelineFlowKey, moduleKey: string, taskId: string) => void;
+  stopRun: (flowKey: PipelineFlowKey, moduleKey: string, runId: string, flowLabel: string) => void;
+  selectTask: (flowKey: PipelineFlowKey, moduleKey: string, runId: string, taskId: string) => void;
+  stopTask: (flowKey: PipelineFlowKey, moduleKey: string, runId: string, taskId: string, flowLabel: string) => void;
+  rerunTask: (flowKey: PipelineFlowKey, moduleKey: string, runId: string, taskId: string) => void;
   applyRuntime: (snapshot: PipelineRuntimeSnapshot) => void;
   applyRuntimes: (snapshots: PipelineRuntimeSnapshot[]) => void;
 }
@@ -123,8 +124,8 @@ function parseRuntimeSnapshots(values: unknown[]): PipelineRuntimeSnapshot[] {
     .filter((snapshot): snapshot is PipelineRuntimeSnapshot => Boolean(snapshot));
 }
 
-export function getPipelineRuntimeKey(flowKey: PipelineFlowKey, moduleKey: string): string {
-  return `${flowKey}:${moduleKey}`;
+export function getPipelineRuntimeKey(flowKey: PipelineFlowKey, moduleKey: string, runId?: string): string {
+  return runId ?? `${flowKey}:${moduleKey}:draft`;
 }
 
 export function makeInitialRuntime(
@@ -190,7 +191,7 @@ function applySnapshot(
   runtimes: Record<string, PipelineRuntimeSnapshot>,
   snapshot: PipelineRuntimeSnapshot,
 ): Record<string, PipelineRuntimeSnapshot> {
-  const key = getPipelineRuntimeKey(snapshot.flowKey, snapshot.moduleKey);
+  const key = getPipelineRuntimeKey(snapshot.flowKey, snapshot.moduleKey, snapshot.runId);
   return mergeLatestSnapshot(runtimes, key, snapshot);
 }
 
@@ -290,7 +291,19 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
       cwd,
       runParameters,
     }).then((result) => {
-      if (!result.success) {
+      const snapshot = result.success ? parseRuntimeSnapshot(result.snapshot) : null;
+      if (snapshot) {
+        set((state) => {
+          const runtimes = applySnapshot(state.runtimes, snapshot);
+          const draftKey = getPipelineRuntimeKey(flowKey, moduleKey);
+          if (runtimes[draftKey]?.runState === 'running') {
+            const next = { ...runtimes };
+            delete next[draftKey];
+            return { runtimes: next };
+          }
+          return { runtimes };
+        });
+      } else if (!result.success) {
         rollbackOptimisticRuntime(result.error);
       }
     }).catch((error) => {
@@ -299,12 +312,23 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
   },
 
   stopRuntime: (flowKey, moduleKey, flowLabel) => {
-    void stopPipelineRuntime({ flowKey, moduleKey, flowLabel });
+    Object.values(usePipelineRuntimeStore.getState().runtimes)
+      .filter((runtime) => runtime.flowKey === flowKey
+        && runtime.moduleKey === moduleKey
+        && runtime.runId
+        && runtime.runState === 'running')
+      .forEach((runtime) => {
+        void stopPipelineRuntime({ flowKey, moduleKey, runId: runtime.runId!, flowLabel });
+      });
   },
 
-  selectTask: (flowKey, moduleKey, taskId) => {
+  stopRun: (flowKey, moduleKey, runId, flowLabel) => {
+    void stopPipelineRuntime({ flowKey, moduleKey, runId, flowLabel });
+  },
+
+  selectTask: (flowKey, moduleKey, runId, taskId) => {
     set((state) => {
-      const key = getPipelineRuntimeKey(flowKey, moduleKey);
+      const key = getPipelineRuntimeKey(flowKey, moduleKey, runId);
       const runtime = state.runtimes[key];
       if (!runtime) {
         return state;
@@ -316,15 +340,15 @@ const usePipelineRuntimeStore = create<PipelineRuntimeStore>((set) => ({
         },
       };
     });
-    void selectPipelineTask({ flowKey, moduleKey, taskId });
+    void selectPipelineTask({ flowKey, moduleKey, runId, taskId });
   },
 
-  stopTask: (flowKey, moduleKey, taskId, flowLabel) => {
-    void stopPipelineTask({ flowKey, moduleKey, taskId, flowLabel });
+  stopTask: (flowKey, moduleKey, runId, taskId, flowLabel) => {
+    void stopPipelineTask({ flowKey, moduleKey, runId, taskId, flowLabel });
   },
 
-  rerunTask: (flowKey, moduleKey, taskId) => {
-    void rerunPipelineTask({ flowKey, moduleKey, taskId });
+  rerunTask: (flowKey, moduleKey, runId, taskId) => {
+    void rerunPipelineTask({ flowKey, moduleKey, runId, taskId });
   },
 
   applyRuntime: (snapshot) => {

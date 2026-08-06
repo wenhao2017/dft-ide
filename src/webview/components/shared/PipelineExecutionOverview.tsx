@@ -297,8 +297,8 @@ function getAncestorIds(taskId: string, parentByChild: Map<string, string>): str
   return ancestors;
 }
 
-function getStepTerminalTitle(flowLabel: string, moduleKey: string, _task?: PipelineTask): string {
-  return `${flowLabel} / ${moduleKey}`;
+function getStepTerminalTitle(flowLabel: string, moduleKey: string, runId: string): string {
+  return `${flowLabel} / ${moduleKey} / ${runId}`;
 }
 
 function getTrackTaskId(run: PipelineRunOverview, parentByChild: Map<string, string>): string | undefined {
@@ -341,10 +341,9 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   const runtimes = usePipelineRuntimeStore(
     useShallow((state) => {
       const subset: Record<string, PipelineRuntimeSnapshot> = {};
-      selectedModuleKeys.forEach((moduleKey) => {
-        const key = getPipelineRuntimeKey(flowKey, moduleKey);
-        if (state.runtimes[key]) {
-          subset[key] = state.runtimes[key];
+      Object.entries(state.runtimes).forEach(([key, runtime]) => {
+        if (runtime.flowKey === flowKey && selectedModuleKeys.includes(runtime.moduleKey)) {
+          subset[key] = runtime;
         }
       });
       return subset;
@@ -352,6 +351,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   );
   const ensureRuntime = usePipelineRuntimeStore((state) => state.ensureRuntime);
   const selectRuntimeTask = usePipelineRuntimeStore((state) => state.selectTask);
+  const stopRun = usePipelineRuntimeStore((state) => state.stopRun);
   const [activeModuleKey, setActiveModuleKey] = useState<string>();
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(() => new Set());
@@ -372,30 +372,40 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   }, [defaultTasksByModule, flowKey, selectedModuleKeys, ensureRuntime, getFlowLabel]);
 
   const visibleRuns = useMemo(() => (
-    selectedModuleKeys.map((moduleKey) => {
-      const runtime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
+    selectedModuleKeys.flatMap((moduleKey) => {
+      const moduleRuntimes = Object.values(runtimes)
+        .filter((runtime) => runtime.moduleKey === moduleKey && runtime.runId)
+        .sort((left, right) => (right.startedAt ?? right.updatedAt) - (left.startedAt ?? left.updatedAt));
+      const draftRuntime = runtimes[getPipelineRuntimeKey(flowKey, moduleKey)];
+      const sourceRuntimes = moduleRuntimes.length > 0 ? moduleRuntimes : [draftRuntime];
       const defaultTasks = defaultTasksByModule?.[moduleKey];
-      const runtimeTasksById = new Map(runtime?.tasks.map((task) => [task.id, task]));
-      const effectiveRuntime = runtime?.runState === 'idle' && defaultTasks?.length
-        ? {
-          ...runtime,
-          tasks: defaultTasks.map((task) => ({
-            ...task,
-            status: 'pending' as const,
-            attempts: 1,
-            eco: runtimeTasksById.get(task.id)?.eco ?? makePendingEcoRuntime(flowKey, task),
-          })),
-          links: defaultTasks.slice(1).map((task, index) => ({
-            source: defaultTasks[index].id,
-            target: task.id,
-          })),
-        }
-        : runtime;
-      return summarizeRuntime(moduleKey, flowKey, getFlowLabel(moduleKey), effectiveRuntime);
+      return sourceRuntimes.map((runtime) => {
+        const runtimeTasksById = new Map(runtime?.tasks.map((task) => [task.id, task]));
+        const effectiveRuntime = runtime?.runState === 'idle' && defaultTasks?.length
+          ? {
+            ...runtime,
+            tasks: defaultTasks.map((task) => ({
+              ...task,
+              status: 'pending' as const,
+              attempts: 1,
+              eco: runtimeTasksById.get(task.id)?.eco ?? makePendingEcoRuntime(flowKey, task),
+            })),
+            links: defaultTasks.slice(1).map((task, index) => ({
+              source: defaultTasks[index].id,
+              target: task.id,
+            })),
+          }
+          : runtime;
+        return summarizeRuntime(moduleKey, flowKey, getFlowLabel(moduleKey), effectiveRuntime);
+      });
     })
   ), [defaultTasksByModule, flowKey, getFlowLabel, runtimes, selectedModuleKeys]);
 
-  const activeModuleData = visibleRuns.find((run) => run.moduleKey === activeModuleKey);
+  const getRunIdentity = useCallback(
+    (run: PipelineRunOverview) => run.runId ?? getPipelineRuntimeKey(flowKey, run.moduleKey),
+    [flowKey],
+  );
+  const activeModuleData = visibleRuns.find((run) => getRunIdentity(run) === activeModuleKey);
   const activeHierarchy = useMemo(() => {
     return activeModuleData ? getTaskHierarchy(activeModuleData) : undefined;
   }, [activeModuleData]);
@@ -452,28 +462,34 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   }, [currentPage, filteredRuns.length, pageSize]);
 
   useEffect(() => {
-    if (!activeModuleKey || filteredRuns.some((run) => run.moduleKey === activeModuleKey)) return;
-    setActiveModuleKey(filteredRuns[0]?.moduleKey);
-  }, [activeModuleKey, filteredRuns]);
+    if (!activeModuleKey || filteredRuns.some((run) => getRunIdentity(run) === activeModuleKey)) return;
+    setActiveModuleKey(filteredRuns[0] ? getRunIdentity(filteredRuns[0]) : undefined);
+  }, [activeModuleKey, filteredRuns, getRunIdentity]);
 
 
 
-  const activateModule = useCallback((moduleKey: string) => {
-    setActiveModuleKey(moduleKey);
-    onActiveModuleChange?.(moduleKey);
-  }, [onActiveModuleChange]);
+  const activateModule = useCallback((run: PipelineRunOverview) => {
+    setActiveModuleKey(getRunIdentity(run));
+    onActiveModuleChange?.(run.moduleKey);
+  }, [getRunIdentity, onActiveModuleChange]);
 
   useEffect(() => {
     if (externalActiveModuleKey) {
-      setActiveModuleKey(externalActiveModuleKey);
-      const selectedIndex = selectedModuleKeys.indexOf(externalActiveModuleKey);
+      const matchingRun = visibleRuns.find((run) => run.moduleKey === externalActiveModuleKey);
+      const activeMatchesExternal = visibleRuns.some(
+        (run) => getRunIdentity(run) === activeModuleKey && run.moduleKey === externalActiveModuleKey,
+      );
+      if (matchingRun && !activeMatchesExternal) {
+        setActiveModuleKey(getRunIdentity(matchingRun));
+      }
+      const selectedIndex = visibleRuns.findIndex((run) => run.moduleKey === externalActiveModuleKey);
       if (selectedIndex >= 0) {
         setCurrentPage(Math.floor(selectedIndex / pageSize) + 1);
       }
-    } else if (selectedModuleKeys.length && !activeModuleKey) {
-      setActiveModuleKey(selectedModuleKeys[0]);
+    } else if (visibleRuns.length && !activeModuleKey) {
+      setActiveModuleKey(getRunIdentity(visibleRuns[0]));
     }
-  }, [activeModuleKey, externalActiveModuleKey, pageSize, selectedModuleKeys]);
+  }, [activeModuleKey, externalActiveModuleKey, getRunIdentity, pageSize, visibleRuns]);
 
   useEffect(() => {
     visibleRuns.forEach((run) => {
@@ -481,25 +497,26 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
         return;
       }
       setPeakMetrics((prev) => {
-        const current = prev[run.moduleKey] || { maxCpu: 0, maxMem: 0 };
+        const runKey = getRunIdentity(run);
+        const current = prev[runKey] || { maxCpu: 0, maxMem: 0 };
         if (run.cpu <= current.maxCpu && run.mem <= current.maxMem) {
           return prev;
         }
         return {
           ...prev,
-          [run.moduleKey]: {
+          [runKey]: {
             maxCpu: Math.max(current.maxCpu, run.cpu),
             maxMem: Math.max(current.maxMem, run.mem),
           },
         };
       });
     });
-  }, [visibleRuns]);
+  }, [getRunIdentity, visibleRuns]);
 
   const selectStep = useCallback((run: PipelineRunOverview, taskId: string) => {
     const hierarchy = getTaskHierarchy(run);
     const ancestorIds = getAncestorIds(taskId, hierarchy.parentByChild);
-    activateModule(run.moduleKey);
+    activateModule(run);
     setSelectedTaskId(taskId);
     setExpandedTaskIds((prev) => {
       const next = new Set(prev);
@@ -509,15 +526,17 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
       }
       return next;
     });
-    selectRuntimeTask(flowKey, run.moduleKey, taskId);
+    if (run.runId) {
+      selectRuntimeTask(flowKey, run.moduleKey, run.runId, taskId);
+    }
     if (run.runId) {
       revealExecutionHistory(flowKey, run.runId);
     }
 
     const task = run.tasks.find((t) => t.id === taskId);
-    if (task && task.status !== 'pending' && task.status !== 'skipped') {
+    if (task && run.runId && task.status !== 'pending' && task.status !== 'skipped') {
       void openExecutionTerminal({
-        title: getStepTerminalTitle(flowLabel, run.moduleKey, task),
+        title: getStepTerminalTitle(flowLabel, run.moduleKey, run.runId),
         cwd: moduleWorkDirs?.[run.moduleKey],
       });
     }
@@ -539,8 +558,8 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     });
   }, []);
 
-  const toggleEcoExpanded = useCallback((moduleKey: string, taskId: string) => {
-    const key = `${moduleKey}:${taskId}`;
+  const toggleEcoExpanded = useCallback((runKey: string, taskId: string) => {
+    const key = `${runKey}:${taskId}`;
     setExpandedEcoTaskKeys((prev) => {
       const next = new Set(prev);
       if (next.has(key)) {
@@ -593,10 +612,11 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   }, [activeHierarchy, activeModuleData]);
 
   const runEcoHook = useCallback(async (task: PipelineTask, phase: PipelineEcoPhase) => {
-    if (!activeModuleData) return;
+    if (!activeModuleData?.runId) return;
     const result = await runPipelineTaskEcoHook({
       flowKey,
       moduleKey: activeModuleData.moduleKey,
+      runId: activeModuleData.runId,
       taskId: task.id,
       phase,
       cwd: moduleWorkDirs?.[activeModuleData.moduleKey],
@@ -608,10 +628,11 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   }, [activeModuleData, flowKey, moduleWorkDirs]);
 
   const stopEcoHook = useCallback(async (task: PipelineTask, phase: PipelineEcoPhase) => {
-    if (!activeModuleData) return;
+    if (!activeModuleData?.runId) return;
     const result = await stopPipelineTaskEcoHook({
       flowKey,
       moduleKey: activeModuleData.moduleKey,
+      runId: activeModuleData.runId,
       taskId: task.id,
       phase,
     });
@@ -627,7 +648,8 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
     const children = activeHierarchy.childrenByParent.get(task.id) ?? [];
     const hasChildren = children.length > 0;
     const expanded = expandedTaskIds.has(task.id);
-    const ecoExpanded = expandedEcoTaskKeys.has(`${activeModuleData.moduleKey}:${task.id}`);
+    const activeRunKey = getRunIdentity(activeModuleData);
+    const ecoExpanded = expandedEcoTaskKeys.has(`${activeRunKey}:${task.id}`);
     const isSelected = selectedTaskId === task.id;
     const isRunning = task.status === 'running';
     const isChild = depth > 0;
@@ -710,7 +732,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
                     : <CaretRightOutlined style={{ fontSize: 10 }} />}
                   onClick={(event) => {
                     event.stopPropagation();
-                    toggleEcoExpanded(activeModuleData.moduleKey, task.id);
+                    toggleEcoExpanded(activeRunKey, task.id);
                   }}
                   style={{
                     color: isSelected ? themeStyles.selectedFg : themeStyles.textSecondary,
@@ -1021,8 +1043,9 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
         <List
           size="small"
           dataSource={pagedRuns}
+          rowKey={(item) => getRunIdentity(item.run)}
           renderItem={({ run, counterText, trackTasks }) => {
-            const isSelected = run.moduleKey === activeModuleKey;
+            const isSelected = getRunIdentity(run) === activeModuleKey;
             const statusColor = run.runState === 'running'
               ? themeStyles.accent
               : run.runState === 'completed'
@@ -1035,7 +1058,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
 
             return (
               <List.Item
-                onClick={() => activateModule(run.moduleKey)}
+                onClick={() => activateModule(run)}
                 style={{
                   cursor: 'pointer',
                   padding: 0,
@@ -1064,20 +1087,41 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
                         {run.moduleKey}
                       </span>
                     </Space>
-                    <Tag
-                      style={{
-                        margin: 0,
-                        color: themeStyles.accentText,
-                        borderColor: themeStyles.borderLight,
-                        background: themeStyles.metricBg,
-                        fontFamily: 'monospace',
-                        fontWeight: 700,
-                        fontSize: 10,
-                        padding: '0 4px',
-                      }}
-                    >
-                      {counterText}
-                    </Tag>
+                    <Space size={4}>
+                      {run.runId && (
+                        <Tag style={{ margin: 0, fontFamily: 'monospace', fontSize: 10 }}>
+                          {run.runId.slice(-8)}
+                        </Tag>
+                      )}
+                      <Tag
+                        style={{
+                          margin: 0,
+                          color: themeStyles.accentText,
+                          borderColor: themeStyles.borderLight,
+                          background: themeStyles.metricBg,
+                          fontFamily: 'monospace',
+                          fontWeight: 700,
+                          fontSize: 10,
+                          padding: '0 4px',
+                        }}
+                      >
+                        {counterText}
+                      </Tag>
+                      {run.runId && run.runState === 'running' && (
+                        <Tooltip title="停止此实例">
+                          <Button
+                            danger
+                            type="text"
+                            size="small"
+                            icon={<PauseCircleOutlined />}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              stopRun(flowKey, run.moduleKey, run.runId!, run.flowLabel);
+                            }}
+                          />
+                        </Tooltip>
+                      )}
+                    </Space>
                   </div>
 
                   <div style={{ padding: '5px 10px 7px', borderTop: `1px solid ${themeStyles.borderLight}` }}>
@@ -1183,8 +1227,8 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
 
             {/* Module Metrics (CPU, MEM, Start Time, Run Time) displayed in the middle column header */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', background: 'var(--vscode-list-hoverBackground, rgba(127,127,127,0.04))', padding: '6px 10px', borderRadius: 6, border: `1px solid ${themeStyles.borderLight}`, fontSize: 12, marginBottom: 10 }}>
-              <div><span style={{ color: themeStyles.textSecondary }}>CPU:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{(peakMetrics[activeModuleData.moduleKey]?.maxCpu || activeModuleData.cpu)}%</span></div>
-              <div><span style={{ color: themeStyles.textSecondary }}>内存:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{(peakMetrics[activeModuleData.moduleKey]?.maxMem || activeModuleData.mem).toFixed(1)}GB</span></div>
+              <div><span style={{ color: themeStyles.textSecondary }}>CPU:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{(peakMetrics[getRunIdentity(activeModuleData)]?.maxCpu || activeModuleData.cpu)}%</span></div>
+              <div><span style={{ color: themeStyles.textSecondary }}>内存:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{(peakMetrics[getRunIdentity(activeModuleData)]?.maxMem || activeModuleData.mem).toFixed(1)}GB</span></div>
               <div><span style={{ color: themeStyles.textSecondary }}>开始:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{formatStartTime(activeModuleData.startedAt)}</span></div>
               <div><span style={{ color: themeStyles.textSecondary }}>用时:</span> <span style={{ fontFamily: 'monospace', color: themeStyles.textPrimary, fontWeight: 700 }}>{getModuleRuntime(activeModuleData)}</span></div>
             </div>

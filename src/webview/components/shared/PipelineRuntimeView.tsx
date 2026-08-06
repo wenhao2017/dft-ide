@@ -243,25 +243,27 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   }, [stopAll, stopToken]);
 
   const stopTask = useCallback((id: string) => {
-    if (readOnly) {
+    if (readOnly || !runtime.runId) {
       return;
     }
-    stopRuntimeTask(activeFlowKey, activeModuleKey, id, flowLabel);
-  }, [activeFlowKey, activeModuleKey, readOnly, stopRuntimeTask]);
+    stopRuntimeTask(activeFlowKey, activeModuleKey, runtime.runId, id, flowLabel);
+  }, [activeFlowKey, activeModuleKey, flowLabel, readOnly, runtime.runId, stopRuntimeTask]);
 
   const rerunTask = useCallback((id: string) => {
-    if (readOnly) {
+    if (readOnly || !runtime.runId) {
       return;
     }
-    rerunRuntimeTask(activeFlowKey, activeModuleKey, id);
-  }, [activeFlowKey, activeModuleKey, readOnly, rerunRuntimeTask]);
+    rerunRuntimeTask(activeFlowKey, activeModuleKey, runtime.runId, id);
+  }, [activeFlowKey, activeModuleKey, readOnly, rerunRuntimeTask, runtime.runId]);
 
   const selectTask = useCallback((id: string) => {
     if (snapshot) {
       return;
     }
-    selectRuntimeTask(activeFlowKey, activeModuleKey, id);
-  }, [activeFlowKey, activeModuleKey, selectRuntimeTask, snapshot]);
+    if (runtime.runId) {
+      selectRuntimeTask(activeFlowKey, activeModuleKey, runtime.runId, id);
+    }
+  }, [activeFlowKey, activeModuleKey, runtime.runId, selectRuntimeTask, snapshot]);
 
   const handlers = useMemo(
     () => ({ onSelect: selectTask, onRerun: rerunTask, onStop: stopTask }),
@@ -354,7 +356,7 @@ const PipelineRuntimeView: React.FC<PipelineRuntimeViewProps> = ({
   const selectedTask = taskMeta.selectedTask;
   const failedCount = taskMeta.failedCount;
   const runningCount = taskMeta.runningCount;
-  const canStart = !readOnly && runtime.runState !== 'running';
+  const canStart = !readOnly;
   const canStopAll = !readOnly && runtime.runState === 'running' && taskMeta.hasStoppableTask;
 
   if (!visible) {

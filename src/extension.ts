@@ -665,10 +665,18 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           const flowKey = msg.flowKey;
           const moduleKey = typeof msg.moduleKey === 'string' ? msg.moduleKey : '';
           const flowLabel = typeof msg.flowLabel === 'string' ? msg.flowLabel : moduleKey;
+          const runId = typeof msg.runId === 'string' ? msg.runId : '';
           const taskId = typeof msg.taskId === 'string' ? msg.taskId : '';
 
           if (!isPipelineFlowKey(flowKey) || !moduleKey) {
             throw new Error('Invalid pipeline runtime payload');
+          }
+          if (
+            msg.command !== 'ensurePipelineRuntime'
+            && msg.command !== 'startPipelineRuntime'
+            && !runId
+          ) {
+            throw new Error('Pipeline runId is required');
           }
 
           let snapshot;
@@ -714,15 +722,15 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
               projectCshrcPath,
             );
             const runParameters = msg.runParameters;
-            pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel, selectedTaskIds, cwd, envConfig, taskConfig, selectedTasks, runParameters);
+            snapshot = pipelineRuntimeService.startRuntime(flowKey, moduleKey, flowLabel, selectedTaskIds, cwd, envConfig, taskConfig, selectedTasks, runParameters);
           } else if (msg.command === 'stopPipelineRuntime') {
-            pipelineRuntimeService.stopRuntime(flowKey, moduleKey, flowLabel);
+            pipelineRuntimeService.stopRuntime(flowKey, moduleKey, runId);
           } else if (msg.command === 'selectPipelineTask') {
-            pipelineRuntimeService.selectTask(flowKey, moduleKey, taskId);
+            pipelineRuntimeService.selectTask(flowKey, moduleKey, runId, taskId);
           } else if (msg.command === 'stopPipelineTask') {
-            pipelineRuntimeService.stopTask(flowKey, moduleKey, taskId, flowLabel);
+            pipelineRuntimeService.stopTask(flowKey, moduleKey, runId, taskId);
           } else if (msg.command === 'rerunPipelineTask') {
-            pipelineRuntimeService.rerunTask(flowKey, moduleKey, taskId);
+            pipelineRuntimeService.rerunTask(flowKey, moduleKey, runId, taskId);
           } else if (msg.command === 'runPipelineTaskEcoHook') {
             const phase = msg.phase === 'before' || msg.phase === 'after' ? msg.phase : undefined;
             if (!taskId || !phase) {
@@ -749,6 +757,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
             snapshot = pipelineRuntimeService.runTaskEcoHook(
               flowKey,
               moduleKey,
+              runId,
               taskId,
               phase,
               envConfig,
@@ -758,7 +767,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
               stepStatus,
             );
           } else if (msg.command === 'stopPipelineTaskEcoHook') {
-            pipelineRuntimeService.stopTaskEcoHook(flowKey, moduleKey);
+            pipelineRuntimeService.stopTaskEcoHook(flowKey, moduleKey, runId);
           }
 
           if (requestId) {

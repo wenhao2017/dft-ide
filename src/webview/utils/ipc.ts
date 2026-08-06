@@ -1034,14 +1034,15 @@ export async function startPipelineRuntime(options: {
   }>
   cwd?: string
   runParameters?: unknown
-}): Promise<{ success: boolean; error?: string }> {
+}): Promise<{ success: boolean; snapshot?: unknown; error?: string }> {
   const res = await ipcRequest('startPipelineRuntime', options)
-  return res as { success: boolean; error?: string }
+  return res as { success: boolean; snapshot?: unknown; error?: string }
 }
 
 export async function stopPipelineRuntime(options: {
   flowKey: 'hibist' | 'sailor' | 'verification'
   moduleKey: string
+  runId: string
   flowLabel: string
 }): Promise<{ success: boolean; error?: string }> {
   const res = await ipcRequest('stopPipelineRuntime', options)
@@ -1051,6 +1052,7 @@ export async function stopPipelineRuntime(options: {
 export async function selectPipelineTask(options: {
   flowKey: 'hibist' | 'sailor' | 'verification'
   moduleKey: string
+  runId: string
   taskId: string
 }): Promise<{ success: boolean; error?: string }> {
   const res = await ipcRequest('selectPipelineTask', options)
@@ -1060,6 +1062,7 @@ export async function selectPipelineTask(options: {
 export async function stopPipelineTask(options: {
   flowKey: 'hibist' | 'sailor' | 'verification'
   moduleKey: string
+  runId: string
   taskId: string
   flowLabel: string
 }): Promise<{ success: boolean; error?: string }> {
@@ -1070,6 +1073,7 @@ export async function stopPipelineTask(options: {
 export async function rerunPipelineTask(options: {
   flowKey: 'hibist' | 'sailor' | 'verification'
   moduleKey: string
+  runId: string
   taskId: string
 }): Promise<{ success: boolean; error?: string }> {
   const res = await ipcRequest('rerunPipelineTask', options)
@@ -1079,6 +1083,7 @@ export async function rerunPipelineTask(options: {
 export async function runPipelineTaskEcoHook(options: {
   flowKey: 'hibist' | 'sailor' | 'verification'
   moduleKey: string
+  runId: string
   taskId: string
   phase: 'before' | 'after'
   cwd?: string
@@ -1091,6 +1096,7 @@ export async function runPipelineTaskEcoHook(options: {
 export async function stopPipelineTaskEcoHook(options: {
   flowKey: 'hibist' | 'sailor' | 'verification'
   moduleKey: string
+  runId: string
   taskId: string
   phase: 'before' | 'after'
 }): Promise<{ success: boolean; error?: string }> {

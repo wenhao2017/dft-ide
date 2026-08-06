@@ -114,8 +114,8 @@ const timers = new Map<string, ReturnType<typeof setTimeout>[]>();
 const nowText = () => formatTime(new Date());
 const nowStamp = () => Date.now();
 
-function getPipelineTerminalTitle(flowLabel: string, moduleKey: string): string {
-  return `${flowLabel} / ${moduleKey}`;
+function getPipelineTerminalTitle(flowLabel: string, moduleKey: string, runId: string): string {
+  return `${flowLabel} / ${moduleKey} / ${runId}`;
 }
 
 const PIPELINE_PYTHON_MODULE = 'python/3.10.6';
@@ -479,6 +479,7 @@ function buildStepCommands(
       flowKey,
       ...(stage ? [stage] : []),
       moduleKey,
+      runId,
     );
     fs.mkdirSync(targetDir, { recursive: true });
     const targetFile = path.join(targetDir, task.name);
@@ -494,8 +495,8 @@ function buildStepCommands(
   return commands;
 }
 
-export function getPipelineRuntimeKey(flowKey: PipelineFlowKey, moduleKey: string): string {
-  return `${flowKey}:${moduleKey}`;
+export function getPipelineRuntimeKey(flowKey: PipelineFlowKey, moduleKey: string, runId?: string): string {
+  return runId ?? `${flowKey}:${moduleKey}:draft`;
 }
 
 export function isPipelineFlowKey(value: unknown): value is PipelineFlowKey {
@@ -622,9 +623,13 @@ function getYamlPath(flowKey: PipelineFlowKey): string | undefined {
       return yamlPath;
     }
   }
-  const root = path.resolve(__dirname, '../');
-  if (!root) return undefined;
-  return path.join(root, 'pipelines', getYamlFileName(flowKey));
+  const fileName = getYamlFileName(flowKey);
+  const candidates = [
+    path.resolve(__dirname, '../pipelines', fileName),
+    path.resolve(__dirname, '../../pipelines', fileName),
+    path.resolve(process.cwd(), 'pipelines', fileName),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
 }
 
 function getDefaultYamlContent(flowKey: PipelineFlowKey): string {
@@ -783,14 +788,9 @@ export class PipelineRuntimeService {
     selectedTasks?: Array<Pick<PipelineTask, 'id' | 'name' | 'command' | 'description'>>,
     runParameters?: unknown,
   ): PipelineRuntimeSnapshot {
-    const key = getPipelineRuntimeKey(flowKey, moduleKey);
     const config = pipelineFlowConfigs[flowKey];
-    const runId = `exec_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-
-    const existing = this.runtimes.get(key);
-    if (existing?.runState === 'running') {
-      return existing;
-    }
+    const runId = `exec_${Date.now()}_${Math.floor(Math.random() * 1_000_000_000)}`;
+    const key = getPipelineRuntimeKey(flowKey, moduleKey, runId);
     this.runtimeContexts.set(key, { cwd, envConfig, taskConfig, runParameters });
 
     const projectRoot = resolveProjectRoot();
@@ -896,7 +896,7 @@ export class PipelineRuntimeService {
         moduleKey,
         flowLabel,
         logPrefix: config.logPrefix,
-        terminalTitle: getPipelineTerminalTitle(flowLabel, moduleKey),
+        terminalTitle: getPipelineTerminalTitle(flowLabel, moduleKey, runId),
         tasks: selectedTasksToRun,
         flowStepNames: initialTasks.map((task) => task.name || task.id),
         executionPlan,
@@ -936,26 +936,24 @@ export class PipelineRuntimeService {
     return runtime;
   }
 
-  stopRuntime(flowKey: PipelineFlowKey, moduleKey: string, flowLabel: string): void {
-    this.ensureRuntime(flowKey, moduleKey, flowLabel);
-
-    const key = getPipelineRuntimeKey(flowKey, moduleKey);
+  stopRuntime(flowKey: PipelineFlowKey, moduleKey: string, runId: string): void {
+    const key = getPipelineRuntimeKey(flowKey, moduleKey, runId);
     const config = pipelineFlowConfigs[flowKey];
-    this.markRuntimeStopped(key, config.logPrefix, '已触发“停止全部”。', true);
+    this.markRuntimeStopped(key, config.logPrefix, '已停止该流水线实例。', true);
   }
 
-  selectTask(flowKey: PipelineFlowKey, moduleKey: string, taskId: string): void {
-    const key = getPipelineRuntimeKey(flowKey, moduleKey);
+  selectTask(flowKey: PipelineFlowKey, moduleKey: string, runId: string, taskId: string): void {
+    const key = getPipelineRuntimeKey(flowKey, moduleKey, runId);
     this.updateRuntime(key, (runtime) => ({ ...runtime, selectedTaskId: taskId }));
   }
 
-  stopTask(flowKey: PipelineFlowKey, moduleKey: string, taskId: string, flowLabel: string): void {
-    const key = getPipelineRuntimeKey(flowKey, moduleKey);
+  stopTask(flowKey: PipelineFlowKey, moduleKey: string, runId: string, taskId: string): void {
+    const key = getPipelineRuntimeKey(flowKey, moduleKey, runId);
     this.markRuntimeStopped(key, pipelineFlowConfigs[flowKey].logPrefix, `任务 ${taskId} 已由用户手动停止。`, true);
   }
 
-  rerunTask(flowKey: PipelineFlowKey, moduleKey: string, taskId: string): void {
-    const key = getPipelineRuntimeKey(flowKey, moduleKey);
+  rerunTask(flowKey: PipelineFlowKey, moduleKey: string, runId: string, taskId: string): void {
+    const key = getPipelineRuntimeKey(flowKey, moduleKey, runId);
     const config = pipelineFlowConfigs[flowKey];
     const runtime = this.runtimes.get(key);
     const task = runtime?.tasks.find((t) => t.id === taskId);
@@ -981,7 +979,7 @@ export class PipelineRuntimeService {
         runtime.tasks.map((runtimeTask) => runtimeTask.name || runtimeTask.id),
       );
       this.options.openTerminal(
-        getPipelineTerminalTitle(runtime.flowLabel, moduleKey),
+        getPipelineTerminalTitle(runtime.flowLabel, moduleKey, runId),
         commands,
         true,
         context?.cwd,
@@ -1001,6 +999,7 @@ export class PipelineRuntimeService {
   runTaskEcoHook(
     flowKey: PipelineFlowKey,
     moduleKey: string,
+    runtimeRunId: string,
     taskId: string,
     phase: PipelineEcoPhase,
     envConfig?: Record<string, unknown> | null,
@@ -1009,7 +1008,7 @@ export class PipelineRuntimeService {
     cwd?: string,
     stepStatus = 0,
   ): PipelineRuntimeSnapshot {
-    const key = getPipelineRuntimeKey(flowKey, moduleKey);
+    const key = getPipelineRuntimeKey(flowKey, moduleKey, runtimeRunId);
     const previousContext = this.runtimeContexts.get(key);
     envConfig ??= previousContext?.envConfig;
     taskConfig ??= previousContext?.taskConfig;
@@ -1037,7 +1036,7 @@ export class PipelineRuntimeService {
     }
 
     const runId = `eco_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-    const terminalTitle = `${runtime.flowLabel} / ${moduleKey} / ECO`;
+    const terminalTitle = `${runtime.flowLabel} / ${moduleKey} / ${runtimeRunId} / ECO`;
     const commands = this.buildEcoHookCommands(
       runId,
       task,
@@ -1090,8 +1089,8 @@ export class PipelineRuntimeService {
     return this.runtimes.get(key)!;
   }
 
-  stopTaskEcoHook(flowKey: PipelineFlowKey, moduleKey: string): void {
-    const key = getPipelineRuntimeKey(flowKey, moduleKey);
+  stopTaskEcoHook(flowKey: PipelineFlowKey, moduleKey: string, runId: string): void {
+    const key = getPipelineRuntimeKey(flowKey, moduleKey, runId);
     const session = this.ecoExecutionSessions.get(key);
     if (!session) return;
     stopExecutionTerminal(session.terminalTitle);
@@ -1549,7 +1548,10 @@ export class PipelineRuntimeService {
 
     clearRuntimeTimers(key);
     if (sendInterrupt) {
-      stopExecutionTerminal(session?.terminalTitle ?? getPipelineTerminalTitle(runtime.flowLabel, runtime.moduleKey));
+      stopExecutionTerminal(
+        session?.terminalTitle
+          ?? getPipelineTerminalTitle(runtime.flowLabel, runtime.moduleKey, runtime.runId ?? key),
+      );
     }
     this.disposeExecutionSession(key);
 

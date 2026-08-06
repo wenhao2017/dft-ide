@@ -255,8 +255,29 @@ export default function ModeList({
                     flexShrink: 0,
                   }}
                 >
+                  {running && (
+                    <Tooltip title="启动新实例">
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<CaretRightOutlined />}
+                        onClick={() => {
+                          onRun(item)
+                        }}
+                        style={{
+                          width: 26,
+                          height: 26,
+                          padding: 0,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: accent,
+                        }}
+                      />
+                    </Tooltip>
+                  )}
                   {running ? (
-                    <Tooltip title="停止">
+                    <Tooltip title="停止全部实例">
                       <Button
                         type="text"
                         size="small"
