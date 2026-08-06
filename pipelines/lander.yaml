@@ -1,38 +1,455 @@
-# HiSalad Lander 仿真验证 流水线配置文件
-# 修改此文件可以自定义流水线的执行步骤和执行命令
+- id: create_project
+  name: create_project
+  command: "run_flow_lander --steps create_project"
+  description: Run lander flow create_project
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
 
-- id: prepare_workspace
-  name: prepare_workspace
-  command: "run_flow_lander prepare_workspace --dir ./verify_run"
-  description: 准备 verification workspace
+- id: gen_design_info
+  name: gen_design_info
+  command: "run_flow_lander --steps gen_design_info"
+  description: Run lander flow gen_design_info
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
 
-- id: load_config
-  name: load_config
-  command: "run_flow_lander load_config --file lander_verify.cfg"
-  description: 加载 lander 配置
+- id: gen_plan_env
+  name: gen_plan_env
+  command: "run_flow_lander --steps gen_plan_env"
+  description: Run lander flow gen_plan_env
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
 
-- id: check_env
-  name: check_env
-  command: "run_flow_lander check_env --tools"
-  description: 检查仿真环境、filelist 和工具版本
+- id: release_plan
+  name: release_plan
+  command: "run_flow_lander --steps release_plan"
+  description: Run lander flow release_plan
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
 
-- id: submit_mode
-  name: submit_mode
-  command: "run_flow_lander submit_mode --mode scan_test"
-  description: 提交仿真 mode 任务
+- id: gen_atpg_setting
+  name: gen_atpg_setting
+  command: "run_flow_lander --steps gen_atpg_setting"
+  description: Run lander flow gen_atpg_setting
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
 
-- id: collect_result
-  name: collect_result
-  command: "run_flow_lander collect_result --dir ./verify_run"
-  description: 收集仿真结果
+- id: gen_pdl_env
+  name: gen_pdl_env
+  command: "run_flow_lander --steps gen_pdl_env"
+  description: Run lander flow gen_pdl_env
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
 
-- id: parse_report
-  name: parse_report
-  command: "run_flow_lander parse_report --out report.json"
-  description: 解析 pass / fail / error 报告
+- id: gen_atpg_env_pre
+  name: gen_atpg_env_pre
+  command: "run_flow_lander --steps gen_atpg_env_pre"
+  description: Run lander flow gen_atpg_env_pre
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
 
-- id: publish_dashboard
-  name: publish_dashboard
-  command: "run_flow_lander publish_dashboard --server ide-board"
-  description: 发布结果到 IDE 看板
+- id: gen_atpg_env
+  name: gen_atpg_env
+  command: "run_flow_lander --steps gen_atpg_env"
+  description: Run lander flow gen_atpg_env
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
 
+- id: run_atpg
+  name: run_atpg
+  command: "run_flow_lander --steps run_atpg"
+  description: Run lander flow run_atpg
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: upload_atpg_database_pre
+  name: upload_atpg_database_pre
+  command: "run_flow_lander --steps upload_atpg_database_pre"
+  description: Run lander flow upload_atpg_database_pre
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: upload_atpg_database
+  name: upload_atpg_database
+  command: "run_flow_lander --steps upload_atpg_database"
+  description: Run lander flow upload_atpg_database
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_odc_env
+  name: gen_odc_env
+  command: "run_flow_lander --steps gen_odc_env"
+  description: Run lander flow gen_odc_env
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_odc_pattern
+  name: gen_odc_pattern
+  command: "run_flow_lander --steps gen_odc_pattern"
+  description: Run lander flow gen_odc_pattern
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: upload_odc_database_pre
+  name: upload_odc_database_pre
+  command: "run_flow_lander --steps upload_odc_database_pre"
+  description: Run lander flow upload_odc_database_pre
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: upload_odc_database
+  name: upload_odc_database
+  command: "run_flow_lander --steps upload_odc_database"
+  description: Run lander flow upload_odc_database
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: get_dftlib_info
+  name: get_dftlib_info
+  command: "run_flow_lander --steps get_dftlib_info"
+  description: Run lander flow get_dftlib_info
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_dftlib_rtl
+  name: gen_dftlib_rtl
+  command: "run_flow_lander --steps gen_dftlib_rtl"
+  description: Run lander flow gen_dftlib_rtl
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_dftlib_qualib
+  name: run_dftlib_qualib
+  command: "run_flow_lander --steps run_dftlib_qualib"
+  description: Run lander flow run_dftlib_qualib
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_dftlib_qa_rpt
+  name: gen_dftlib_qa_rpt
+  command: "run_flow_lander --steps gen_dftlib_qa_rpt"
+  description: Run lander flow gen_dftlib_qa_rpt
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_dftlib_syn
+  name: run_dftlib_syn
+  command: "run_flow_lander --steps run_dftlib_syn"
+  description: Run lander flow run_dftlib_syn
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_dftlib_scan
+  name: run_dftlib_scan
+  command: "run_flow_lander --steps run_dftlib_scan"
+  description: Run lander flow run_dftlib_scan
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_dftlib_atpg
+  name: run_dftlib_atpg
+  command: "run_flow_lander --steps run_dftlib_atpg"
+  description: Run lander flow run_dftlib_atpg
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_dftlib_sdf
+  name: gen_dftlib_sdf
+  command: "run_flow_lander --steps gen_dftlib_sdf"
+  description: Run lander flow gen_dftlib_sdf
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_dftlib_sim
+  name: run_dftlib_sim
+  command: "run_flow_lander --steps run_dftlib_sim"
+  description: Run lander flow run_dftlib_sim
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_check_tb
+  name: gen_check_tb
+  command: "run_flow_lander --steps gen_check_tb"
+  description: Run lander flow gen_check_tb
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: upload_libcheck_data
+  name: upload_libcheck_data
+  command: "run_flow_lander --steps upload_libcheck_data"
+  description: Run lander flow upload_libcheck_data
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: modify_sdf
+  name: modify_sdf
+  command: "run_flow_lander --steps modify_sdf"
+  description: Run lander flow modify_sdf
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_3d_merge_env
+  name: gen_3d_merge_env
+  command: "run_flow_lander --steps gen_3d_merge_env"
+  description: Run lander flow gen_3d_merge_env
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: analysis_3d_netlist
+  name: analysis_3d_netlist
+  command: "run_flow_lander --steps analysis_3d_netlist"
+  description: Run lander flow analysis_3d_netlist
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: complete_check
+  name: complete_check
+  command: "run_flow_lander --steps complete_check"
+  description: Run lander flow complete_check
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_3d_merge
+  name: run_3d_merge
+  command: "run_flow_lander --steps run_3d_merge"
+  description: Run lander flow run_3d_merge
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_fml_env
+  name: gen_fml_env
+  command: "run_flow_lander --steps gen_fml_env"
+  description: Run lander flow gen_fml_env
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_fml
+  name: run_fml
+  command: "run_flow_lander --steps run_fml"
+  description: Run lander flow run_fml
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: upload_fml_database_pre
+  name: upload_fml_database_pre
+  command: "run_flow_lander --steps upload_fml_database_pre"
+  description: Run lander flow upload_fml_database_pre
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: upload_fml_database
+  name: upload_fml_database
+  command: "run_flow_lander --steps upload_fml_database"
+  description: Run lander flow upload_fml_database
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_prune_env
+  name: gen_prune_env
+  command: "run_flow_lander --steps gen_prune_env"
+  description: Run lander flow gen_prune_env
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_prune
+  name: run_prune
+  command: "run_flow_lander --steps run_prune"
+  description: Run lander flow run_prune
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: upload_prune_database_pre
+  name: upload_prune_database_pre
+  command: "run_flow_lander --steps upload_prune_database_pre"
+  description: Run lander flow upload_prune_database_pre
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: upload_prune_database
+  name: upload_prune_database
+  command: "run_flow_lander --steps upload_prune_database"
+  description: Run lander flow upload_prune_database
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_dftm_excel
+  name: gen_dftm_excel
+  command: "run_flow_lander --steps gen_dftm_excel"
+  description: Run lander flow gen_dftm_excel
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_mbist_setting
+  name: gen_mbist_setting
+  command: "run_flow_lander --steps gen_mbist_setting"
+  description: Run lander flow gen_mbist_setting
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_run_env
+  name: gen_run_env
+  command: "run_flow_lander --steps gen_run_env"
+  description: Run lander flow gen_run_env
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_ip_gen
+  name: run_ip_gen
+  command: "run_flow_lander --steps run_ip_gen"
+  description: Run lander flow run_ip_gen
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_jtag_gen
+  name: run_jtag_gen
+  command: "run_flow_lander --steps run_jtag_gen"
+  description: Run lander flow run_jtag_gen
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_mbist_gen
+  name: run_mbist_gen
+  command: "run_flow_lander --steps run_mbist_gen"
+  description: Run lander flow run_mbist_gen
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_crg_env
+  name: gen_crg_env
+  command: "run_flow_lander --steps gen_crg_env"
+  description: Run lander flow gen_crg_env
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_crg_gen
+  name: run_crg_gen
+  command: "run_flow_lander --steps run_crg_gen"
+  description: Run lander flow run_crg_gen
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: sed_3d_tb
+  name: sed_3d_tb
+  command: "run_flow_lander --steps sed_3d_tb"
+  description: Run lander flow sed_3d_tb
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_all_scan_env
+  name: gen_all_scan_env
+  command: "run_flow_lander --steps gen_all_scan_env"
+  description: Run lander flow gen_all_scan_env
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_all_scan
+  name: run_all_scan
+  command: "run_flow_lander --steps run_all_scan"
+  description: Run lander flow run_all_scan
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_sim_env
+  name: gen_sim_env
+  command: "run_flow_lander --steps gen_sim_env"
+  description: Run lander flow gen_sim_env
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_sim
+  name: run_sim
+  command: "run_flow_lander --steps run_sim"
+  description: Run lander flow run_sim
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: upload_simu_database_pre
+  name: upload_simu_database_pre
+  command: "run_flow_lander --steps upload_simu_database_pre"
+  description: Run lander flow upload_simu_database_pre
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: upload_simu_database
+  name: upload_simu_database
+  command: "run_flow_lander --steps upload_simu_database"
+  description: Run lander flow upload_simu_database
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_report
+  name: gen_report
+  command: "run_flow_lander --steps gen_report"
+  description: Run lander flow gen_report
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_wgl_check
+  name: run_wgl_check
+  command: "run_flow_lander --steps run_wgl_check"
+  description: Run lander flow run_wgl_check
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: delivery_data
+  name: delivery_data
+  command: "run_flow_lander --steps delivery_data"
+  description: Run lander flow delivery_data
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false

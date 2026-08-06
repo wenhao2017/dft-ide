@@ -5,7 +5,6 @@ import type {
   ModePanelItem,
   ModePanelProps,
   ModePanelTab,
-  ParsedCfgResult,
 } from '../types'
 
 import RunModal from '../RunModal'
@@ -23,7 +22,7 @@ import { useModeSelection } from './hooks/useModeSelection'
 import { useModeCrud } from './hooks/useModeCrud'
 import { useModeRun } from './hooks/useModeRun'
 
-import { createCopyName, sameName, createVersionName } from './utils'
+import { createCopyName, sameName } from './utils'
 import { readSavedParams, updateSavedParamReferences } from '../savedParamUtils'
 
 import {
@@ -32,6 +31,7 @@ import {
   getLanderModePipelines,
   renameVerificationModeCfg,
   selectVerificationModeCfg,
+  openFileInEditor,
 } from '../../../../utils/ipc'
 import { confirmDelete } from '../../../../utils/confirmDelete'
 import { useVerificationStageConfig } from './hooks/useVerificationStageConfig'
@@ -135,8 +135,6 @@ export default function ModePanel({
 
   const [renameItem, setRenameItem] = useState<ModePanelItem>()
 
-  const [cfgResult, setCfgResult] = useState<ParsedCfgResult>()
-
   const [parsing, setParsing] = useState(false)
 
   const allItems = resources[activeTab]
@@ -166,12 +164,11 @@ export default function ModePanel({
     const focusedNames = new Set(resources.focusModes)
     const focusedModes = resources.mode.filter((mode) => focusedNames.has(mode.name))
 
-    void Promise.all(focusedModes.map(async (mode) => {
-      const result = await getLanderModePipelines(mode.preMode)
-      return [mode.name, result.success ? result.steps : []] as const
-    })).then((entries) => {
+    void getLanderModePipelines().then((result) => {
       if (!cancelled) {
-        onDefaultStepsChange(Object.fromEntries(entries))
+        onDefaultStepsChange(Object.fromEntries(
+          focusedModes.map((mode) => [mode.name, result.success ? result.steps : []]),
+        ))
       }
     })
 
@@ -232,7 +229,6 @@ export default function ModePanel({
   }, [focusedNames, selection.selectedItem])
 
   const openCreate = () => {
-    setCfgResult(undefined)
     setCreateOpen(true)
   }
 
@@ -242,7 +238,6 @@ export default function ModePanel({
     }
 
     setCreateOpen(false)
-    setCfgResult(undefined)
   }
 
   const handleSelectCfg = async (): Promise<string | null> => {
@@ -250,31 +245,22 @@ export default function ModePanel({
     const selected = await selectVerificationModeCfg(stage)
     if (!selected) return null
     setParsing(true)
-    setCfgResult(undefined)
 
     try {
-      const preMode = selected.preMode.trim()
-      const result: ParsedCfgResult = {
-        extractedCandidate: preMode || undefined,
-        preMode: preMode || undefined,
-      }
-
-      setCfgResult(result)
       return selected.modeName
     } finally {
       setParsing(false)
     }
   }
 
-  const confirmCreate = (name: string, result?: ParsedCfgResult) => {
-    const success = crud.createItem(activeTab, name, result)
+  const confirmCreate = (name: string) => {
+    const success = crud.createItem(activeTab, name)
 
     if (!success) {
       return
     }
 
     setCreateOpen(false)
-    setCfgResult(undefined)
   }
 
   const openRename = (item: ModePanelItem) => {
@@ -393,16 +379,28 @@ export default function ModePanel({
 
     if (activeTab === 'mode') {
       if (!stage) return
-      const targetName = createVersionName(resources.mode, selectedItem.name)
-      try {
-        await duplicateVerificationModeCfg(stage, selectedItem.name, targetName)
-      } catch (error) {
-        message.error(error instanceof Error ? error.message : 'Mode 配置文件新增版本失败')
-        return
-      }
-      crud.duplicateVersionItem(selectedItem, activeTab, targetName)
+      // const targetName = createVersionName(resources.mode, selectedItem.name)
+      // try {
+      //   await duplicateVerificationModeCfg(stage, selectedItem.name, targetName)
+      // } catch (error) {
+      //   message.error(error instanceof Error ? error.message : 'Mode 配置文件新增版本失败')
+      //   return
+      // }
+      // crud.duplicateVersionItem(selectedItem, activeTab, targetName)
     }
   }
+
+  const handleOpen = async () => {
+    if (!selectedItem) return;
+    const selectMode = resources.mode.find((item) => item.name === selectedItem.name);
+    if (!selectMode) return;
+
+    if (selectMode.filePath) {
+      openFileInEditor(selectMode.filePath);
+    } else {
+      message.warning('模块 CFG 路径为空');
+    }
+  };
 
   const handleCopy = async () => {
     if (!selectedItem) {
@@ -433,16 +431,20 @@ export default function ModePanel({
   }
 
   const handleDelete = async () => {
-    if (!batchCheckedNames.length) {
-      return
+    const deleteNames = batchCheckedNames.length
+      ? [...batchCheckedNames]
+      : selectedItem ? [selectedItem.name] : [];
+
+    if (!deleteNames.length) {
+      return;
     }
 
-    if (!await confirmDelete('Mode', batchCheckedNames)) return
+    if (!await confirmDelete('Mode', deleteNames)) return
 
     if (activeTab === 'mode') {
       if (!stage) return
       try {
-        await deleteVerificationModeCfg(stage, batchCheckedNames)
+        await deleteVerificationModeCfg(stage, deleteNames)
       } catch (error) {
         message.error(error instanceof Error ? error.message : 'Mode 配置文件删除失败')
         return
@@ -451,7 +453,7 @@ export default function ModePanel({
       const result = updateSavedParamReferences(
         readSavedParams(stageConfig?.params),
         activeTab,
-        batchCheckedNames,
+        deleteNames,
       )
       if (result.affectedAliases.length > 0) {
         if (!await handleSave({ params: result.params })) return
@@ -461,7 +463,7 @@ export default function ModePanel({
       }
     }
 
-    crud.deleteItems(activeTab, batchCheckedNames)
+    crud.deleteItems(activeTab, deleteNames)
   }
   const handleBatchCheckedChange = (name: string, checked: boolean) => {
     setBatchCheckedNamesByTab((current) => {
@@ -481,9 +483,7 @@ export default function ModePanel({
   const handleRunItem = (item: ModePanelItem) => {
     if (
       activeTab !== 'mode' ||
-      !('preMode' in item) ||
-      typeof item.preMode !== 'string' ||
-      !item.preMode.trim()
+      !item.name
     ) {
       return
     }
@@ -619,6 +619,10 @@ export default function ModePanel({
             onCheckedChange={handleBatchCheckedChange}
             onRun={handleRunItem}
             onStop={handleStopItem}
+            openSelected={handleOpen}
+            duplicateSelected={handleCopy}
+            openRename={handleRename}
+            deleteSelected={handleDelete}
           />
         </div>
       </div>
@@ -636,7 +640,6 @@ export default function ModePanel({
         open={createOpen}
         tab={activeTab}
         parsing={parsing}
-        cfgResult={cfgResult}
         accent={accentColor}
         onCancel={closeCreate}
         onSelectCfg={handleSelectCfg}
@@ -654,6 +657,7 @@ export default function ModePanel({
       <RunModal
         open={run.runOpen}
         mode={run.runMode}
+        stage={stage}
         groups={resources.group}
         tcs={resources.tc}
         subattrs={resources.subattr}
@@ -662,6 +666,7 @@ export default function ModePanel({
         stageConfigLoading={stageConfigLoading}
         handleSave={handleSave}
         onCancel={run.closeRun}
+        onAfterClose={run.clearRunMode}
         onRun={run.handleRun}
       />
     </div>

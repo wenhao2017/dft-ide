@@ -195,18 +195,16 @@ export async function openProjectCshrc(flow: RepoKey): Promise<string> {
 
 export async function selectVerificationModeCfg(
   stage: string,
-): Promise<{ path: string; fileName: string; modeName: string; preMode: string } | null> {
+): Promise<{ path: string; fileName: string; modeName: string } | null> {
   const res = await ipcRequest('selectVerificationModeCfg', { stage })
   if (typeof res.error === 'string') throw new Error(res.error)
   return typeof res.path === 'string'
     && typeof res.fileName === 'string'
     && typeof res.modeName === 'string'
-    && typeof res.preMode === 'string'
     ? {
         path: res.path,
         fileName: res.fileName,
         modeName: res.modeName,
-        preMode: res.preMode,
       }
     : null
 }
@@ -244,7 +242,7 @@ export async function deleteVerificationModeCfg(stage: string, modeNames: string
 
 export interface VerificationModeCfg {
   name: string
-  preMode: string
+  filePath: string
 }
 
 export async function syncVerificationModes(stage: string): Promise<VerificationModeCfg[]> {
@@ -254,7 +252,7 @@ export async function syncVerificationModes(stage: string): Promise<Verification
     ? res.modes.filter((item): item is VerificationModeCfg =>
         typeof item === 'object' && item !== null &&
         typeof (item as VerificationModeCfg).name === 'string' &&
-        typeof (item as VerificationModeCfg).preMode === 'string')
+        typeof (item as VerificationModeCfg).filePath === 'string')
     : []
 }
 
@@ -1240,19 +1238,17 @@ export async function removeLanderStage(
 export interface GetLanderModePipelinesResult extends Record<string, unknown> {
   success: boolean
 
-  preMode: string
-
   steps: LanderStep[]
 
   error?: string
 }
 
-export async function getLanderModePipelines(
-  preMode: string,
-): Promise<GetLanderModePipelinesResult> {
-  return ipcRequest<GetLanderModePipelinesResult>('getLanderModePipelines', {
-    preMode,
-  })
+export async function getLanderModePipelines(options: {
+  stage?: string
+  modeName?: string
+  init?: boolean
+} = {}): Promise<GetLanderModePipelinesResult> {
+  return ipcRequest<GetLanderModePipelinesResult>('getLanderModePipelines', options)
 }
 
 export async function getModules(

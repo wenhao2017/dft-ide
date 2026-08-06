@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { Button, Empty, Input, Modal, Popconfirm, Select, Space, Spin, message, Typography } from 'antd'
+import { Button, Checkbox, Empty, Input, Modal, Popconfirm, Select, Space, message, Typography } from 'antd'
 
 import type {
   BaseConfigItem,
@@ -18,6 +18,7 @@ import { readSavedParams, type SavedParams } from './savedParamUtils'
 interface RunModalProps {
   open: boolean
   mode?: ModeConfigItem
+  stage?: string
 
   groups: BaseConfigItem[]
   tcs: BaseConfigItem[]
@@ -28,6 +29,7 @@ interface RunModalProps {
   handleSave: (data: Record<string, unknown>) => Promise<boolean>
 
   onCancel: () => void
+  onAfterClose: () => void
   onRun: (payload: ModeRunPayload) => void
 
   getLanderModePipelines: GetLanderModePipelines
@@ -64,6 +66,7 @@ const cloneRow = (row: RunParamRow): RunParamRow => cloneRows([row])[0]
 export default function RunModal({
   open,
   mode,
+  stage,
   groups,
   tcs,
   subattrs,
@@ -71,12 +74,19 @@ export default function RunModal({
   stageConfigLoading,
   handleSave,
   onCancel,
+  onAfterClose,
   onRun,
   getLanderModePipelines,
 }: RunModalProps) {
   const [loading, setLoading] = useState(false)
+  const loadRequestRef = useRef(0)
+  const [init, setInit] = useState(false)
+  const [dialogStep, setDialogStep] = useState<'options' | 'transition' | 'run'>('options')
 
-  const [steps, setSteps] = useState<LanderStep[]>([])
+  const [loadedSteps, setLoadedSteps] = useState<{
+    optionsKey: string
+    steps: LanderStep[]
+  }>()
 
   const [range, setRange] = useState<[number, number]>([0, 0])
 
@@ -88,11 +98,17 @@ export default function RunModal({
 
   useEffect(() => {
     if (open && mode) {
+      loadRequestRef.current += 1
+      setLoading(false)
+      setLoadedSteps(undefined)
+      setRange([0, 0])
       setRows([createRunParamRow()])
       setScenarioAlias('')
       setSelectedAlias(undefined)
+      setInit(false)
+      setDialogStep('options')
     }
-  }, [open, mode?.name])
+  }, [open, mode?.name, stage])
 
   useEffect(() => {
     if (!stageConfigLoading) {
@@ -100,64 +116,59 @@ export default function RunModal({
     }
   }, [stageConfig, stageConfigLoading])
 
-  useEffect(() => {
-    if (!open || !mode) {
+  const optionsKey = mode && stage ? `${stage}\u0000${mode.name}\u0000${init}` : ''
+  const steps = loadedSteps?.optionsKey === optionsKey ? loadedSteps.steps : []
+  const runDialogReady = loadedSteps?.optionsKey === optionsKey
+
+  const confirmRunOptions = async () => {
+    if (!mode || loading) {
       return
     }
 
-    const preMode = mode.preMode.trim()
-
-    if (!preMode) {
-      setSteps([])
-      message.error('当前 Mode 没有配置 preMode')
+    if (!stage) {
+      message.error('请先选择 Verification stage')
       return
     }
 
-    let cancelled = false
+    const requestId = ++loadRequestRef.current
+    const requestedOptionsKey = `${stage}\u0000${mode.name}\u0000${init}`
+    setLoading(true)
+    setLoadedSteps(undefined)
+    setRange([0, 0])
 
-    const loadSteps = async () => {
-      setLoading(true)
+    try {
+      const result = await getLanderModePipelines({
+        stage,
+        modeName: mode.name,
+        init,
+      })
 
-      try {
-        const result = await getLanderModePipelines(preMode)
+      if (requestId !== loadRequestRef.current) {
+        return
+      }
 
-        if (cancelled) {
-          return
-        }
+      if (!result.success) {
+        message.error(result.error ?? '读取流水线步骤失败')
+        return
+      }
 
-        if (!result.success) {
-          setSteps([])
+      setLoadedSteps({ optionsKey: requestedOptionsKey, steps: result.steps })
+      setRange(result.steps.length > 0 ? [0, result.steps.length - 1] : [0, 0])
+      // Close the compact options dialog first. Its after-close callback opens
+      // the full run dialog, so the two modal animations and masks never overlap.
+      setDialogStep('transition')
+    } catch (error) {
+      if (requestId !== loadRequestRef.current) {
+        return
+      }
 
-          message.error(result.error ?? '读取流水线步骤失败')
-
-          return
-        }
-
-        setSteps(result.steps)
-        setRange(result.steps.length > 0 ? [0, result.steps.length - 1] : [0, 0])
-      } catch (error) {
-        if (cancelled) {
-          return
-        }
-
-        setSteps([])
-
-        message.error(
-          error instanceof Error ? error.message : '读取流水线步骤失败',
-        )
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
+      message.error(error instanceof Error ? error.message : '读取流水线步骤失败')
+    } finally {
+      if (requestId === loadRequestRef.current) {
+        setLoading(false)
       }
     }
-
-    void loadSteps()
-
-    return () => {
-      cancelled = true
-    }
-  }, [open, mode?.preMode, getLanderModePipelines])
+  }
 
   const selectedSteps = useMemo(() => {
     return steps.slice(range[0], range[1] + 1)
@@ -230,6 +241,29 @@ export default function RunModal({
     setScenarioAlias('')
   }
 
+  const closeModal = () => {
+    loadRequestRef.current += 1
+    onCancel()
+  }
+
+  const resetSession = () => {
+    setDialogStep('options')
+    setLoading(false)
+    setLoadedSteps(undefined)
+    setRange([0, 0])
+    setRows([createRunParamRow()])
+    setScenarioAlias('')
+    setSelectedAlias(undefined)
+    setInit(false)
+  }
+
+  const finishDialogClose = () => {
+    if (!open) {
+      resetSession()
+      onAfterClose()
+    }
+  }
+
   const confirm = () => {
     if (!mode) {
       return
@@ -241,37 +275,62 @@ export default function RunModal({
       return
     }
 
-    onRun({
+    const payload: ModeRunPayload = {
       mode,
-      preMode: mode.preMode,
       stepRange: range,
       stepNames,
       stepIds: selectedSteps.map((step) => step.id),
       steps: selectedSteps.map((step) => ({ ...step })),
       rows: cloneRows(rows),
-    })
+    }
+
+    // Keep the second-step content stable during Ant Design's close animation.
+    // Reset it only after the modal is fully hidden.
+    loadRequestRef.current += 1
+    onRun(payload)
   }
 
   return (
-    <Modal
-      open={open}
-      title={mode ? `运行 ${mode.name}` : '运行'}
-      width={1000}
-      footer={null}
-      onCancel={onCancel}
-    >
-      {loading ? (
-        <div
-          style={{
-            minHeight: 220,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Spin />
-        </div>
-      ) : (
+    <>
+      <Modal
+        open={open && dialogStep === 'options'}
+        title={mode ? `运行 ${mode.name}` : '运行'}
+        width={520}
+        confirmLoading={loading}
+        okText="下一步"
+        cancelText="取消"
+        onCancel={closeModal}
+        onOk={() => void confirmRunOptions()}
+        afterOpenChange={(visible) => {
+          if (!visible) {
+            if (open && dialogStep === 'transition' && runDialogReady) {
+              setDialogStep('run')
+              return
+            }
+
+            finishDialogClose()
+          }
+        }}
+        destroyOnHidden
+      >
+        <Checkbox checked={init} onChange={(event) => setInit(event.target.checked)}>
+          init/flatMode
+        </Checkbox>
+      </Modal>
+
+      <Modal
+        open={open && dialogStep === 'run' && runDialogReady}
+        title={mode ? `运行 ${mode.name}` : '运行'}
+        width={1000}
+        footer={null}
+        onCancel={closeModal}
+        afterOpenChange={(visible) => {
+          if (!visible) {
+            finishDialogClose()
+          }
+        }}
+        destroyOnHidden
+      >
         <Space
           direction="vertical"
           size={16}
@@ -358,7 +417,7 @@ export default function RunModal({
               gap: 8,
             }}
           >
-            <Button onClick={onCancel}>取消</Button>
+            <Button onClick={closeModal}>取消</Button>
 
             <Button
               type="primary"
@@ -369,7 +428,7 @@ export default function RunModal({
             </Button>
           </div>
         </Space>
-      )}
-    </Modal>
+      </Modal>
+    </>
   )
 }

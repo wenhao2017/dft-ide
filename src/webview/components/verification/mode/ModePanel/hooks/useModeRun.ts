@@ -20,16 +20,15 @@ export function useModeRun({ onRun, onStop }: UseModeRunProps) {
       return
     }
 
-    if (!mode.preMode?.trim()) {
-      return
-    }
-
     setRunMode(mode)
     setRunOpen(true)
   }, [])
 
   const closeRun = useCallback(() => {
     setRunOpen(false)
+  }, [])
+
+  const clearRunMode = useCallback(() => {
     setRunMode(undefined)
   }, [])
 
@@ -90,6 +89,8 @@ export function useModeRun({ onRun, onStop }: UseModeRunProps) {
     openRun,
 
     closeRun,
+
+    clearRunMode,
 
     handleRun,
 

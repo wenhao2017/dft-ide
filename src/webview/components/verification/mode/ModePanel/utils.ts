@@ -1,22 +1,4 @@
-import type { ModeConfigItem, ModePanelItem } from '../types'
-
-/**
- * 判断当前资源是否为 Mode
- *
- * Mode:
- * {
- *   name,
- *   preMode
- * }
- *
- * Group/TC/SubAttr:
- * {
- *   name
- * }
- */
-export const isModeItem = (item?: ModePanelItem): item is ModeConfigItem => {
-  return Boolean(item && 'preMode' in item)
-}
+import type { ModePanelItem } from '../types'
 
 /**
  * 非空字符串
@@ -62,25 +44,6 @@ export const createCopyName = (
     index += 1
 
     candidate = `${sourceName}_copy_${index}`
-  }
-
-  return candidate
-}
-
-export const createVersionName = (
-  items: ModePanelItem[],
-  sourceName: string,
-): string => {
-  let index = 1
-  let candidate = `${sourceName}@V1`
-
-  while (
-    items.some(
-      (item) => item.name.trim().toLowerCase() === candidate.toLowerCase(),
-    )
-  ) {
-    index += 1
-    candidate = `${sourceName}@V${index}`
   }
 
   return candidate

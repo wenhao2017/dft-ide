@@ -1,9 +1,14 @@
-import { Button, Checkbox, Empty, List, Tooltip, Typography } from 'antd'
+import { Button, Checkbox, Empty, List, Tooltip, Typography, Dropdown } from 'antd'
 
 import {
   CaretRightOutlined,
   FileTextOutlined,
   StopOutlined,
+  CopyOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  PlayCircleOutlined,
+  FileOutlined,
 } from '@ant-design/icons'
 
 import type { ModePanelItem, ModePanelTab } from '../../types'
@@ -35,6 +40,14 @@ interface ModeListProps {
   onRun: (item: ModePanelItem) => void
 
   onStop: (item: ModePanelItem) => void
+
+  openSelected: (item: ModePanelItem) => void
+
+  duplicateSelected: (item: ModePanelItem) => void
+
+  openRename: (item: ModePanelItem) => void
+
+  deleteSelected: (item: ModePanelItem) => void
 }
 
 const TAB_LABELS: Record<ModePanelTab, string> = {
@@ -55,6 +68,10 @@ export default function ModeList({
   onCheckedChange,
   onRun,
   onStop,
+  openSelected,
+  duplicateSelected,
+  openRename,
+  deleteSelected,
 }: ModeListProps) {
   const selectedBackground = `var(--vscode-list-inactiveSelectionBackground, color-mix(in srgb, ${accent} 14%, var(--vscode-editor-background, #ffffff)))`
 
@@ -94,14 +111,39 @@ export default function ModeList({
 
         const running = runningNames.includes(item.name)
 
-        const modeItem = tab === 'mode' && 'preMode' in item ? item : undefined
+        const modeItem = tab === 'mode' ? item : undefined
+
+        const dropdownItems = [
+          { key: 'open', icon: <FileOutlined />, label: '打开' },
+          { key: 'copy', icon: <CopyOutlined />, label: '复制' },
+          { key: 'rename', icon: <EditOutlined />, label: '重命名' },
+          { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true },
+        ];
 
         return (
+          <Dropdown
+            trigger={['contextMenu']}
+            onOpenChange={(open) => {
+              if (open) {
+                onSelect(item);
+              }
+            }}
+            menu={{
+              items: dropdownItems,
+              onClick: ({ key, domEvent }) => {
+                domEvent.stopPropagation();
+                if (key === 'open') openSelected(item);
+                if (key === 'copy') void duplicateSelected(item);
+                if (key === 'rename') openRename(item);
+                if (key === 'delete') deleteSelected(item);
+              },
+            }}
+          >
           <List.Item
             onClick={() => onSelect(item)}
             style={{
               minWidth: 0,
-              minHeight: modeItem ? 48 : 40,
+              minHeight: 40,
 
               marginBottom: 4,
               padding: '6px 8px 6px 9px',
@@ -199,19 +241,6 @@ export default function ModeList({
                     {item.name}
                   </Text>
 
-                  {modeItem && (
-                    <Text
-                      type="secondary"
-                      ellipsis={{ tooltip: modeItem.preMode }}
-                      style={{
-                        minWidth: 0,
-                        fontSize: 11,
-                        lineHeight: '16px',
-                      }}
-                    >
-                      {modeItem.preMode}
-                    </Text>
-                  )}
                 </div>
               </div>
 
@@ -274,6 +303,7 @@ export default function ModeList({
               )}
             </div>
           </List.Item>
+          </Dropdown>
         )
         }}
       />

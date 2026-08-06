@@ -8,7 +8,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons'
 
-import type { ModePanelTab, ParsedCfgResult } from '../../types'
+import type { ModePanelTab } from '../../types'
 
 const { Text } = Typography
 
@@ -18,8 +18,6 @@ interface CreateModalProps {
   tab: ModePanelTab
 
   parsing: boolean
-
-  cfgResult?: ParsedCfgResult
 
   /**
    * 面板强调色。
@@ -31,7 +29,7 @@ interface CreateModalProps {
 
   onSelectCfg: () => Promise<string | null>
 
-  onConfirm: (name: string, cfgResult?: ParsedCfgResult) => void
+  onConfirm: (name: string) => void
 }
 
 const tabLabels: Partial<Record<ModePanelTab, string>> = {
@@ -45,7 +43,6 @@ export default function CreateModal({
   open,
   tab,
   parsing,
-  cfgResult,
   accent = 'var(--vscode-focusBorder, #1677ff)',
   onCancel,
   onSelectCfg,
@@ -73,7 +70,7 @@ export default function CreateModal({
       return
     }
 
-    onConfirm(normalizedName, cfgResult)
+    onConfirm(normalizedName)
   }
 
   const handleSelectCfg = async () => {
@@ -220,39 +217,6 @@ export default function CreateModal({
                   </Space>
                 )}
 
-                {cfgResult?.preMode && (
-                  <div
-                    style={{
-                      padding: '8px 10px',
-                      borderRadius: 6,
-                      border: `1px solid ${accent}33`,
-                      background: 'var(--vscode-editor-background)',
-                    }}
-                  >
-                    <Space size={6}>
-                      <Text
-                        type="secondary"
-                        style={{
-                          fontSize: 12,
-                        }}
-                      >
-                        解析到的 preMode：
-                      </Text>
-
-                      <Text
-                        strong
-                        style={{
-                          color: accent,
-                          fontSize: 12,
-                          fontFamily:
-                            'var(--vscode-editor-font-family, monospace)',
-                        }}
-                      >
-                        {cfgResult.preMode}
-                      </Text>
-                    </Space>
-                  </div>
-                )}
               </Space>
             </div>
           </div>

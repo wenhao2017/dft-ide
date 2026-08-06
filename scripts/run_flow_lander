@@ -24,14 +24,29 @@ PROJECT_REPOS = ("data", "hibist", "sailor", "verification")
 ECO_FILE = "run_flow_lander_eco"
 DEFAULT_GITLAB_HOST = "http://code-dg.hisi.huawei.com/DFT_IDE_PROJECTS"
 STEPS = (
-    "prepare_workspace", "load_config", "check_env", "submit_mode",
-    "collect_result", "parse_report", "publish_dashboard",
+    "create_project", "gen_design_info", "gen_plan_env", "release_plan",
+    "gen_atpg_setting", "gen_pdl_env", "gen_atpg_env_pre", "gen_atpg_env",
+    "run_atpg", "upload_atpg_database_pre", "upload_atpg_database",
+    "gen_odc_env", "gen_odc_pattern", "upload_odc_database_pre",
+    "upload_odc_database", "get_dftlib_info", "gen_dftlib_rtl",
+    "run_dftlib_qualib", "gen_dftlib_qa_rpt", "run_dftlib_syn",
+    "run_dftlib_scan", "run_dftlib_atpg", "gen_dftlib_sdf",
+    "run_dftlib_sim", "gen_check_tb", "upload_libcheck_data", "modify_sdf",
+    "gen_3d_merge_env", "analysis_3d_netlist", "complete_check", "run_3d_merge",
+    "gen_fml_env", "run_fml", "upload_fml_database_pre", "upload_fml_database",
+    "gen_prune_env", "run_prune", "upload_prune_database_pre",
+    "upload_prune_database", "gen_dftm_excel", "gen_mbist_setting", "gen_run_env",
+    "run_ip_gen", "run_jtag_gen", "run_mbist_gen", "gen_crg_env", "run_crg_gen",
+    "sed_3d_tb", "gen_all_scan_env", "run_all_scan", "gen_sim_env", "run_sim",
+    "upload_simu_database_pre", "upload_simu_database", "gen_report",
+    "run_wgl_check", "delivery_data",
 )
 ENV_FILE_NAME = ".dft_ide_env.json"
 ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 RESERVED_ENV = {
     "DFT_IDE_FLOW", "DFT_IDE_STEP", "DFT_IDE_ECO_PHASE",
-    "DFT_IDE_STEP_STATUS", "DFT_IDE_WORK_PATH", "DFT_IDE_MODE", "DFT_IDE_STAGE",
+    "DFT_IDE_STEP_STATUS", "DFT_IDE_STEPS", "DFT_IDE_WORK_PATH",
+    "DFT_IDE_MODE", "DFT_IDE_STAGE",
 }
 MATRIX_PARAMETERS = (
     ("groups", ("DFT_IDE_GROUPS",), "-group"),
@@ -619,14 +634,14 @@ def run_step(step, step_args, work_path=None, mode=None, cfg=None, env_file=None
 def print_help():
     name = Path(sys.argv[0]).name
     print(f"""用法:
+  {name} --steps step1,step2 [运行参数]
+  DFT_IDE_STEPS=step1,step2 {name} [运行参数]
   {name} <step> [step参数...]
   {name} run [运行参数] <step> [step参数...]
-  {name} steps
   {name} clone [项目名称] [--dest 本地项目根目录]
   {name} env <list|get|set|unset> [NAME] [VALUE] [环境参数]
 
 命令:
-  steps    查看当前 Flow 支持的全部 Step
   run      执行指定 Step
   clone    按固定地址一次克隆项目的四个业务仓
   env      查看或管理环境变量
@@ -649,7 +664,7 @@ Clone 说明:
   也可以使用 sailor=xxx、verification=xxx 等形式单独指定。
 
 示例:
-  {name} steps
+  {name} --steps {STEPS[0]},{STEPS[1]} --mode mode_A
   {name} env list
   {name} clone SDV1000714 --dest /home/user/work
   {name} clone SDV1000714 --branch develop
@@ -664,14 +679,11 @@ def main(argv):
         print_help()
         return 0
     command = argv[0]
-    if command == "steps":
-        print("\n".join(STEPS))
-        return 0
     if command == "clone":
         return clone_command(argv[1:])
     if command == "env":
         return env_command(argv[1:])
-    if command == "run":
+    if command == "run" or command.startswith("--"):
         parser = ChineseArgumentParser(prog=f"{Path(sys.argv[0]).name} run", description="执行指定 Flow Step。")
         parser.add_argument("--work-path", help="Flow 业务仓根目录")
         parser.add_argument("--mode", help="当前 Mode 名称")
@@ -681,13 +693,14 @@ def main(argv):
         parser.add_argument("--source", help="需要 source 的 Csh 环境文件")
         parser.add_argument("--no-eco", action="store_true", help="跳过前置和后置 ECO")
         parser.add_argument("--extra-arg", help="Optional arguments inserted after the step CFG")
-        parser.add_argument("step", choices=STEPS, help="需要执行的 Flow Step")
+        parser.add_argument("--steps", help="Comma-separated Flow steps; defaults to DFT_IDE_STEPS")
         parser.add_argument("--groups", help="Comma-separated ATPG groups")
         parser.add_argument("--tcs", help="Comma-separated ATPG testcases")
         parser.add_argument("--subattrs", help="Comma-separated ATPG subattrs")
         parser.add_argument("--eco-phase", choices=("before", "after"))
         parser.add_argument("--step-status", type=int, default=0)
-        args, step_args = parser.parse_known_args(argv[1:])
+        run_argv = argv[1:] if command == "run" else argv
+        args, step_args = parser.parse_known_args(run_argv)
         if args.eco_phase:
             os.environ["DFT_IDE_ECO_ONLY_PHASE"] = args.eco_phase
             os.environ["DFT_IDE_STEP_STATUS"] = str(args.step_status)
@@ -697,7 +710,24 @@ def main(argv):
             value = getattr(args, option)
             if value is not None:
                 step_args.extend((f"--{option}", value))
-        return run_step(args.step, step_args, args.work_path, args.mode, args.cfg, args.env_file, args.source, args.stage, args.no_eco, args.extra_arg)
+        raw_steps = args.steps or os.environ.get("DFT_IDE_STEPS")
+        selected_steps = parse_csv_list(raw_steps, "--steps/DFT_IDE_STEPS") if raw_steps else []
+        if not selected_steps and step_args:
+            positional_step = step_args.pop(0)
+            if positional_step not in STEPS:
+                fail(f"Unknown {FLOW_LABEL} step: {positional_step}")
+            selected_steps = [positional_step]
+        if not selected_steps:
+            fail("Use --steps step1,step2 or set DFT_IDE_STEPS")
+        unknown_steps = [step for step in selected_steps if step not in STEPS]
+        if unknown_steps:
+            fail(f"Unknown Lander steps: {', '.join(unknown_steps)}")
+        os.environ["DFT_IDE_STEPS"] = ",".join(selected_steps)
+        for step in selected_steps:
+            status = run_step(step, step_args, args.work_path, args.mode, args.cfg, args.env_file, args.source, args.stage, args.no_eco, args.extra_arg)
+            if status:
+                return status
+        return 0
     return run_step(command, argv[1:])
 
 

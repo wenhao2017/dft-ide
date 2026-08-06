@@ -72,18 +72,7 @@ export const normalizeBaseItems = (value: unknown): BaseConfigItem[] => {
 /**
  * 解析 Mode
  *
- * 必须保留 preMode
- *
- * 输入:
- *
- * {
- *   name:"xxx",
- *   preMode:"verification"
- * }
- *
- * 输出:
- *
- * ModeConfigItem
+ * 输入资源会被归一化为 ModeConfigItem。
  */
 export const normalizeModeItems = (value: unknown): ModeConfigItem[] => {
   if (!Array.isArray(value)) {
@@ -97,16 +86,13 @@ export const normalizeModeItems = (value: unknown): ModeConfigItem[] => {
 
     const name = toNonEmptyString(raw.name)
 
-    const preMode = toNonEmptyString(raw.preMode)
-
-    if (!name || !preMode) {
+    if (!name) {
       return []
     }
 
     return [
       {
         name,
-        preMode,
       },
     ]
   })
@@ -181,8 +167,6 @@ export const createResourcePatch = (store: ResourceStore) => {
   return {
     modes: store.mode.map((item) => ({
       name: item.name,
-
-      preMode: item.preMode,
     })),
 
     focusModes: store.focusModes,

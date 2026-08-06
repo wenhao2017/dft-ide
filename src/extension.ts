@@ -18,7 +18,6 @@ import { SpreadsheetProvider } from "./spreadsheet"
 import {
   handleGetLanderModePipelines,
 } from './ipc/landerPipelineIpc';
-import { parsePreModeFromModeCfg } from './services/modeCfgService';
 // Import constants
 import {
   VIEW_TYPE,
@@ -1030,14 +1029,11 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           if (path.resolve(path.dirname(selectedPath)).toLowerCase() !== path.resolve(cfgRoot).toLowerCase()) {
             throw new Error(`导入文件必须位于 ${cfgRoot} 目录中。`);
           }
-          const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(selectedPath));
-          const preMode = parsePreModeFromModeCfg(Buffer.from(bytes).toString('utf8')) ?? '';
           currentPanel?.webview.postMessage({
             command: 'selectVerificationModeCfgResponse', requestId,
             path: selectedPath,
             fileName: path.basename(selectedPath),
             modeName: path.basename(selectedPath, path.extname(selectedPath)),
-            preMode,
           });
         } catch (err) {
           currentPanel?.webview.postMessage({
@@ -2823,12 +2819,10 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           const cfgRoot = path.join(repoRoot, stage, 'lander_env', 'lander_cfg');
           await ensureLocalConfigDirectory(cfgRoot);
           const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(cfgRoot));
-          const modes = await Promise.all(entries.filter(([name, type]) => type === vscode.FileType.File && name.toLowerCase().endsWith('.cfg')).sort(([a], [b]) => a.localeCompare(b)).map(async ([fileName]) => {
-            const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(path.join(cfgRoot, fileName)));
-            const text = Buffer.from(bytes).toString('utf8');
-            const preMode = parsePreModeFromModeCfg(text) ?? '';
-            return { name: path.basename(fileName, path.extname(fileName)), preMode };
-          }));
+          const modes = entries.filter(([name, type]) => type === vscode.FileType.File && name.toLowerCase().endsWith('.cfg')).sort(([a], [b]) => a.localeCompare(b)).map(([fileName]) => {
+            const cfgPath = path.join(cfgRoot, fileName);
+            return { name: path.basename(fileName, path.extname(fileName)), filePath: cfgPath };
+          });
           currentPanel?.webview.postMessage({ command: 'syncVerificationModesResponse', requestId, modes });
         } catch (err) {
           currentPanel?.webview.postMessage({ command: 'syncVerificationModesResponse', requestId, modes: [], error: err instanceof Error ? err.message : String(err) });

@@ -7,11 +7,10 @@ import type {
   ModeConfigItem,
   ModePanelItem,
   ModePanelTab,
-  ParsedCfgResult,
   ResourceStore,
 } from '../../types'
 
-import { createCopyName, sameName, createVersionName } from '../utils'
+import { createCopyName, sameName } from '../utils'
 
 interface UseModeCrudProps {
   resources: ResourceStore
@@ -59,7 +58,7 @@ export function useModeCrud({
   )
 
   const createItem = useCallback(
-    (tab: ModePanelTab, name: string, cfgResult?: ParsedCfgResult) => {
+    (tab: ModePanelTab, name: string) => {
       const normalizedName = name.trim()
 
       if (!normalizedName) {
@@ -77,16 +76,8 @@ export function useModeCrud({
       }
 
       if (tab === 'mode') {
-        if (!cfgResult?.preMode) {
-          message.warning('mode.cfg 中未解析到有效 preMode')
-
-          return false
-        }
-
         const item: ModeConfigItem = {
           name: normalizedName,
-
-          preMode: cfgResult.preMode,
         }
 
         updateResources((current) => ({
@@ -165,7 +156,7 @@ export function useModeCrud({
       }
 
       const targetTab = tab ?? 'mode'
-      const duplicatedName = targetName ?? createVersionName(resources[targetTab], item.name)
+      const duplicatedName = targetName ?? ''
       const duplicated: ModePanelItem = {
         ...item,
         name: duplicatedName,

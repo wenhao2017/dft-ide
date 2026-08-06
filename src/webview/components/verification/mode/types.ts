@@ -5,19 +5,9 @@ export interface BaseConfigItem {
 }
 
 export interface ModeConfigItem {
-  /**
-   * mode.cfg 解析结果。
-   *
-   * name:
-   *   运行模式名称
-   *
-   * preMode:
-   *   用于获取:
-   *   pipelines/lander_{preMode}.yaml
-   */
   name: string
 
-  preMode: string
+  filePath?: string
 }
 
 export type ModePanelItem = BaseConfigItem | ModeConfigItem
@@ -58,8 +48,6 @@ export interface RunParamRow {
 export interface ModeRunPayload {
   mode: ModeConfigItem
 
-  preMode: string
-
   stepRange: [number, number]
 
   stepNames: string[]
@@ -71,45 +59,19 @@ export interface ModeRunPayload {
   rows: RunParamRow[]
 }
 
-export interface ParsedCfgResult {
-  /**
-   * mode.cfg 原始解析候选值。
-   *
-   * 例如：
-   * verification
-   * mode_verification
-   * lander_verification
-   */
-  extractedCandidate?: string
-
-  /**
-   * 归一化后的 preMode
-   */
-  preMode?: string
-}
-
-export interface PreModeExtractContext {
-  file: File
-  text: string
-}
-
-export type PreModeExtractor = (
-  context: PreModeExtractContext,
-) => string | undefined | Promise<string | undefined>
-
 export interface GetLanderModePipelinesResult {
   success: boolean
-
-  preMode?: string
 
   steps: LanderStep[]
 
   error?: string
 }
 
-export type GetLanderModePipelines = (
-  preMode: string,
-) => Promise<GetLanderModePipelinesResult>
+export type GetLanderModePipelines = (options?: {
+  stage?: string
+  modeName?: string
+  init?: boolean
+}) => Promise<GetLanderModePipelinesResult>
 
 export interface ModePanelProps {
   accent: string

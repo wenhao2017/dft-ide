@@ -1,69 +1,101 @@
 #!/bin/csh -f
 
-# Lander 通用项目级 ECO 调度入口。
-# 设置 DFT_IDE_LANDER_MODE 后，Mode 流程将调用对应的
-# run_flow_lander_<mode>_eco；跨 Mode 的通用规则可放在本文件中。
+# Lander 统一项目级 ECO 入口。
+#
+# run_flow_lander 会在每个 step 的 before/after 阶段 source 本文件，并提供：
+#   DFT_IDE_STEP       当前 step
+#   DFT_IDE_ECO_PHASE  before 或 after
+#   DFT_IDE_MODE       当前 mode 配置名
+#   DFT_IDE_STAGE      当前 Lander stage
+#
+# 需要定制 ECO 时，可在下面按 "${step}:${phase}" 分支；如果不同 mode
+# 的同一 step 行为不同，可再读取 $DFT_IDE_MODE，或改用
+# "${DFT_IDE_MODE}:${step}:${phase}" 作为 switch key。
 
-if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE || ! $?DFT_IDE_STAGE) then
-    echo "[HiSalad] 未设置 DFT_IDE_STEP、DFT_IDE_ECO_PHASE 或 DFT_IDE_STAGE。"
+if (! $?DFT_IDE_STEP || ! $?DFT_IDE_ECO_PHASE || ! $?DFT_IDE_MODE || ! $?DFT_IDE_STAGE) then
+    echo "[HiSalad] 未设置 DFT_IDE_STEP、DFT_IDE_ECO_PHASE、DFT_IDE_MODE 或 DFT_IDE_STAGE。"
     exit 2
 endif
 
 set step = "$DFT_IDE_STEP"
 set phase = "$DFT_IDE_ECO_PHASE"
-set stage = "$DFT_IDE_STAGE"
+
 if ("$phase" != "before" && "$phase" != "after") then
     echo "[HiSalad] 不支持的 Lander ECO 阶段: $phase"
     exit 2
 endif
 
-# 在此添加通用 Lander ECO 调度规则；没有匹配动作时正常返回 0。
-switch ("${step}:${phase}")
-case "prepare_workspace:before":
-    # 在此添加 prepare_workspace 的前置 ECO 命令。
-    breaksw
-case "prepare_workspace:after":
-    # 在此添加 prepare_workspace 的后置 ECO 命令。
-    breaksw
-case "load_config:before":
-    # 在此添加 load_config 的前置 ECO 命令。
-    breaksw
-case "load_config:after":
-    # 在此添加 load_config 的后置 ECO 命令。
-    breaksw
-case "check_env:before":
-    # 在此添加 check_env 的前置 ECO 命令。
-    breaksw
-case "check_env:after":
-    # 在此添加 check_env 的后置 ECO 命令。
-    breaksw
-case "submit_mode:before":
-    # 在此添加 submit_mode 的前置 ECO 命令。
-    breaksw
-case "submit_mode:after":
-    # 在此添加 submit_mode 的后置 ECO 命令。
-    breaksw
-case "collect_result:before":
-    # 在此添加 collect_result 的前置 ECO 命令。
-    breaksw
-case "collect_result:after":
-    # 在此添加 collect_result 的后置 ECO 命令。
-    breaksw
-case "parse_report:before":
-    # 在此添加 parse_report 的前置 ECO 命令。
-    breaksw
-case "parse_report:after":
-    # 在此添加 parse_report 的后置 ECO 命令。
-    breaksw
-case "publish_dashboard:before":
-    # 在此添加 publish_dashboard 的前置 ECO 命令。
-    breaksw
-case "publish_dashboard:after":
-    # 在此添加 publish_dashboard 的后置 ECO 命令。
+# 此列表与 scripts/run_flow_lander 中的 STEPS 保持一致。合法但尚未定制的
+# step 是正常的空 ECO；未知 step 则立即报错，避免拼写错误被静默忽略。
+switch ("$step")
+case "create_project":
+case "gen_design_info":
+case "gen_plan_env":
+case "release_plan":
+case "gen_atpg_setting":
+case "gen_pdl_env":
+case "gen_atpg_env_pre":
+case "gen_atpg_env":
+case "run_atpg":
+case "upload_atpg_database_pre":
+case "upload_atpg_database":
+case "gen_odc_env":
+case "gen_odc_pattern":
+case "upload_odc_database_pre":
+case "upload_odc_database":
+case "get_dftlib_info":
+case "gen_dftlib_rtl":
+case "run_dftlib_qualib":
+case "gen_dftlib_qa_rpt":
+case "run_dftlib_syn":
+case "run_dftlib_scan":
+case "run_dftlib_atpg":
+case "gen_dftlib_sdf":
+case "run_dftlib_sim":
+case "gen_check_tb":
+case "upload_libcheck_data":
+case "modify_sdf":
+case "gen_3d_merge_env":
+case "analysis_3d_netlist":
+case "complete_check":
+case "run_3d_merge":
+case "gen_fml_env":
+case "run_fml":
+case "upload_fml_database_pre":
+case "upload_fml_database":
+case "gen_prune_env":
+case "run_prune":
+case "upload_prune_database_pre":
+case "upload_prune_database":
+case "gen_dftm_excel":
+case "gen_mbist_setting":
+case "gen_run_env":
+case "run_ip_gen":
+case "run_jtag_gen":
+case "run_mbist_gen":
+case "gen_crg_env":
+case "run_crg_gen":
+case "sed_3d_tb":
+case "gen_all_scan_env":
+case "run_all_scan":
+case "gen_sim_env":
+case "run_sim":
+case "upload_simu_database_pre":
+case "upload_simu_database":
+case "gen_report":
+case "run_wgl_check":
+case "delivery_data":
     breaksw
 default:
-    echo "[HiSalad] 未知的 ECO 调度组合: step=$step phase=$phase"
+    echo "[HiSalad] 未知的 Lander ECO step: $step"
     exit 2
 endsw
+
+# 在这里添加统一 ECO 调度规则，例如：
+# switch ("${step}:${phase}")
+# case "run_atpg:before":
+#     # 前置 ECO 命令
+#     breaksw
+# endsw
 
 exit 0

@@ -74,6 +74,7 @@ interface PipelineExecutionSession {
   logPrefix: string;
   terminalTitle: string;
   tasks: PipelineTask[];
+  flowStepNames: string[];
   executionPlan: PipelineExecutionPlanItem[];
   executionPlanByMarkerTaskId: Map<string, PipelineExecutionPlanItem>;
   nextIndex: number;
@@ -348,6 +349,13 @@ function getApplicableVerificationParameterSets(
 }
 
 function buildVerificationExecutionCommands(projectPath: string | undefined, task: PipelineTask): string[] {
+  if (getRunFlowScriptName(task.command) === 'run_flow_lander') {
+    const scriptPath = resolvePipelineScriptPath(projectPath, 'run_flow_lander');
+    const stepName = task.name || task.id;
+    return [
+      `ma ${PIPELINE_PYTHON_MODULE} && python3 ${quoteCshArgument(scriptPath)} ${quoteCshArgument(stepName)}`,
+    ];
+  }
   return [buildPipelineStepExecutionCommand(projectPath, task.command.trim())];
 }
 
@@ -389,11 +397,16 @@ function buildStepCommands(
   taskConfig?: Record<string, unknown> | null,
   runParameters?: unknown,
   markerTaskId: string = task.id,
+  flowStepNames: string[] = [],
 ): string | string[] {
   const commands: string[] = [];
   const projectPath = resolveProjectPath(flowKey);
   commands.push(`setenv DFT_IDE_HISTORY ${quoteCshArgument(runId)}`);
   commands.push(`setenv DFT_IDE_MARKER_TASK_ID ${quoteCshArgument(markerTaskId)}`);
+  commands.push(`setenv DFT_IDE_STEP ${quoteCshArgument(task.name)}`);
+  if (flowKey === 'verification' && flowStepNames.length > 0) {
+    commands.push(`setenv DFT_IDE_STEPS ${quoteCshArgument(flowStepNames.join(','))}`);
+  }
   const customConfig = getRuntimeTaskConfig(envConfig, taskConfig);
 
   if (index === 0) {
@@ -588,7 +601,7 @@ const DEFAULT_PIPELINE_TASKS: Record<PipelineFlowKey, Array<{ id: string; name: 
   verification: [
     { id: 'prepare_workspace', name: 'prepare_workspace', command: 'lander prepare_workspace --dir ./verify_run', description: '准备 verification workspace' },
     { id: 'load_config', name: 'load_config', command: 'lander load_config --file lander_verify.cfg', description: '加载 lander 配置' },
-    { id: 'check_env', name: 'check_env', command: 'run_flow_lander check_env --tools', description: '检查仿真环境、filelist 和工具版本' },
+    { id: 'check_env', name: 'check_env', command: 'run_flow_lander --steps check_env --tools', description: '检查仿真环境、filelist 和工具版本' },
     { id: 'submit_mode', name: 'submit_mode', command: 'lander submit_mode --mode scan_test', description: '提交仿真 mode 任务' },
     { id: 'collect_result', name: 'collect_result', command: 'lander collect_result --dir ./verify_run', description: '收集仿真结果' },
     { id: 'parse_report', name: 'parse_report', command: 'lander parse_report --out report.json', description: '解析 pass / fail / error 报告' },
@@ -885,6 +898,7 @@ export class PipelineRuntimeService {
         logPrefix: config.logPrefix,
         terminalTitle: getPipelineTerminalTitle(flowLabel, moduleKey),
         tasks: selectedTasksToRun,
+        flowStepNames: initialTasks.map((task) => task.name || task.id),
         executionPlan,
         executionPlanByMarkerTaskId: new Map(
           executionPlan.map((item) => [item.markerTaskId, item]),
@@ -963,6 +977,8 @@ export class PipelineRuntimeService {
         context?.envConfig,
         context?.taskConfig,
         context?.runParameters,
+        task.id,
+        runtime.tasks.map((runtimeTask) => runtimeTask.name || runtimeTask.id),
       );
       this.options.openTerminal(
         getPipelineTerminalTitle(runtime.flowLabel, moduleKey),
@@ -1212,6 +1228,7 @@ export class PipelineRuntimeService {
       session.taskConfig,
       execution.parameters ? [execution.parameters] : session.runParameters,
       execution.markerTaskId,
+      session.flowStepNames,
     );
     const generatedCommands = session.flowKey === 'verification'
       ? buildVerificationExecutionCommands(resolveProjectPath(session.flowKey), task)
