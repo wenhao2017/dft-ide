@@ -258,7 +258,7 @@ export default function ModeList({
                     alignItems: 'center',
                     flexShrink: 0,
                   }}
-                >
+              >
                   <Tooltip title="策略执行">
                     <Button
                       type="text"

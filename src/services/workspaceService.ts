@@ -13,6 +13,8 @@ import { inferDftFlow } from './diagnosticsService';
 import { obsTrackingService } from './obsTrackingService';
 import { getObsScriptConfig } from './configService';
 
+const terminalShellExecutionEndLabel = "DFT_IDE_Terminal_Shell_Execution_END";
+
 export function toConfigPathSegment(flow: string): string {
   const normalized = flow.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
   return normalized || 'default';
@@ -515,25 +517,35 @@ export async function cloneRepoWithTerminal(repoUrl: string, projectPath: string
       const disposable = windowWithTerminalData.onDidWriteTerminalData(e => {
         if (e.terminal === terminal) {
           output += e.data;
-          const lines = output.replace(/(\r\n|\r)/g, '\n').split('\n');
-          const cloneFinishedIndex = lines.indexOf('CLONE_FINISHED');
-          if (cloneFinishedIndex > 0) {
+          const result = isTerminalShellExecutionEnd(output);
+          if (result.isEnd) {
             disposable.dispose();
-            const result = lines[cloneFinishedIndex - 1].toLowerCase();
-            if (result.includes('receiving objects:') || result.includes('unpacking objects:')) {
+            if (result.exitCode === 0) {
               terminal.dispose();
               resolve();
-            } else if (result.includes('fatal:')) {
-              reject(new Error(result));
             } else {
               reject(new Error('Failed to clone the Git repository. See terminal logs for specific error details'));
             }
           }
         }
       });
-      terminal.sendText(`git clone -c credential.helper=store ${repoUrl} ; echo "CLONE_FINISHED"`);
+      terminal.sendText(`git clone -c credential.helper=store ${repoUrl} ; echo "${terminalShellExecutionEndLabel}|$status"`);
     }
   });
+}
+
+function isTerminalShellExecutionEnd(data: string) {
+  const lines = data.replace(/(\r\n|\r)/g, '\n').split('\n');
+  const endLine = lines.find(line => line.startsWith(terminalShellExecutionEndLabel));
+  if (endLine) {
+    const statusStr = endLine.split('|')[1];
+    const status = statusStr && !isNaN(Number(statusStr)) ? Number(statusStr) : undefined;
+    return {
+      isEnd: true,
+      exitCode: status
+    };
+  }
+  return { isEnd: false };
 }
 
 export async function pushDomainEcoWithTerminal(projectPath: string, commands: string[]) {
@@ -567,23 +579,19 @@ export async function pushDomainEcoWithTerminal(projectPath: string, commands: s
       const disposable = windowWithTerminalData.onDidWriteTerminalData(e => {
         if (e.terminal === terminal) {
           output += e.data;
-          const lines = output.replace(/(\r\n|\r)/g, '\n').split('\n');
-          const cloneFinishedIndex = lines.indexOf('PUSH_FINISHED');
-          if (cloneFinishedIndex > 0) {
+          const result = isTerminalShellExecutionEnd(output);
+          if (result.isEnd) {
             disposable.dispose();
-            const result = lines[cloneFinishedIndex - 1].toLowerCase();
-            if (result.includes('-> master')) {
+            if (result.exitCode === 0) {
               terminal.dispose();
               resolve();
-            } else if (result.includes('fatal:')) {
-              reject(new Error(result));
             } else {
               reject(new Error('Failed to push the domain eco. See terminal logs for specific error details'));
             }
           }
         }
       });
-      terminal.sendText(`${command} ; echo "PUSH_FINISHED"`);
+      terminal.sendText(`${command} ; echo "${terminalShellExecutionEndLabel}|$status"`);
     }
   });
 }
@@ -666,21 +674,15 @@ export async function writeDefaultLocalState(localStateUri: vscode.Uri, repos: {
         const assistantFilePath = path.join(repo.localPath, 'LANDER_ASSISTANT.json');
         try {
           const obsScriptConfig = await getObsScriptConfig(repo.key, domain);
-          const remoteAssistant = path.posix.join(
-            obsScriptConfig.remoteScriptPath,
-            obsScriptConfig.remoteScriptFiles[0].fileName.replace(/\\/g, '/'),
-            'LANDER_ASSISTANT.json',
-          );
-          await obsTrackingService.downloadFile(
-            obsScriptConfig.scriptSpace,
-            remoteAssistant,
-            vscode.Uri.file(assistantFilePath),
-            { overwriteUntracked: true },
-          );
+          const remoteAssistant = path.posix.join(obsScriptConfig.remoteScriptPath,
+            obsScriptConfig.remoteScriptFiles[0].fileName.replace(/\\/g, '/'), 'LANDER_ASSISTANT.json');
+          await obsTrackingService.downloadFile(obsScriptConfig.scriptSpace, remoteAssistant, vscode.Uri.file(assistantFilePath), {
+            overwriteUntracked: true,
+          });
           stateObject.landerAssistant = assistantFilePath;
           await writeFile(stateUri, JSON.stringify(stateObject, null, 2));
         } catch {
-          console.warn('no LANDER_ASSISTANT in obs');
+          console.warn("no LANDER_ASSISTANT in obs")
         }
       }
     }
