@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Empty, Tabs, message } from 'antd';
+import { Button, Tabs, message } from 'antd';
 import {
   LeftOutlined,
   RightOutlined,
-  FileSearchOutlined,
   CloudUploadOutlined,
 } from '@ant-design/icons';
 import ExecutionHistoryList from '../shared/ExecutionHistoryList';
@@ -11,6 +10,7 @@ import { getExecutionHistory, ExecutionHistoryRecord } from '../../utils/ipc';
 import { uploadExecutionData } from '../../services/projectService';
 import useWizardStore from '../../store/wizardStore';
 import ExecutionHistoryDetail from '../shared/ExecutionHistoryDetail';
+import ReportParsingPanel from './ReportParsingPanel';
 
 interface Props {
   onNext: () => void;
@@ -77,8 +77,13 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
   return (
     <div style={{ padding: '16px 0' }}>
       <Tabs
-        defaultActiveKey={'history'}
+        defaultActiveKey={'reportParsing'}
         items={[
+          {
+            key: 'reportParsing',
+            label: '报告解析',
+            children: <ReportParsingPanel />,
+          },
           {
             key: 'history',
             label: '执行历史',
@@ -88,16 +93,6 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
                 flow='verification'
                 onOpenPipeline={viewHistoryDetail}
                 onDeleted={handleHistoryDeleted}
-              />
-            ),
-          },
-          {
-            key: 'otherLogs',
-            label: '其它 Log 文件',
-            children: (
-              <Empty
-                image={<FileSearchOutlined style={{ fontSize: 48 }} />}
-                description={'功能预留，后续支持查看其它 Log 文件'}
               />
             ),
           },

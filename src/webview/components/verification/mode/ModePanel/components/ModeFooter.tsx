@@ -22,9 +22,6 @@ interface ModeFooterProps {
 
 const TAB_LABELS: Record<ModePanelTab, string> = {
   mode: '模式',
-  group: 'Group',
-  tc: 'TC',
-  subattr: 'SubAttr',
 }
 
 export default function ModeFooter({

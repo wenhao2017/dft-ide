@@ -16,6 +16,8 @@ import { getWebviewHtml, InitialWebviewCommand } from './webviewHtml';
 import { environmentDefaults, getEnvironmentSetting } from './config/environment';
 import { SpreadsheetProvider } from "./spreadsheet"
 import {
+  handleExecuteLanderStrategy,
+  handleGetLanderModeConfigInfo,
   handleGetLanderModePipelines,
 } from './ipc/landerPipelineIpc';
 // Import constants
@@ -2817,6 +2819,16 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           currentPanel,
           msg,
         );
+        return;
+      }
+
+      case 'getLanderModeConfigInfo': {
+        await handleGetLanderModeConfigInfo(currentPanel, msg);
+        return;
+      }
+
+      case 'executeLanderStrategy': {
+        await handleExecuteLanderStrategy(currentPanel, msg);
         return;
       }
 

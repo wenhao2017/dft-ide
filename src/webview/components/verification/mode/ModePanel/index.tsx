@@ -13,7 +13,6 @@ import ModeTitle from './components/ModeTitle'
 import ModeToolbar from './components/ModeToolbar'
 import ModeList from './components/ModeList'
 import ModeFooter from './components/ModeFooter'
-import ModeTypeSwitcher from './components/ModeTypeSwitcher'
 import CreateModal from './components/CreateModal'
 import RenameModal from './components/RenameModal'
 
@@ -23,8 +22,6 @@ import { useModeCrud } from './hooks/useModeCrud'
 import { useModeRun } from './hooks/useModeRun'
 
 import { createCopyName, sameName } from './utils'
-import { readSavedParams, updateSavedParamReferences } from '../savedParamUtils'
-
 import {
   deleteVerificationModeCfg,
   duplicateVerificationModeCfg,
@@ -32,6 +29,7 @@ import {
   renameVerificationModeCfg,
   selectVerificationModeCfg,
   openFileInEditor,
+  executeLanderStrategy,
 } from '../../../../utils/ipc'
 import { confirmDelete } from '../../../../utils/confirmDelete'
 import { useVerificationStageConfig } from './hooks/useVerificationStageConfig'
@@ -40,7 +38,6 @@ import { useShallow } from 'zustand/react/shallow'
 
 export default function ModePanel({
   accent,
-  initialTab = 'mode',
   title,
   initialCollapsed = false,
   onSelect,
@@ -57,7 +54,10 @@ export default function ModePanel({
     handleSave,
   } = useVerificationStageConfig()
 
-  const [activeTab, setActiveTab] = useState<ModePanelTab>(initialTab)
+  // Lander exposes only Mode as a top-level resource. The union type remains
+  // temporarily for the shared list helpers, but there is no UI path that can
+  // switch to Group/TC/SubAttr.
+  const [activeTab] = useState<ModePanelTab>('mode')
 
   const [collapsed, setCollapsed] = useState(initialCollapsed)
 
@@ -65,9 +65,6 @@ export default function ModePanel({
     Record<ModePanelTab, string[]>
   >({
     mode: [],
-    group: [],
-    tc: [],
-    subattr: [],
   })
 
   const { resources, updateResources, syncModesFromDirectory } = useModeResource()
@@ -274,54 +271,28 @@ export default function ModePanel({
   }
 
   const confirmRename = async (value: string) => {
-    if (!renameItem) {
-      return
-    }
+    if (!renameItem || !stage) return
 
     const nextName = value.trim()
     if (!nextName) {
       message.warning('请输入名称')
       return
     }
-
-    if (activeTab === 'mode') {
-      if (!stage) return
-      if (resources.mode.some((item) => !sameName(item.name, renameItem.name) && sameName(item.name, nextName))) {
-        message.error(`mode 名称 ${nextName} 已存在`)
-        return
-      }
-      try {
-        await renameVerificationModeCfg(stage, renameItem.name, nextName)
-      } catch (error) {
-        message.error(error instanceof Error ? error.message : 'Mode 配置文件重命名失败')
-        return
-      }
-    } else {
-      if (resources[activeTab].some((item) => item.name !== renameItem.name && item.name === nextName)) {
-        message.error(`${activeTab} 名称 "${nextName}" 已存在`)
-        return
-      }
-
-      const result = updateSavedParamReferences(
-        readSavedParams(stageConfig?.params),
-        activeTab,
-        [renameItem.name],
-        nextName,
-      )
-      if (result.affectedAliases.length > 0) {
-        if (!await handleSave({ params: result.params })) return
-        message.warning(
-          `重命名影响了 ${result.affectedAliases.length} 个保存场景，已自动更新参数`,
-        )
-      }
-    }
-    const success = crud.renameItem(renameItem, activeTab, nextName)
-
-    if (!success) {
+    if (resources.mode.some((item) =>
+      !sameName(item.name, renameItem.name) && sameName(item.name, nextName)
+    )) {
+      message.error(`Mode 名称 ${nextName} 已存在`)
       return
     }
 
-    closeRename()
+    try {
+      await renameVerificationModeCfg(stage, renameItem.name, nextName)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Mode 配置文件重命名失败')
+      return
+    }
+
+    if (crud.renameItem(renameItem, activeTab, nextName)) closeRename()
   }
   const handleFocusChange = (names: string[]) => {
     const validNames = new Set(allItems.map((item) => item.name))
@@ -433,34 +404,16 @@ export default function ModePanel({
   const handleDelete = async () => {
     const deleteNames = batchCheckedNames.length
       ? [...batchCheckedNames]
-      : selectedItem ? [selectedItem.name] : [];
+      : selectedItem ? [selectedItem.name] : []
 
-    if (!deleteNames.length) {
-      return;
-    }
-
+    if (!deleteNames.length || !stage) return
     if (!await confirmDelete('Mode', deleteNames)) return
 
-    if (activeTab === 'mode') {
-      if (!stage) return
-      try {
-        await deleteVerificationModeCfg(stage, deleteNames)
-      } catch (error) {
-        message.error(error instanceof Error ? error.message : 'Mode 配置文件删除失败')
-        return
-      }
-    } else {
-      const result = updateSavedParamReferences(
-        readSavedParams(stageConfig?.params),
-        activeTab,
-        deleteNames,
-      )
-      if (result.affectedAliases.length > 0) {
-        if (!await handleSave({ params: result.params })) return
-        message.warning(
-          `删除影响了 ${result.affectedAliases.length} 个保存场景，已自动移除相关参数`,
-        )
-      }
+    try {
+      await deleteVerificationModeCfg(stage, deleteNames)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Mode 配置文件删除失败')
+      return
     }
 
     crud.deleteItems(activeTab, deleteNames)
@@ -489,6 +442,31 @@ export default function ModePanel({
     }
 
     run.openRun(item)
+  }
+
+  const handleRunStrategy = async (item: ModePanelItem) => {
+    if (activeTab !== 'mode' || !stage || !item.name) return
+
+    try {
+      const response = await executeLanderStrategy({ stage, modeName: item.name })
+      if (!response.success || !response.result) {
+        throw new Error(response.error || '策略执行请求失败')
+      }
+
+      const steps = response.result.steps
+      run.handleRun({
+        mode: { ...item },
+        stepRange: [0, Math.max(steps.length - 1, 0)],
+        stepNames: steps.map((step) => step.name),
+        stepIds: steps.map((step) => step.id),
+        steps,
+        rows: [],
+      })
+
+      message.success('策略任务已提交，可在右侧监控执行状态')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '策略执行失败')
+    }
   }
 
   const handleStopItem = (item: ModePanelItem) => {
@@ -568,14 +546,6 @@ export default function ModePanel({
         onCollapsedChange={setCollapsed}
       />
 
-      <div style={{ padding: '10px 12px 0' }}>
-        <ModeTypeSwitcher
-          activeTab={activeTab}
-          accent={accentColor}
-          onChange={setActiveTab}
-        />
-      </div>
-
       <div
         style={{
           minWidth: 0,
@@ -618,6 +588,7 @@ export default function ModePanel({
             }}
             onCheckedChange={handleBatchCheckedChange}
             onRun={handleRunItem}
+            onRunStrategy={(item) => void handleRunStrategy(item)}
             onStop={handleStopItem}
             openSelected={handleOpen}
             duplicateSelected={handleCopy}
@@ -658,9 +629,6 @@ export default function ModePanel({
         open={run.runOpen}
         mode={run.runMode}
         stage={stage}
-        groups={resources.group}
-        tcs={resources.tc}
-        subattrs={resources.subattr}
         getLanderModePipelines={getLanderModePipelines}
         stageConfig={stageConfig}
         stageConfigLoading={stageConfigLoading}

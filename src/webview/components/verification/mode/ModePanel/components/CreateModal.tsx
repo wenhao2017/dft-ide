@@ -34,9 +34,6 @@ interface CreateModalProps {
 
 const tabLabels: Partial<Record<ModePanelTab, string>> = {
   mode: 'Mode',
-  group: 'Group',
-  tc: 'TC',
-  subattr: 'SubAttr',
 }
 
 export default function CreateModal({

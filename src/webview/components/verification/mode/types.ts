@@ -1,4 +1,4 @@
-export type ModePanelTab = 'mode' | 'group' | 'tc' | 'subattr'
+export type ModePanelTab = 'mode'
 
 export interface BaseConfigItem {
   name: string
@@ -64,7 +64,15 @@ export interface GetLanderModePipelinesResult {
 
   steps: LanderStep[]
 
+  parameters: LanderModeParameters
+
   error?: string
+}
+
+export interface LanderModeParameters {
+  groups: string[]
+  tcs: string[]
+  subattrs: string[]
 }
 
 export type GetLanderModePipelines = (options?: {
@@ -75,8 +83,6 @@ export type GetLanderModePipelines = (options?: {
 
 export interface ModePanelProps {
   accent: string
-
-  initialTab?: ModePanelTab
 
   title?: string
 
@@ -101,11 +107,6 @@ export interface ResourceStore {
    */
   focusModes: string[]
 
-  group: BaseConfigItem[]
-
-  tc: BaseConfigItem[]
-
-  subattr: BaseConfigItem[]
 }
 
 /**

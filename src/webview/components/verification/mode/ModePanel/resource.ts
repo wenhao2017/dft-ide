@@ -1,4 +1,4 @@
-import type { BaseConfigItem, ModeConfigItem, ResourceStore } from '../types'
+import type { ModeConfigItem, ResourceStore } from '../types'
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -22,53 +22,6 @@ const toNonEmptyString = (value: unknown): string | undefined => {
  *   name: string
  * }
  */
-export const normalizeBaseItems = (value: unknown): BaseConfigItem[] => {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  const items = value.flatMap((raw) => {
-    if (typeof raw === 'string') {
-      const name = raw.trim()
-
-      return name
-        ? [
-            {
-              name,
-            },
-          ]
-        : []
-    }
-
-    if (!isRecord(raw)) {
-      return []
-    }
-
-    const name =
-      toNonEmptyString(raw.name) ??
-      toNonEmptyString(raw.label) ??
-      toNonEmptyString(raw.value)
-
-    if (!name) {
-      return []
-    }
-
-    return [
-      {
-        name,
-      },
-    ]
-  })
-
-  const seen = new Set<string>()
-  return items.filter((item) => {
-    const key = item.name
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
-
 /**
  * 解析 Mode
  *
@@ -93,6 +46,7 @@ export const normalizeModeItems = (value: unknown): ModeConfigItem[] => {
     return [
       {
         name,
+        filePath: toNonEmptyString(raw.filePath),
       },
     ]
   })
@@ -140,12 +94,6 @@ export const readResources = (
     mode: modes,
 
     focusModes: normalizeFocusModes(data?.focusModes, modes),
-
-    group: normalizeBaseItems(data?.groups ?? data?.group),
-
-    tc: normalizeBaseItems(data?.tcs ?? data?.tc),
-
-    subattr: normalizeBaseItems(data?.subattrs ?? data?.subattr),
   }
 }
 
@@ -153,28 +101,12 @@ export const readResources = (
  * ResourceStore -> 配置保存结构
  */
 export const createResourcePatch = (store: ResourceStore) => {
-  const uniqueNames = (items: BaseConfigItem[]) => {
-    const seen = new Set<string>()
-    return items.flatMap((item) => {
-      const name = item.name.trim()
-      const key = name
-      if (!name || seen.has(key)) return []
-      seen.add(key)
-      return [name]
-    })
-  }
-
   return {
     modes: store.mode.map((item) => ({
       name: item.name,
+      ...(item.filePath ? { filePath: item.filePath } : {}),
     })),
 
     focusModes: store.focusModes,
-
-    groups: uniqueNames(store.group),
-
-    tcs: uniqueNames(store.tc),
-
-    subattrs: uniqueNames(store.subattr),
   }
 }

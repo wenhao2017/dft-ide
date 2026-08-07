@@ -123,7 +123,6 @@ const VerificationFlow: React.FC = () => {
           <ModePanel
             key="execution-sidebar"
             accent="#059669"
-            initialTab="mode"
             initialCollapsed={false}
             title="模式与参数配置"
             onSelect={handleSelect}

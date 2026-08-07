@@ -1,40 +1,22 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 
-import { Button, Empty, message, Slider, Space, Tooltip } from 'antd'
+import { Empty, Slider, Tooltip } from 'antd'
 
 export interface StepSelectorStep {
   id: string
   name: string
 }
 
-export type StepSelectorPresets = Record<string, string[]>
-
 interface StepSelectorProps {
   steps: StepSelectorStep[]
   range: [number, number]
   onChange: (range: [number, number]) => void
-  presets?: StepSelectorPresets
 }
 
 interface SliderMark {
   label: ReactNode
   style: CSSProperties
-}
-
-export const VERIFICATION_STEP_PRESETS: StepSelectorPresets = {
-  Plan: ['gen_plan_env', 'release_plan', 'gen_atpg_setting', 'gen_pdl_env'],
-  Env: [
-    'gen_atpg_env_pre',
-    'gen_atpg_env',
-    'gen_crg_env',
-    'run_crg_gen',
-    'run_atpg',
-    'gen_all_scan_env',
-    'run_all_scan',
-    'delivery_data',
-  ],
-  Sim: ['sed_3d_tb', 'gen_sim_env', 'run_sim'],
 }
 
 const normalizeRange = (
@@ -46,32 +28,12 @@ const normalizeRange = (
   return start <= end ? [start, end] : [end, start]
 }
 
-const findContinuousRange = (
-  steps: StepSelectorStep[],
-  names: string[],
-): [number, number] | undefined => {
-  if (!names.length) {
-    return undefined
-  }
-
-  for (let start = 0; start <= steps.length - names.length; start++) {
-    const matched = names.every(
-      (name, offset) => steps[start + offset]?.name === name,
-    )
-    if (matched) {
-      return [start, start + names.length - 1]
-    }
-  }
-
-  return undefined
-}
-
 export default function StepSelector({
   steps,
   range,
   onChange,
-  presets,
 }: StepSelectorProps) {
+  const [hoveredStepIndex, setHoveredStepIndex] = useState<number>()
   const maxIndex = Math.max(steps.length - 1, 0)
   const safeRange = useMemo(
     () => normalizeRange(range, maxIndex),
@@ -86,7 +48,11 @@ export default function StepSelector({
           pointerEvents: 'none',
         },
         label: (
-          <Tooltip title={step.name} placement="top" mouseEnterDelay={0}>
+          <Tooltip
+            title={step.name}
+            placement="top"
+            open={hoveredStepIndex === index}
+          >
             <span
               style={{
                 position: 'relative',
@@ -106,43 +72,29 @@ export default function StepSelector({
       }
       return result
     }, {})
-  }, [steps])
-
-  const applyPreset = (name: string, stepNames?: string[]) => {
-    if (!stepNames?.length) {
-      message.warning(`${name} 未配置 Step`)
-      return
-    }
-
-    const result = findContinuousRange(steps, stepNames)
-    if (!result) {
-      message.warning(`${name} 预设不满足当前 Step 顺序`)
-      return
-    }
-
-    onChange(result)
-  }
+  }, [hoveredStepIndex, steps])
 
   if (!steps.length) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 Step" />
   }
 
   return (
-    <Space direction="vertical" size={14} style={{ width: '100%' }}>
-      {presets && (
-        <Space wrap>
-          {Object.entries(presets).map(([name, value]) => (
-            <Button
-              key={name}
-              size="small"
-              onClick={() => applyPreset(name, value)}
-            >
-              {name}
-            </Button>
-          ))}
-        </Space>
-      )}
+    <div
+      onPointerMove={(event) => {
+        const bounds = event.currentTarget.getBoundingClientRect()
+        const stepWidth = maxIndex > 0 ? bounds.width / maxIndex : bounds.width
+        const nearestIndex = maxIndex > 0
+          ? Math.round((event.clientX - bounds.left) / stepWidth)
+          : 0
+        const nodeX = bounds.left + nearestIndex * stepWidth
+        const nextIndex = Math.abs(event.clientX - nodeX) <= 14
+          ? Math.max(0, Math.min(nearestIndex, maxIndex))
+          : undefined
 
+        setHoveredStepIndex((current) => current === nextIndex ? current : nextIndex)
+      }}
+      onPointerLeave={() => setHoveredStepIndex(undefined)}
+    >
       <Slider
         range={{ draggableTrack: true }}
         dots
@@ -164,6 +116,6 @@ export default function StepSelector({
           }
         }}
       />
-    </Space>
+    </div>
   )
 }

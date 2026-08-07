@@ -486,7 +486,7 @@ function buildStepCommands(
     const scriptContent = commands.map(cmd => cmd.trim()).join('\n');
     fs.writeFileSync(
       targetFile,
-      `#!/bin/csh -f\nstty sane >& /dev/null\nstty onlcr >& /dev/null\n${scriptContent}\n`,
+      `#!/bin/csh -f\nstty sane >& /dev/null\nstty onlcr >& /dev/null\nsource /software/hicad/cshrc/cshrc.modules\n${scriptContent}\n`,
     );
     fs.chmodSync(targetFile, 0o755);
     return `source ${targetFile}`;

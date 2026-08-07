@@ -382,22 +382,6 @@
   enableTC: false
   enableSubAttr: false
 
-- id: gen_all_scan_env
-  name: gen_all_scan_env
-  command: "run_flow_lander --steps gen_all_scan_env"
-  description: Run lander flow gen_all_scan_env
-  enableGroup: false
-  enableTC: false
-  enableSubAttr: false
-
-- id: run_all_scan
-  name: run_all_scan
-  command: "run_flow_lander --steps run_all_scan"
-  description: Run lander flow run_all_scan
-  enableGroup: false
-  enableTC: false
-  enableSubAttr: false
-
 - id: gen_sim_env
   name: gen_sim_env
   command: "run_flow_lander --steps gen_sim_env"
@@ -410,6 +394,22 @@
   name: run_sim
   command: "run_flow_lander --steps run_sim"
   description: Run lander flow run_sim
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: gen_all_scan_env
+  name: gen_all_scan_env
+  command: "run_flow_lander --steps gen_all_scan_env"
+  description: Run lander flow gen_all_scan_env
+  enableGroup: false
+  enableTC: false
+  enableSubAttr: false
+
+- id: run_all_scan
+  name: run_all_scan
+  command: "run_flow_lander --steps run_all_scan"
+  description: Run lander flow run_all_scan
   enableGroup: false
   enableTC: false
   enableSubAttr: false

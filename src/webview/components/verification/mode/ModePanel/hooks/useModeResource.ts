@@ -11,9 +11,6 @@ import { createResourcePatch, readResources } from '../resource'
 const EMPTY_RESOURCE: ResourceStore = {
   mode: [],
   focusModes: [],
-  group: [],
-  tc: [],
-  subattr: [],
 }
 
 const cloneResources = (store: ResourceStore): ResourceStore => {
@@ -23,18 +20,6 @@ const cloneResources = (store: ResourceStore): ResourceStore => {
     })),
 
     focusModes: [...store.focusModes],
-
-    group: store.group.map((item) => ({
-      ...item,
-    })),
-
-    tc: store.tc.map((item) => ({
-      ...item,
-    })),
-
-    subattr: store.subattr.map((item) => ({
-      ...item,
-    })),
   }
 }
 

@@ -46,9 +46,7 @@ import {
 import { confirmDelete } from '../../utils/confirmDelete';
 import usePipelineRuntimeStore from '../../store/pipelineRuntimeStore';
 import { useShallow } from 'zustand/react/shallow';
-import StepSelector, {
-  VERIFICATION_STEP_PRESETS,
-} from '../verification/mode/StepSelector';
+import StepSelector from '../verification/mode/StepSelector';
 
 const { Text, Title } = Typography;
 
@@ -917,7 +915,6 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
               <StepSelector
                 steps={stepList}
                 range={modalStepRange}
-                presets={flow === 'verification' ? VERIFICATION_STEP_PRESETS : undefined}
                 onChange={setModalStepRange}
               />
             </div>

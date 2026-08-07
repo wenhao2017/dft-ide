@@ -27,6 +27,18 @@ export interface LanderFlowSelectionOptions {
   init?: boolean
 }
 
+export interface LanderModeConfigInfo {
+  atpgStage: string
+  atpgMode: string
+  parameters: LanderModeParameters
+}
+
+export interface LanderModeParameters {
+  groups: string[]
+  tcs: string[]
+  subattrs: string[]
+}
+
 type CfgCommand = { name: string; options: Map<string, string> }
 
 function parseCfgCommands(content: string): CfgCommand[] {
@@ -46,6 +58,80 @@ function parseCfgCommands(content: string): CfgCommand[] {
     }
     return [{ name, options }]
   })
+}
+
+export function parseLanderModeConfigInfo(content: string): LanderModeConfigInfo {
+  const atpg = parseCfgCommands(content).find((item) => item.name === 'define_atpg_info')
+
+  return {
+    atpgStage: atpg?.options.get('stage') ?? '',
+    atpgMode: atpg?.options.get('mode') ?? '',
+    parameters: parseLanderModeParameters(content),
+  }
+}
+
+const PARAMETER_OPTIONS = {
+  groups: ['group', 'groups'],
+  tcs: ['tc', 'tcs'],
+  subattrs: ['subattr', 'subattrs'],
+} as const
+
+function splitParameterValues(value: string): string[] {
+  return value
+    .replace(/^\[|\]$/g, '')
+    .split(/[\s,;]+/)
+    .map((item) => item.trim().replace(/^(?:"|'|\{)|(?:"|'|\})$/g, ''))
+    .filter(Boolean)
+}
+
+/**
+ * Resolve the parameter choices owned by one mode.cfg.
+ *
+ * Today inline Group/TC/SubAttr options are supported. Keeping this loader on
+ * the extension-host side gives xlsx/json-backed parameter sources a single
+ * integration point without reintroducing those values as global resources.
+ */
+export function parseLanderModeParameters(content: string): LanderModeParameters {
+  const commands = parseCfgCommands(content)
+  const readOptions = (optionNames: readonly string[]) => {
+    const values = commands.flatMap((command) => optionNames.flatMap((optionName) => {
+      const value = command.options.get(optionName)
+      return value === undefined ? [] : splitParameterValues(value)
+    }))
+    return Array.from(new Set(values))
+  }
+
+  return {
+    groups: readOptions(PARAMETER_OPTIONS.groups),
+    tcs: readOptions(PARAMETER_OPTIONS.tcs),
+    subattrs: readOptions(PARAMETER_OPTIONS.subattrs),
+  }
+}
+
+async function readModeConfig(cfgPath: string): Promise<string> {
+  if (!cfgPath.toLowerCase().endsWith('.cfg')) {
+    throw new Error('Mode 配置文件必须是 .cfg 文件')
+  }
+
+  try {
+    const cfgBytes = await vscode.workspace.fs.readFile(vscode.Uri.file(cfgPath))
+    return new TextDecoder('utf-8', { fatal: true }).decode(cfgBytes)
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`读取或解析 mode.cfg 失败: ${reason}`)
+  }
+}
+
+export async function getLanderModeConfigInfo(
+  cfgPath: string,
+): Promise<LanderModeConfigInfo> {
+  return parseLanderModeConfigInfo(await readModeConfig(cfgPath))
+}
+
+export async function getLanderModeParameters(
+  cfgPath: string,
+): Promise<LanderModeParameters> {
+  return parseLanderModeParameters(await readModeConfig(cfgPath))
 }
 
 function selectFlowNames(content: string, options: LanderFlowSelectionOptions): string[] {
@@ -125,15 +211,7 @@ export async function getLanderModePipelines(
 
   if (!cfgPath) return result.data
 
-  if (!cfgPath.toLowerCase().endsWith('.cfg')) throw new Error('Mode 配置文件必须是 .cfg 文件')
-  let cfgContent: string
-  try {
-    const cfgBytes = await vscode.workspace.fs.readFile(vscode.Uri.file(cfgPath))
-    cfgContent = new TextDecoder('utf-8', { fatal: true }).decode(cfgBytes)
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    throw new Error(`读取或解析 mode.cfg 失败: ${reason}`)
-  }
+  const cfgContent = await readModeConfig(cfgPath)
 
   const selectedNames = selectFlowNames(cfgContent, selectionOptions)
   if (!selectedNames.length) {

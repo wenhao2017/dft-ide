@@ -10,6 +10,8 @@ import { executeFileCommand, pathExists, isRecord } from './utils';
 import dayjs from 'dayjs';
 import { DftProject } from '../webview/services/projectService';
 import { inferDftFlow } from './diagnosticsService';
+import { obsTrackingService } from './obsTrackingService';
+import { getObsScriptConfig } from './configService';
 
 export function toConfigPathSegment(flow: string): string {
   const normalized = flow.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
@@ -403,7 +405,7 @@ export async function initProjectWorkspace(project: DftProject): Promise<string>
   const localStateUri = vscode.Uri.joinPath(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR);
   await vscode.workspace.fs.createDirectory(localStateUri);
   await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(localStateUri, 'obs'));
-  await writeDefaultLocalState(localStateUri, repos);
+  await writeDefaultLocalState(localStateUri, repos, project.domain?.key as string);
 
   await ensureLocalStateIgnored(projectRoot.fsPath, localStateUri.fsPath);
 
@@ -606,7 +608,7 @@ export async function writeDefaultLocalState(localStateUri: vscode.Uri, repos: {
   key: string,
   gitlabProjectName: string,
   localPath: string,
-}[]) {
+}[], domain: string) {
   for (const repo of repos) {
     const fileName = repo.key === 'data' ? 'common' : repo.key;
 
@@ -658,6 +660,27 @@ export async function writeDefaultLocalState(localStateUri: vscode.Uri, repos: {
         if (isExists) {
           stateObject.project = cshrcFilePath;
           await writeFile(stateUri, JSON.stringify(stateObject, null, 2));
+        }
+      }
+      if (repo.key === 'verification' && !stateObject.landerAssistant) {
+        const assistantFilePath = path.join(repo.localPath, 'LANDER_ASSISTANT.json');
+        try {
+          const obsScriptConfig = await getObsScriptConfig(repo.key, domain);
+          const remoteAssistant = path.posix.join(
+            obsScriptConfig.remoteScriptPath,
+            obsScriptConfig.remoteScriptFiles[0].fileName.replace(/\\/g, '/'),
+            'LANDER_ASSISTANT.json',
+          );
+          await obsTrackingService.downloadFile(
+            obsScriptConfig.scriptSpace,
+            remoteAssistant,
+            vscode.Uri.file(assistantFilePath),
+            { overwriteUntracked: true },
+          );
+          stateObject.landerAssistant = assistantFilePath;
+          await writeFile(stateUri, JSON.stringify(stateObject, null, 2));
+        } catch {
+          console.warn('no LANDER_ASSISTANT in obs');
         }
       }
     }
@@ -1058,7 +1081,7 @@ export async function doConfigTransform(transformLog: TransformLog): Promise<Tra
   } catch (error) {
     activeDefaultConfigRuns.delete(runKey);
     throw error;
-  } finally{
+  } finally {
     transformLog = { ...transformLog, finished: true };
   }
   return transformLog;
@@ -1079,7 +1102,7 @@ function getFlowTransformCommand(transformLog: TransformLog, marker: string): st
       if (!transformLog.designTree || !transformLog.normTable || !transformLog.module) {
         throw new Error('缺少 design tree、归一化表格或 module。');
       }
-      if(transformLog.isAllSelected){
+      if (transformLog.isAllSelected) {
         return [
           `${quoteCshArg(transformLog.scriptPath)} ${quoteCshArg(transformLog.designTree)} ${quoteCshArg(transformLog.normTable)} | tee ${quoteCshArg(transformLog.logFile!)}`,
           'set dft_ide_default_config_status = $status',
@@ -1092,25 +1115,25 @@ function getFlowTransformCommand(transformLog: TransformLog, marker: string): st
           `echo "${marker}$dft_ide_default_config_status"`,
         ].join('; ');
       }
-      
+
   }
 }
 
 export async function isDirectoryExists(dir: string) {
   try {
-      const stat = await vscode.workspace.fs.stat(vscode.Uri.file(dir));
-      return stat.type === vscode.FileType.Directory;
+    const stat = await vscode.workspace.fs.stat(vscode.Uri.file(dir));
+    return stat.type === vscode.FileType.Directory;
   } catch (error) {
-      return false;
+    return false;
   }
 }
 
 export async function copyDirectory(srcDir: string, destDir: string) {
   try {
-      await vscode.workspace.fs.copy(vscode.Uri.file(srcDir), vscode.Uri.file(destDir), { overwrite: true });
+    await vscode.workspace.fs.copy(vscode.Uri.file(srcDir), vscode.Uri.file(destDir), { overwrite: true });
   } catch (error) {
-      console.error('stage 复制目录失败:', error);
-      throw error;
+    console.error('stage 复制目录失败:', error);
+    throw error;
   }
 }
 

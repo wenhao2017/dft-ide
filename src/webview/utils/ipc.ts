@@ -1246,6 +1246,12 @@ export interface GetLanderModePipelinesResult extends Record<string, unknown> {
 
   steps: LanderStep[]
 
+  parameters: {
+    groups: string[]
+    tcs: string[]
+    subattrs: string[]
+  }
+
   error?: string
 }
 
@@ -1255,6 +1261,57 @@ export async function getLanderModePipelines(options: {
   init?: boolean
 } = {}): Promise<GetLanderModePipelinesResult> {
   return ipcRequest<GetLanderModePipelinesResult>('getLanderModePipelines', options)
+}
+
+export interface LanderModeConfigInfo {
+  atpgStage: string
+  atpgMode: string
+  parameters: {
+    groups: string[]
+    tcs: string[]
+    subattrs: string[]
+  }
+}
+
+export interface GetLanderModeConfigInfoResult extends Record<string, unknown> {
+  success: boolean
+  info: LanderModeConfigInfo
+  error?: string
+}
+
+export async function getLanderModeConfigInfo(options: {
+  stage?: string
+  modeName: string
+}): Promise<GetLanderModeConfigInfoResult> {
+  return ipcRequest<GetLanderModeConfigInfoResult>('getLanderModeConfigInfo', options)
+}
+
+export interface ExecuteLanderStrategyResult extends Record<string, unknown> {
+  success: boolean
+  result?: {
+    implemented: boolean
+    cfgPath: string
+    outputDirectory: string
+    outputPath: string
+    sourceExtensions: readonly string[]
+    steps: Array<{
+      id: string
+      name: string
+      command: string
+      description: string
+      enableGroup: boolean
+      enableTC: boolean
+      enableSubAttr: boolean
+    }>
+  }
+  error?: string
+}
+
+export async function executeLanderStrategy(options: {
+  stage: string
+  modeName: string
+}): Promise<ExecuteLanderStrategyResult> {
+  return ipcRequest<ExecuteLanderStrategyResult>('executeLanderStrategy', options)
 }
 
 export async function getModules(

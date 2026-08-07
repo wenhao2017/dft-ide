@@ -9,6 +9,7 @@ import {
   EditOutlined,
   PlayCircleOutlined,
   FileOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 
 import type { ModePanelItem, ModePanelTab } from '../../types'
@@ -39,6 +40,8 @@ interface ModeListProps {
 
   onRun: (item: ModePanelItem) => void
 
+  onRunStrategy: (item: ModePanelItem) => void
+
   onStop: (item: ModePanelItem) => void
 
   openSelected: (item: ModePanelItem) => void
@@ -52,9 +55,6 @@ interface ModeListProps {
 
 const TAB_LABELS: Record<ModePanelTab, string> = {
   mode: '模式',
-  group: 'Group',
-  tc: 'TC',
-  subattr: 'SubAttr',
 }
 
 export default function ModeList({
@@ -67,6 +67,7 @@ export default function ModeList({
   onSelect,
   onCheckedChange,
   onRun,
+  onRunStrategy,
   onStop,
   openSelected,
   duplicateSelected,
@@ -113,12 +114,15 @@ export default function ModeList({
 
         const modeItem = tab === 'mode' ? item : undefined
 
-        const dropdownItems = [
+        let dropdownItems = [
           { key: 'open', icon: <FileOutlined />, label: '打开' },
           { key: 'copy', icon: <CopyOutlined />, label: '复制' },
           { key: 'rename', icon: <EditOutlined />, label: '重命名' },
           { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true },
         ];
+        if (tab !== 'mode') {
+          dropdownItems = dropdownItems.filter(item => item.key !== 'open');
+        }
 
         return (
           <Dropdown
@@ -255,6 +259,25 @@ export default function ModeList({
                     flexShrink: 0,
                   }}
                 >
+                  <Tooltip title="策略执行">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<ThunderboltOutlined />}
+                      onClick={() => {
+                        onRunStrategy(item)
+                      }}
+                      style={{
+                        width: 26,
+                        height: 26,
+                        padding: 0,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: accent,
+                      }}
+                    />
+                  </Tooltip>
                   {running && (
                     <Tooltip title="启动新实例">
                       <Button
