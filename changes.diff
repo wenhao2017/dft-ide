@@ -1,0 +1,2216 @@
+diff --git a/pipelines/lander.yaml b/pipelines/lander.yaml
+index ac47d29..e56627b 100644
+--- a/pipelines/lander.yaml
++++ b/pipelines/lander.yaml
+@@ -382,22 +382,6 @@
+   enableTC: false
+   enableSubAttr: false
+ 
+-- id: gen_all_scan_env
+-  name: gen_all_scan_env
+-  command: "run_flow_lander --steps gen_all_scan_env"
+-  description: Run lander flow gen_all_scan_env
+-  enableGroup: false
+-  enableTC: false
+-  enableSubAttr: false
+-
+-- id: run_all_scan
+-  name: run_all_scan
+-  command: "run_flow_lander --steps run_all_scan"
+-  description: Run lander flow run_all_scan
+-  enableGroup: false
+-  enableTC: false
+-  enableSubAttr: false
+-
+ - id: gen_sim_env
+   name: gen_sim_env
+   command: "run_flow_lander --steps gen_sim_env"
+@@ -414,6 +398,22 @@
+   enableTC: false
+   enableSubAttr: false
+ 
++- id: gen_all_scan_env
++  name: gen_all_scan_env
++  command: "run_flow_lander --steps gen_all_scan_env"
++  description: Run lander flow gen_all_scan_env
++  enableGroup: false
++  enableTC: false
++  enableSubAttr: false
++
++- id: run_all_scan
++  name: run_all_scan
++  command: "run_flow_lander --steps run_all_scan"
++  description: Run lander flow run_all_scan
++  enableGroup: false
++  enableTC: false
++  enableSubAttr: false
++
+ - id: upload_simu_database_pre
+   name: upload_simu_database_pre
+   command: "run_flow_lander --steps upload_simu_database_pre"
+diff --git a/src/extension.ts b/src/extension.ts
+index 4a5180a..030641c 100644
+--- a/src/extension.ts
++++ b/src/extension.ts
+@@ -16,6 +16,8 @@ import { getWebviewHtml, InitialWebviewCommand } from './webviewHtml';
+ import { environmentDefaults, getEnvironmentSetting } from './config/environment';
+ import { SpreadsheetProvider } from "./spreadsheet"
+ import {
++  handleExecuteLanderStrategy,
++  handleGetLanderModeConfigInfo,
+   handleGetLanderModePipelines,
+ } from './ipc/landerPipelineIpc';
+ // Import constants
+@@ -2820,6 +2822,16 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+         return;
+       }
+ 
++      case 'getLanderModeConfigInfo': {
++        await handleGetLanderModeConfigInfo(currentPanel, msg);
++        return;
++      }
++
++      case 'executeLanderStrategy': {
++        await handleExecuteLanderStrategy(currentPanel, msg);
++        return;
++      }
++
+       case 'syncVerificationModes': {
+         const requestId: string = msg.requestId;
+         try {
+diff --git a/src/ipc/landerPipelineIpc.ts b/src/ipc/landerPipelineIpc.ts
+index 4fb087c..2628f97 100644
+--- a/src/ipc/landerPipelineIpc.ts
++++ b/src/ipc/landerPipelineIpc.ts
+@@ -1,9 +1,10 @@
+ import * as vscode from 'vscode'
+ import * as path from 'path'
+ 
+-import { getLanderModePipelines } from '../services/landerPipelineService'
++import { getLanderModeConfigInfo, getLanderModeParameters, getLanderModePipelines } from '../services/landerPipelineService'
++import { executeLanderStrategy } from '../services/landerStrategyService'
+ import { normalizeStageName, resolveProjectRepoRoot } from '../services/workspaceService'
+-import type { LanderStep } from '../services/landerPipelineService'
++import type { LanderModeConfigInfo, LanderModeParameters, LanderStep } from '../services/landerPipelineService'
+ 
+ export interface GetLanderModePipelinesMessage {
+   requestId?: unknown
+@@ -17,9 +18,48 @@ export interface GetLanderModePipelinesResponse {
+   requestId: string
+   success: boolean
+   steps: LanderStep[]
++  parameters: LanderModeParameters
+   error?: string
+ }
+ 
++function normalizeModeName(value: unknown): string {
++  if (typeof value !== 'string') throw new Error('Mode name is required.')
++  const modeName = value.trim().replace(/\.cfg$/i, '')
++  if (!modeName || modeName === '.' || modeName === '..' || path.basename(modeName) !== modeName) {
++    throw new Error(`Invalid Mode name: ${String(value)}`)
++  }
++  return modeName
++}
++
++async function resolveModeConfigPath(stageValue: unknown, modeValue: unknown): Promise<string> {
++  const stage = normalizeStageName(stageValue)
++  const modeName = normalizeModeName(modeValue)
++  const repoRoot = await resolveProjectRepoRoot('verification')
++  return path.join(repoRoot, stage, 'lander_env', 'lander_cfg', `${modeName}.cfg`)
++}
++
++export async function handleGetLanderModeConfigInfo(
++  panel: vscode.WebviewPanel | undefined,
++  msg: { requestId?: unknown; stage?: unknown; modeName?: unknown },
++): Promise<void> {
++  if (!panel) return
++  const requestId = typeof msg.requestId === 'string' ? msg.requestId : String(msg.requestId ?? '')
++
++  try {
++    const cfgPath = await resolveModeConfigPath(msg.stage, msg.modeName)
++    const info: LanderModeConfigInfo = await getLanderModeConfigInfo(cfgPath)
++    await panel.webview.postMessage({
++      command: 'getLanderModeConfigInfoResponse', requestId, success: true, info,
++    })
++  } catch (error) {
++    await panel.webview.postMessage({
++      command: 'getLanderModeConfigInfoResponse', requestId, success: false,
++      info: { atpgStage: '', atpgMode: '' },
++      error: error instanceof Error ? error.message : String(error),
++    })
++  }
++}
++
+ export async function handleGetLanderModePipelines(
+   context: vscode.ExtensionContext,
+   panel: vscode.WebviewPanel | undefined,
+@@ -31,22 +71,48 @@ export async function handleGetLanderModePipelines(
+   try {
+     let cfgPath: string | undefined
+     if (msg.modeName !== undefined) {
+-      if (typeof msg.modeName !== 'string') throw new Error('Mode name is required.')
+-      const modeName = msg.modeName.trim().replace(/\.cfg$/i, '')
+-      if (!modeName || modeName === '.' || modeName === '..' || path.basename(modeName) !== modeName) {
+-        throw new Error(`Invalid Mode name: ${String(msg.modeName)}`)
+-      }
+-      const stage = normalizeStageName(msg.stage)
+-      const repoRoot = await resolveProjectRepoRoot('verification')
+-      cfgPath = path.join(repoRoot, stage, 'lander_env', 'lander_cfg', `${modeName}.cfg`)
++      cfgPath = await resolveModeConfigPath(msg.stage, msg.modeName)
+     }
+-    const steps = await getLanderModePipelines(context.extensionUri, cfgPath, {
+-      init: msg.init === true,
++    const [steps, parameters] = await Promise.all([
++      getLanderModePipelines(context.extensionUri, cfgPath, {
++        init: msg.init === true,
++      }),
++      cfgPath
++        ? getLanderModeParameters(cfgPath)
++        : Promise.resolve({ groups: [], tcs: [], subattrs: [] }),
++    ])
++    await panel.webview.postMessage({
++      command: 'getLanderModePipelinesResponse', requestId, success: true, steps, parameters,
+     })
+-    await panel.webview.postMessage({ command: 'getLanderModePipelinesResponse', requestId, success: true, steps })
+   } catch (error) {
+     await panel.webview.postMessage({
+       command: 'getLanderModePipelinesResponse', requestId, success: false, steps: [],
++      parameters: { groups: [], tcs: [], subattrs: [] },
++      error: error instanceof Error ? error.message : String(error),
++    })
++  }
++}
++
++export async function handleExecuteLanderStrategy(
++  panel: vscode.WebviewPanel | undefined,
++  msg: { requestId?: unknown; stage?: unknown; modeName?: unknown },
++): Promise<void> {
++  if (!panel) return
++  const requestId = typeof msg.requestId === 'string' ? msg.requestId : String(msg.requestId ?? '')
++
++  try {
++    const stage = normalizeStageName(msg.stage)
++    const modeName = normalizeModeName(msg.modeName)
++    const repoRoot = await resolveProjectRepoRoot('verification')
++    const cfgPath = path.join(repoRoot, stage, 'lander_env', 'lander_cfg', `${modeName}.cfg`)
++    const result = await executeLanderStrategy({ repoRoot, stage, modeName, cfgPath })
++
++    await panel.webview.postMessage({
++      command: 'executeLanderStrategyResponse', requestId, success: true, result,
++    })
++  } catch (error) {
++    await panel.webview.postMessage({
++      command: 'executeLanderStrategyResponse', requestId, success: false,
+       error: error instanceof Error ? error.message : String(error),
+     })
+   }
+diff --git a/src/services/landerPipelineService.ts b/src/services/landerPipelineService.ts
+index 064af27..a79a85d 100644
+--- a/src/services/landerPipelineService.ts
++++ b/src/services/landerPipelineService.ts
+@@ -27,6 +27,18 @@ export interface LanderFlowSelectionOptions {
+   init?: boolean
+ }
+ 
++export interface LanderModeConfigInfo {
++  atpgStage: string
++  atpgMode: string
++  parameters: LanderModeParameters
++}
++
++export interface LanderModeParameters {
++  groups: string[]
++  tcs: string[]
++  subattrs: string[]
++}
++
+ type CfgCommand = { name: string; options: Map<string, string> }
+ 
+ function parseCfgCommands(content: string): CfgCommand[] {
+@@ -48,6 +60,80 @@ function parseCfgCommands(content: string): CfgCommand[] {
+   })
+ }
+ 
++export function parseLanderModeConfigInfo(content: string): LanderModeConfigInfo {
++  const atpg = parseCfgCommands(content).find((item) => item.name === 'define_atpg_info')
++
++  return {
++    atpgStage: atpg?.options.get('stage') ?? '',
++    atpgMode: atpg?.options.get('mode') ?? '',
++    parameters: parseLanderModeParameters(content),
++  }
++}
++
++const PARAMETER_OPTIONS = {
++  groups: ['group', 'groups'],
++  tcs: ['tc', 'tcs'],
++  subattrs: ['subattr', 'subattrs'],
++} as const
++
++function splitParameterValues(value: string): string[] {
++  return value
++    .replace(/^\[|\]$/g, '')
++    .split(/[\s,;]+/)
++    .map((item) => item.trim().replace(/^(?:"|'|\{)|(?:"|'|\})$/g, ''))
++    .filter(Boolean)
++}
++
++/**
++ * Resolve the parameter choices owned by one mode.cfg.
++ *
++ * Today inline Group/TC/SubAttr options are supported. Keeping this loader on
++ * the extension-host side gives xlsx/json-backed parameter sources a single
++ * integration point without reintroducing those values as global resources.
++ */
++export function parseLanderModeParameters(content: string): LanderModeParameters {
++  const commands = parseCfgCommands(content)
++  const readOptions = (optionNames: readonly string[]) => {
++    const values = commands.flatMap((command) => optionNames.flatMap((optionName) => {
++      const value = command.options.get(optionName)
++      return value === undefined ? [] : splitParameterValues(value)
++    }))
++    return Array.from(new Set(values))
++  }
++
++  return {
++    groups: readOptions(PARAMETER_OPTIONS.groups),
++    tcs: readOptions(PARAMETER_OPTIONS.tcs),
++    subattrs: readOptions(PARAMETER_OPTIONS.subattrs),
++  }
++}
++
++async function readModeConfig(cfgPath: string): Promise<string> {
++  if (!cfgPath.toLowerCase().endsWith('.cfg')) {
++    throw new Error('Mode 配置文件必须是 .cfg 文件')
++  }
++
++  try {
++    const cfgBytes = await vscode.workspace.fs.readFile(vscode.Uri.file(cfgPath))
++    return new TextDecoder('utf-8', { fatal: true }).decode(cfgBytes)
++  } catch (error) {
++    const reason = error instanceof Error ? error.message : String(error)
++    throw new Error(`读取或解析 mode.cfg 失败: ${reason}`)
++  }
++}
++
++export async function getLanderModeConfigInfo(
++  cfgPath: string,
++): Promise<LanderModeConfigInfo> {
++  return parseLanderModeConfigInfo(await readModeConfig(cfgPath))
++}
++
++export async function getLanderModeParameters(
++  cfgPath: string,
++): Promise<LanderModeParameters> {
++  return parseLanderModeParameters(await readModeConfig(cfgPath))
++}
++
+ function selectFlowNames(content: string, options: LanderFlowSelectionOptions): string[] {
+   const commands = parseCfgCommands(content)
+   const command = (name: string) => commands.find((item) => item.name === name)
+@@ -125,15 +211,7 @@ export async function getLanderModePipelines(
+ 
+   if (!cfgPath) return result.data
+ 
+-  if (!cfgPath.toLowerCase().endsWith('.cfg')) throw new Error('Mode 配置文件必须是 .cfg 文件')
+-  let cfgContent: string
+-  try {
+-    const cfgBytes = await vscode.workspace.fs.readFile(vscode.Uri.file(cfgPath))
+-    cfgContent = new TextDecoder('utf-8', { fatal: true }).decode(cfgBytes)
+-  } catch (error) {
+-    const reason = error instanceof Error ? error.message : String(error)
+-    throw new Error(`读取或解析 mode.cfg 失败: ${reason}`)
+-  }
++  const cfgContent = await readModeConfig(cfgPath)
+ 
+   const selectedNames = selectFlowNames(cfgContent, selectionOptions)
+   if (!selectedNames.length) {
+diff --git a/src/services/landerStrategyService.ts b/src/services/landerStrategyService.ts
+new file mode 100644
+index 0000000..9bc00c9
+--- /dev/null
++++ b/src/services/landerStrategyService.ts
+@@ -0,0 +1,73 @@
++import * as path from 'path'
++
++export const LANDER_STRATEGY_SOURCE_EXTENSIONS = ['.json', '.xlsx', '.xls'] as const
++
++export interface LanderStrategyExecutionContext {
++  repoRoot: string
++  stage: string
++  modeName: string
++  cfgPath: string
++}
++
++export interface LanderStrategyExecutionResult {
++  implemented: false
++  cfgPath: string
++  outputDirectory: string
++  outputPath: string
++  sourceExtensions: readonly string[]
++  steps: LanderStrategyStep[]
++}
++
++export interface LanderStrategyStep {
++  id: string
++  name: string
++  command: string
++  description: string
++  enableGroup: boolean
++  enableTC: boolean
++  enableSubAttr: boolean
++}
++
++/**
++ * Reserved extension-host boundary for Lander strategy execution.
++ *
++ * Future implementation:
++ * 1. Parse cfgPath to replace the reserved step below with the actual steps.
++ * 2. Only after a successful execution, resolve the report directories from
++ *    the CFG and discover JSON/XLSX/XLS result files there.
++ * 3. Parse the discovered files and write one normalized JSON document to
++ *    <verification repo>/<stage>/lander_env/lander_strategy/<cfg filename>.json.
++ *
++ * Keeping this in the extension host ensures that filesystem/process access
++ * never leaks into the browser-only webview.
++ */
++export async function executeLanderStrategy(
++  context: LanderStrategyExecutionContext,
++): Promise<LanderStrategyExecutionResult> {
++  const strategyStepName = 'lander-strategy'
++  const outputDirectory = path.join(
++    context.repoRoot,
++    context.stage,
++    'lander_env',
++    'lander_strategy',
++  )
++
++  return {
++    implemented: false,
++    cfgPath: context.cfgPath,
++    outputDirectory,
++    outputPath: path.join(outputDirectory, `${context.modeName}.json`),
++    sourceExtensions: LANDER_STRATEGY_SOURCE_EXTENSIONS,
++    // Keep strategy submission on the regular pipeline runtime path today.
++    // The CFG parser will replace this placeholder with its own execution plan.
++    steps: [{
++      id: 'lander-strategy',
++      name: strategyStepName,
++      command: `run_flow_lander ${strategyStepName}`,
++      description: '预留任务：后续由 Mode CFG 解析结果提供实际执行步骤',
++      enableGroup: false,
++      enableTC: false,
++      enableSubAttr: false,
++    }],
++  }
++}
+diff --git a/src/services/pipelineRuntimeService.ts b/src/services/pipelineRuntimeService.ts
+index dfa2cf4..2bea648 100644
+--- a/src/services/pipelineRuntimeService.ts
++++ b/src/services/pipelineRuntimeService.ts
+@@ -486,7 +486,7 @@ function buildStepCommands(
+     const scriptContent = commands.map(cmd => cmd.trim()).join('\n');
+     fs.writeFileSync(
+       targetFile,
+-      `#!/bin/csh\nstty sane >& /dev/null\nstty onlcr >& /dev/null\n${scriptContent}\n`,
++      `#!/bin/csh -f\nstty sane >& /dev/null\nstty onlcr >& /dev/null\nsource /software/hicad/cshrc/cshrc.modules\n${scriptContent}\n`,
+     );
+     fs.chmodSync(targetFile, 0o755);
+     return `source ${targetFile}`;
+diff --git a/src/services/workspaceService.ts b/src/services/workspaceService.ts
+index 390b162..fb036e4 100644
+--- a/src/services/workspaceService.ts
++++ b/src/services/workspaceService.ts
+@@ -10,6 +10,8 @@ import { executeFileCommand, pathExists, isRecord } from './utils';
+ import dayjs from 'dayjs';
+ import { DftProject } from '../webview/services/projectService';
+ import { inferDftFlow } from './diagnosticsService';
++import { obsTrackingService } from './obsTrackingService';
++import { getObsScriptConfig } from './configService';
+ 
+ const terminalShellExecutionEndLabel = "DFT_IDE_Terminal_Shell_Execution_END";
+ 
+@@ -405,7 +407,7 @@ export async function initProjectWorkspace(project: DftProject): Promise<string>
+   const localStateUri = vscode.Uri.joinPath(projectRoot, LOCAL_STATE_DIR_NAME, LOCAL_STATE_SUBDIR);
+   await vscode.workspace.fs.createDirectory(localStateUri);
+   await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(localStateUri, 'obs'));
+-  await writeDefaultLocalState(localStateUri, repos);
++  await writeDefaultLocalState(localStateUri, repos, project.domain?.key as string);
+ 
+   await ensureLocalStateIgnored(projectRoot.fsPath, localStateUri.fsPath);
+ 
+@@ -614,7 +616,7 @@ export async function writeDefaultLocalState(localStateUri: vscode.Uri, repos: {
+   key: string,
+   gitlabProjectName: string,
+   localPath: string,
+-}[]) {
++}[], domain: string) {
+   for (const repo of repos) {
+     const fileName = repo.key === 'data' ? 'common' : repo.key;
+ 
+@@ -670,10 +672,17 @@ export async function writeDefaultLocalState(localStateUri: vscode.Uri, repos: {
+       }
+       if (repo.key === 'verification' && !stateObject.landerAssistant) {
+         const assistantFilePath = path.join(repo.localPath, 'LANDER_ASSISTANT.json');
+-        const isExists = await pathExists(assistantFilePath);
+-        if (isExists) {
++        try {
++          const obsScriptConfig = await getObsScriptConfig(repo.key, domain);
++          const remoteAssistant = path.posix.join(obsScriptConfig.remoteScriptPath,
++            obsScriptConfig.remoteScriptFiles[0].fileName.replace(/\\/g, '/'), 'LANDER_ASSISTANT.json');
++          await obsTrackingService.downloadFile(obsScriptConfig.scriptSpace, remoteAssistant, vscode.Uri.file(assistantFilePath), {
++            overwriteUntracked: true,
++          });
+           stateObject.landerAssistant = assistantFilePath;
+           await writeFile(stateUri, JSON.stringify(stateObject, null, 2));
++        } catch {
++          console.warn("no LANDER_ASSISTANT in obs")
+         }
+       }
+     }
+@@ -1074,7 +1083,7 @@ export async function doConfigTransform(transformLog: TransformLog): Promise<Tra
+   } catch (error) {
+     activeDefaultConfigRuns.delete(runKey);
+     throw error;
+-  } finally{
++  } finally {
+     transformLog = { ...transformLog, finished: true };
+   }
+   return transformLog;
+@@ -1095,7 +1104,7 @@ function getFlowTransformCommand(transformLog: TransformLog, marker: string): st
+       if (!transformLog.designTree || !transformLog.normTable || !transformLog.module) {
+         throw new Error('缺少 design tree、归一化表格或 module。');
+       }
+-      if(transformLog.isAllSelected){
++      if (transformLog.isAllSelected) {
+         return [
+           `${quoteCshArg(transformLog.scriptPath)} ${quoteCshArg(transformLog.designTree)} ${quoteCshArg(transformLog.normTable)} | tee ${quoteCshArg(transformLog.logFile!)}`,
+           'set dft_ide_default_config_status = $status',
+@@ -1108,25 +1117,25 @@ function getFlowTransformCommand(transformLog: TransformLog, marker: string): st
+           `echo "${marker}$dft_ide_default_config_status"`,
+         ].join('; ');
+       }
+-      
++
+   }
+ }
+ 
+ export async function isDirectoryExists(dir: string) {
+   try {
+-      const stat = await vscode.workspace.fs.stat(vscode.Uri.file(dir));
+-      return stat.type === vscode.FileType.Directory;
++    const stat = await vscode.workspace.fs.stat(vscode.Uri.file(dir));
++    return stat.type === vscode.FileType.Directory;
+   } catch (error) {
+-      return false;
++    return false;
+   }
+ }
+ 
+ export async function copyDirectory(srcDir: string, destDir: string) {
+   try {
+-      await vscode.workspace.fs.copy(vscode.Uri.file(srcDir), vscode.Uri.file(destDir), { overwrite: true });
++    await vscode.workspace.fs.copy(vscode.Uri.file(srcDir), vscode.Uri.file(destDir), { overwrite: true });
+   } catch (error) {
+-      console.error('stage 复制目录失败:', error);
+-      throw error;
++    console.error('stage 复制目录失败:', error);
++    throw error;
+   }
+ }
+ 
+diff --git a/src/webview/components/shared/DesignTreePanel.tsx b/src/webview/components/shared/DesignTreePanel.tsx
+index 00a1e0c..096bb04 100644
+--- a/src/webview/components/shared/DesignTreePanel.tsx
++++ b/src/webview/components/shared/DesignTreePanel.tsx
+@@ -46,9 +46,7 @@ import {
+ import { confirmDelete } from '../../utils/confirmDelete';
+ import usePipelineRuntimeStore from '../../store/pipelineRuntimeStore';
+ import { useShallow } from 'zustand/react/shallow';
+-import StepSelector, {
+-  VERIFICATION_STEP_PRESETS,
+-} from '../verification/mode/StepSelector';
++import StepSelector from '../verification/mode/StepSelector';
+ 
+ const { Text, Title } = Typography;
+ 
+@@ -917,7 +915,6 @@ const DesignTreePanel: React.FC<DesignTreePanelProps> = ({
+               <StepSelector
+                 steps={stepList}
+                 range={modalStepRange}
+-                presets={flow === 'verification' ? VERIFICATION_STEP_PRESETS : undefined}
+                 onChange={setModalStepRange}
+               />
+             </div>
+diff --git a/src/webview/components/verification/ReportParsingPanel.tsx b/src/webview/components/verification/ReportParsingPanel.tsx
+new file mode 100644
+index 0000000..d8d5045
+--- /dev/null
++++ b/src/webview/components/verification/ReportParsingPanel.tsx
+@@ -0,0 +1,173 @@
++import { useEffect, useMemo, useState } from 'react'
++
++import { FileSearchOutlined } from '@ant-design/icons'
++import { Alert, Button, Card, Empty, Form, Input, Select, Space, message } from 'antd'
++
++import { getLanderModeConfigInfo } from '../../utils/ipc'
++import useWizardStore from '../../store/wizardStore'
++import { readResources } from './mode/ModePanel/resource'
++import { useVerificationStageConfig } from './mode/ModePanel/hooks/useVerificationStageConfig'
++
++const selectStyle = { width: 240 }
++
++export default function ReportParsingPanel() {
++  const { stage, stageConfig, loading } = useVerificationStageConfig()
++  const activeProject = useWizardStore((state) => state.activeProject)
++  const resources = useMemo(() => readResources(stageConfig), [stageConfig])
++  const [mode, setMode] = useState<string>()
++  const [tc, setTc] = useState<string>()
++  const [tcNames, setTcNames] = useState<string[]>([])
++  const [landerVersion, setLanderVersion] = useState('')
++  const [atpgStage, setAtpgStage] = useState('')
++  const [atpgMode, setAtpgMode] = useState('')
++  const [parsing, setParsing] = useState(false)
++  const [parseError, setParseError] = useState('')
++
++  const modeOptions = useMemo(
++    () => resources.mode.map((item) => ({ label: item.name, value: item.name })),
++    [resources.mode],
++  )
++  const tcOptions = useMemo(
++    () => tcNames.map((name) => ({ label: name, value: name })),
++    [tcNames],
++  )
++  const runSimPath = useMemo(() => {
++    const projectPath = activeProject?.rootPath?.trim().replace(/[\\/]+$/, '')
++    const projectName = activeProject?.name.trim()
++    if (!projectPath || !projectName || !stage) return ''
++
++    return `${projectPath}/${projectName}_verification/${stage}/verification/work/03.run_sim`
++  }, [activeProject?.name, activeProject?.rootPath, stage])
++
++  const handleAnalyze = () => {
++    message.info('分析脚本尚未接入')
++  }
++
++  useEffect(() => {
++    if (mode && !resources.mode.some((item) => item.name === mode)) {
++      setMode(undefined)
++    }
++    if (tc && !tcNames.includes(tc)) {
++      setTc(undefined)
++    }
++  }, [mode, resources.mode, tc, tcNames])
++
++  useEffect(() => {
++    let disposed = false
++    setAtpgStage('')
++    setAtpgMode('')
++    setTcNames([])
++    setParseError('')
++
++    if (!mode || !stage) {
++      setParsing(false)
++      return () => {
++        disposed = true
++      }
++    }
++
++    setParsing(true)
++    void getLanderModeConfigInfo({ stage, modeName: mode }).then(
++      (result) => {
++        if (disposed) return
++        if (result.success) {
++          setAtpgStage(result.info.atpgStage)
++          setAtpgMode(result.info.atpgMode)
++          setTcNames(result.info.parameters?.tcs ?? [])
++        } else {
++          setParseError(result.error ?? 'Mode 配置解析失败')
++        }
++        setParsing(false)
++      },
++      (error) => {
++        if (disposed) return
++        setParseError(error instanceof Error ? error.message : String(error))
++        setParsing(false)
++      },
++    )
++
++    return () => {
++      disposed = true
++    }
++  }, [mode, stage])
++
++  return (
++    <Space direction="vertical" size={24} style={{ width: '100%' }}>
++      <Card size="small" title="参数选择">
++        <Form layout="inline">
++          <Form.Item label="配置文件" style={{ marginBottom: 8 }}>
++            <Select
++              allowClear
++              showSearch
++              loading={loading}
++              optionFilterProp="label"
++              options={modeOptions}
++              placeholder="请选择 Mode"
++              style={selectStyle}
++              value={mode}
++              onChange={setMode}
++            />
++          </Form.Item>
++          <Form.Item label="sample" style={{ marginBottom: 8 }}>
++            <Select
++              allowClear
++              showSearch
++              loading={loading}
++              optionFilterProp="label"
++              options={tcOptions}
++              placeholder="请选择 TC"
++              style={selectStyle}
++              value={tc}
++              onChange={setTc}
++            />
++          </Form.Item>
++          <Form.Item label="atpg_stage" style={{ marginBottom: 8 }}>
++            <Input
++              readOnly
++              value={atpgStage}
++              placeholder={mode ? (parsing ? '正在解析...' : '未配置') : '选择 Mode 后自动解析'}
++              style={selectStyle}
++            />
++          </Form.Item>
++          <Form.Item label="atpg_mode" style={{ marginBottom: 8 }}>
++            <Input
++              readOnly
++              value={atpgMode}
++              placeholder={mode ? (parsing ? '正在解析...' : '未配置') : '选择 Mode 后自动解析'}
++              style={selectStyle}
++            />
++          </Form.Item>
++          <Form.Item label="lander_version" style={{ marginBottom: 8 }}>
++            <Input
++              allowClear
++              value={landerVersion}
++              placeholder="选填"
++              style={selectStyle}
++              onChange={(event) => setLanderVersion(event.target.value)}
++            />
++          </Form.Item>
++          <Form.Item label="run_sim_path" style={{ marginBottom: 8 }}>
++            <Input
++              readOnly
++              value={runSimPath}
++              style={{ width: 520 }}
++            />
++          </Form.Item>
++          <Form.Item style={{ marginBottom: 8 }}>
++            <Button type="primary" onClick={handleAnalyze}>
++              分析
++            </Button>
++          </Form.Item>
++        </Form>
++        {parseError && (
++          <Alert showIcon type="error" message="Mode 配置解析失败" description={parseError} />
++        )}
++      </Card>
++
++      <Empty
++        image={<FileSearchOutlined style={{ fontSize: 48 }} />}
++        description="功能预留，后续支持报告解析"
++      />
++    </Space>
++  )
++}
+diff --git a/src/webview/components/verification/Step3_Result.tsx b/src/webview/components/verification/Step3_Result.tsx
+index ef4e447..cac1462 100644
+--- a/src/webview/components/verification/Step3_Result.tsx
++++ b/src/webview/components/verification/Step3_Result.tsx
+@@ -1,9 +1,8 @@
+ import React, { useState, useEffect } from 'react';
+-import { Button, Empty, Tabs, message } from 'antd';
++import { Button, Tabs, message } from 'antd';
+ import {
+   LeftOutlined,
+   RightOutlined,
+-  FileSearchOutlined,
+   CloudUploadOutlined,
+ } from '@ant-design/icons';
+ import ExecutionHistoryList from '../shared/ExecutionHistoryList';
+@@ -11,6 +10,7 @@ import { getExecutionHistory, ExecutionHistoryRecord } from '../../utils/ipc';
+ import { uploadExecutionData } from '../../services/projectService';
+ import useWizardStore from '../../store/wizardStore';
+ import ExecutionHistoryDetail from '../shared/ExecutionHistoryDetail';
++import ReportParsingPanel from './ReportParsingPanel';
+ 
+ interface Props {
+   onNext: () => void;
+@@ -77,8 +77,13 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
+   return (
+     <div style={{ padding: '16px 0' }}>
+       <Tabs
+-        defaultActiveKey={'history'}
++        defaultActiveKey={'reportParsing'}
+         items={[
++          {
++            key: 'reportParsing',
++            label: '报告解析',
++            children: <ReportParsingPanel />,
++          },
+           {
+             key: 'history',
+             label: '执行历史',
+@@ -91,16 +96,6 @@ const Step3Result: React.FC<Props> = ({ onNext, onPrev }) => {
+               />
+             ),
+           },
+-          {
+-            key: 'otherLogs',
+-            label: '其它 Log 文件',
+-            children: (
+-              <Empty
+-                image={<FileSearchOutlined style={{ fontSize: 48 }} />}
+-                description={'功能预留，后续支持查看其它 Log 文件'}
+-              />
+-            ),
+-          },
+         ]}
+       />
+ 
+diff --git a/src/webview/components/verification/mode/ModePanel/components/CreateModal.tsx b/src/webview/components/verification/mode/ModePanel/components/CreateModal.tsx
+index 366659b..bd18315 100644
+--- a/src/webview/components/verification/mode/ModePanel/components/CreateModal.tsx
++++ b/src/webview/components/verification/mode/ModePanel/components/CreateModal.tsx
+@@ -34,9 +34,6 @@ interface CreateModalProps {
+ 
+ const tabLabels: Partial<Record<ModePanelTab, string>> = {
+   mode: 'Mode',
+-  group: 'Group',
+-  tc: 'TC',
+-  subattr: 'SubAttr',
+ }
+ 
+ export default function CreateModal({
+diff --git a/src/webview/components/verification/mode/ModePanel/components/ModeFooter.tsx b/src/webview/components/verification/mode/ModePanel/components/ModeFooter.tsx
+index 787e6a6..d069699 100644
+--- a/src/webview/components/verification/mode/ModePanel/components/ModeFooter.tsx
++++ b/src/webview/components/verification/mode/ModePanel/components/ModeFooter.tsx
+@@ -22,9 +22,6 @@ interface ModeFooterProps {
+ 
+ const TAB_LABELS: Record<ModePanelTab, string> = {
+   mode: '模式',
+-  group: 'Group',
+-  tc: 'TC',
+-  subattr: 'SubAttr',
+ }
+ 
+ export default function ModeFooter({
+diff --git a/src/webview/components/verification/mode/ModePanel/components/ModeList.tsx b/src/webview/components/verification/mode/ModePanel/components/ModeList.tsx
+index 3f8dda1..c954f2a 100644
+--- a/src/webview/components/verification/mode/ModePanel/components/ModeList.tsx
++++ b/src/webview/components/verification/mode/ModePanel/components/ModeList.tsx
+@@ -9,6 +9,7 @@ import {
+   EditOutlined,
+   PlayCircleOutlined,
+   FileOutlined,
++  ThunderboltOutlined,
+ } from '@ant-design/icons'
+ 
+ import type { ModePanelItem, ModePanelTab } from '../../types'
+@@ -39,6 +40,8 @@ interface ModeListProps {
+ 
+   onRun: (item: ModePanelItem) => void
+ 
++  onRunStrategy: (item: ModePanelItem) => void
++
+   onStop: (item: ModePanelItem) => void
+ 
+   openSelected: (item: ModePanelItem) => void
+@@ -52,9 +55,6 @@ interface ModeListProps {
+ 
+ const TAB_LABELS: Record<ModePanelTab, string> = {
+   mode: '模式',
+-  group: 'Group',
+-  tc: 'TC',
+-  subattr: 'SubAttr',
+ }
+ 
+ export default function ModeList({
+@@ -67,6 +67,7 @@ export default function ModeList({
+   onSelect,
+   onCheckedChange,
+   onRun,
++  onRunStrategy,
+   onStop,
+   openSelected,
+   duplicateSelected,
+@@ -113,12 +114,15 @@ export default function ModeList({
+ 
+         const modeItem = tab === 'mode' ? item : undefined
+ 
+-        const dropdownItems = [
++        let dropdownItems = [
+           { key: 'open', icon: <FileOutlined />, label: '打开' },
+           { key: 'copy', icon: <CopyOutlined />, label: '复制' },
+           { key: 'rename', icon: <EditOutlined />, label: '重命名' },
+           { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true },
+         ];
++        if (tab !== 'mode') {
++          dropdownItems = dropdownItems.filter(item => item.key !== 'open');
++        }
+ 
+         return (
+           <Dropdown
+@@ -254,7 +258,26 @@ export default function ModeList({
+                     alignItems: 'center',
+                     flexShrink: 0,
+                   }}
+-                >
++              >
++                  <Tooltip title="策略执行">
++                    <Button
++                      type="text"
++                      size="small"
++                      icon={<ThunderboltOutlined />}
++                      onClick={() => {
++                        onRunStrategy(item)
++                      }}
++                      style={{
++                        width: 26,
++                        height: 26,
++                        padding: 0,
++                        display: 'inline-flex',
++                        alignItems: 'center',
++                        justifyContent: 'center',
++                        color: accent,
++                      }}
++                    />
++                  </Tooltip>
+                   {running && (
+                     <Tooltip title="启动新实例">
+                       <Button
+diff --git a/src/webview/components/verification/mode/ModePanel/components/ModeTitle.tsx b/src/webview/components/verification/mode/ModePanel/components/ModeTitle.tsx
+index ee45f79..2447349 100644
+--- a/src/webview/components/verification/mode/ModePanel/components/ModeTitle.tsx
++++ b/src/webview/components/verification/mode/ModePanel/components/ModeTitle.tsx
+@@ -24,9 +24,6 @@ interface ModeTitleProps {
+ 
+ const tabLabels: Partial<Record<ModePanelTab, string>> = {
+   mode: 'Mode',
+-  group: 'Group',
+-  tc: 'TC',
+-  subattr: 'SubAttr',
+ }
+ 
+ export default function ModeTitle({
+diff --git a/src/webview/components/verification/mode/ModePanel/components/ModeToolbar.tsx b/src/webview/components/verification/mode/ModePanel/components/ModeToolbar.tsx
+index f4cd36f..d514673 100644
+--- a/src/webview/components/verification/mode/ModePanel/components/ModeToolbar.tsx
++++ b/src/webview/components/verification/mode/ModePanel/components/ModeToolbar.tsx
+@@ -60,9 +60,6 @@ interface ModeToolbarProps {
+ 
+ const tabLabels: Partial<Record<ModePanelTab, string>> = {
+   mode: 'Mode',
+-  group: 'Group',
+-  tc: 'TC',
+-  subattr: 'SubAttr',
+ }
+ 
+ export default function ModeToolbar({
+diff --git a/src/webview/components/verification/mode/ModePanel/components/ModeTypeSwitcher.tsx b/src/webview/components/verification/mode/ModePanel/components/ModeTypeSwitcher.tsx
+deleted file mode 100644
+index 9d83eb5..0000000
+--- a/src/webview/components/verification/mode/ModePanel/components/ModeTypeSwitcher.tsx
++++ /dev/null
+@@ -1,109 +0,0 @@
+-import { Button } from 'antd'
+-
+-import type { ModePanelTab } from '../../types'
+-
+-interface ModeTypeSwitcherProps {
+-  activeTab: ModePanelTab
+-  accent: string
+-  onChange: (tab: ModePanelTab) => void
+-}
+-
+-const options: Array<{ value: ModePanelTab; label: string }> = [
+-  { value: 'mode', label: 'Mode' },
+-  { value: 'group', label: 'Group' },
+-  { value: 'tc', label: 'TC' },
+-  { value: 'subattr', label: 'SubAttr' },
+-]
+-
+-export default function ModeTypeSwitcher({
+-  activeTab,
+-  accent,
+-  onChange,
+-}: ModeTypeSwitcherProps) {
+-  return (
+-    <div
+-      role="group"
+-      aria-label="Configuration type"
+-      style={{
+-        display: 'grid',
+-        gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+-        gap: 2,
+-        padding: 3,
+-        border:
+-          '1px solid color-mix(in srgb, var(--vscode-editor-foreground) 9%, transparent)',
+-        borderRadius: 8,
+-        background:
+-          'color-mix(in srgb, var(--vscode-editor-foreground) 4.5%, transparent)',
+-      }}
+-    >
+-      {options.map((option) => {
+-        const active = option.value === activeTab
+-
+-        return (
+-          <Button
+-            key={option.value}
+-            type="text"
+-            aria-pressed={active}
+-            aria-label={option.label}
+-            onClick={() => onChange(option.value)}
+-            style={{
+-              position: 'relative',
+-              minWidth: 0,
+-              height: 36,
+-              padding: '0 4px',
+-              color: active
+-                ? 'var(--vscode-foreground, currentColor)'
+-                : 'var(--vscode-descriptionForeground, currentColor)',
+-              border: active
+-                ? '1px solid color-mix(in srgb, var(--vscode-editor-foreground) 12%, transparent)'
+-                : '1px solid transparent',
+-              borderRadius: 5,
+-              background: active
+-                ? 'var(--vscode-editor-background)'
+-                : 'transparent',
+-              boxShadow: active
+-                ? '0 1px 3px rgba(0, 0, 0, 0.14)'
+-                : 'none',
+-              transition:
+-                'color 140ms ease, background 140ms ease, border-color 140ms ease, box-shadow 140ms ease',
+-            }}
+-          >
+-            <span
+-              style={{
+-                display: 'flex',
+-                height: '100%',
+-                alignItems: 'center',
+-                justifyContent: 'center',
+-                overflow: 'hidden',
+-                maxWidth: '100%',
+-                fontSize: 12,
+-                fontWeight: active ? 600 : 500,
+-                letterSpacing: '0.1px',
+-                lineHeight: '16px',
+-                textOverflow: 'ellipsis',
+-              }}
+-            >
+-              {option.label}
+-            </span>
+-
+-            {active && (
+-              <span
+-                aria-hidden="true"
+-                style={{
+-                  position: 'absolute',
+-                  bottom: 3,
+-                  left: '50%',
+-                  width: 18,
+-                  height: 2,
+-                  borderRadius: 2,
+-                  background: accent,
+-                  transform: 'translateX(-50%)',
+-                }}
+-              />
+-            )}
+-          </Button>
+-        )
+-      })}
+-    </div>
+-  )
+-}
+diff --git a/src/webview/components/verification/mode/ModePanel/constants.ts b/src/webview/components/verification/mode/ModePanel/constants.ts
+index aaad8cc..575cf75 100644
+--- a/src/webview/components/verification/mode/ModePanel/constants.ts
++++ b/src/webview/components/verification/mode/ModePanel/constants.ts
+@@ -7,28 +7,16 @@ import type {
+ 
+ export const TAB_LABELS: Record<ModePanelTab, string> = {
+   mode: 'Mode',
+-  group: 'Group',
+-  tc: 'TC',
+-  subattr: 'SubAttr',
+ }
+ 
+ export const INITIAL_NAMES: NameStore = {
+   mode: '',
+-  group: '',
+-  tc: '',
+-  subattr: '',
+ }
+ 
+ export const INITIAL_NAME_LISTS: NameListStore = {
+   mode: [],
+-  group: [],
+-  tc: [],
+-  subattr: [],
+ }
+ 
+ export const INITIAL_LOADING: LoadingStore = {
+   mode: false,
+-  group: false,
+-  tc: false,
+-  subattr: false,
+ }
+diff --git a/src/webview/components/verification/mode/ModePanel/hooks/useModeResource.ts b/src/webview/components/verification/mode/ModePanel/hooks/useModeResource.ts
+index 1e70283..b184313 100644
+--- a/src/webview/components/verification/mode/ModePanel/hooks/useModeResource.ts
++++ b/src/webview/components/verification/mode/ModePanel/hooks/useModeResource.ts
+@@ -11,9 +11,6 @@ import { createResourcePatch, readResources } from '../resource'
+ const EMPTY_RESOURCE: ResourceStore = {
+   mode: [],
+   focusModes: [],
+-  group: [],
+-  tc: [],
+-  subattr: [],
+ }
+ 
+ const cloneResources = (store: ResourceStore): ResourceStore => {
+@@ -23,18 +20,6 @@ const cloneResources = (store: ResourceStore): ResourceStore => {
+     })),
+ 
+     focusModes: [...store.focusModes],
+-
+-    group: store.group.map((item) => ({
+-      ...item,
+-    })),
+-
+-    tc: store.tc.map((item) => ({
+-      ...item,
+-    })),
+-
+-    subattr: store.subattr.map((item) => ({
+-      ...item,
+-    })),
+   }
+ }
+ 
+diff --git a/src/webview/components/verification/mode/ModePanel/index.tsx b/src/webview/components/verification/mode/ModePanel/index.tsx
+index 320cee8..ce54c85 100644
+--- a/src/webview/components/verification/mode/ModePanel/index.tsx
++++ b/src/webview/components/verification/mode/ModePanel/index.tsx
+@@ -13,7 +13,6 @@ import ModeTitle from './components/ModeTitle'
+ import ModeToolbar from './components/ModeToolbar'
+ import ModeList from './components/ModeList'
+ import ModeFooter from './components/ModeFooter'
+-import ModeTypeSwitcher from './components/ModeTypeSwitcher'
+ import CreateModal from './components/CreateModal'
+ import RenameModal from './components/RenameModal'
+ 
+@@ -23,8 +22,6 @@ import { useModeCrud } from './hooks/useModeCrud'
+ import { useModeRun } from './hooks/useModeRun'
+ 
+ import { createCopyName, sameName } from './utils'
+-import { readSavedParams, updateSavedParamReferences } from '../savedParamUtils'
+-
+ import {
+   deleteVerificationModeCfg,
+   duplicateVerificationModeCfg,
+@@ -32,6 +29,7 @@ import {
+   renameVerificationModeCfg,
+   selectVerificationModeCfg,
+   openFileInEditor,
++  executeLanderStrategy,
+ } from '../../../../utils/ipc'
+ import { confirmDelete } from '../../../../utils/confirmDelete'
+ import { useVerificationStageConfig } from './hooks/useVerificationStageConfig'
+@@ -40,7 +38,6 @@ import { useShallow } from 'zustand/react/shallow'
+ 
+ export default function ModePanel({
+   accent,
+-  initialTab = 'mode',
+   title,
+   initialCollapsed = false,
+   onSelect,
+@@ -57,7 +54,10 @@ export default function ModePanel({
+     handleSave,
+   } = useVerificationStageConfig()
+ 
+-  const [activeTab, setActiveTab] = useState<ModePanelTab>(initialTab)
++  // Lander exposes only Mode as a top-level resource. The union type remains
++  // temporarily for the shared list helpers, but there is no UI path that can
++  // switch to Group/TC/SubAttr.
++  const [activeTab] = useState<ModePanelTab>('mode')
+ 
+   const [collapsed, setCollapsed] = useState(initialCollapsed)
+ 
+@@ -65,9 +65,6 @@ export default function ModePanel({
+     Record<ModePanelTab, string[]>
+   >({
+     mode: [],
+-    group: [],
+-    tc: [],
+-    subattr: [],
+   })
+ 
+   const { resources, updateResources, syncModesFromDirectory } = useModeResource()
+@@ -274,54 +271,28 @@ export default function ModePanel({
+   }
+ 
+   const confirmRename = async (value: string) => {
+-    if (!renameItem) {
+-      return
+-    }
++    if (!renameItem || !stage) return
+ 
+     const nextName = value.trim()
+     if (!nextName) {
+       message.warning('请输入名称')
+       return
+     }
+-
+-    if (activeTab === 'mode') {
+-      if (!stage) return
+-      if (resources.mode.some((item) => !sameName(item.name, renameItem.name) && sameName(item.name, nextName))) {
+-        message.error(`mode 名称 ${nextName} 已存在`)
+-        return
+-      }
+-      try {
+-        await renameVerificationModeCfg(stage, renameItem.name, nextName)
+-      } catch (error) {
+-        message.error(error instanceof Error ? error.message : 'Mode 配置文件重命名失败')
+-        return
+-      }
+-    } else {
+-      if (resources[activeTab].some((item) => item.name !== renameItem.name && item.name === nextName)) {
+-        message.error(`${activeTab} 名称 "${nextName}" 已存在`)
+-        return
+-      }
+-
+-      const result = updateSavedParamReferences(
+-        readSavedParams(stageConfig?.params),
+-        activeTab,
+-        [renameItem.name],
+-        nextName,
+-      )
+-      if (result.affectedAliases.length > 0) {
+-        if (!await handleSave({ params: result.params })) return
+-        message.warning(
+-          `重命名影响了 ${result.affectedAliases.length} 个保存场景，已自动更新参数`,
+-        )
+-      }
++    if (resources.mode.some((item) =>
++      !sameName(item.name, renameItem.name) && sameName(item.name, nextName)
++    )) {
++      message.error(`Mode 名称 ${nextName} 已存在`)
++      return
+     }
+-    const success = crud.renameItem(renameItem, activeTab, nextName)
+ 
+-    if (!success) {
++    try {
++      await renameVerificationModeCfg(stage, renameItem.name, nextName)
++    } catch (error) {
++      message.error(error instanceof Error ? error.message : 'Mode 配置文件重命名失败')
+       return
+     }
+ 
+-    closeRename()
++    if (crud.renameItem(renameItem, activeTab, nextName)) closeRename()
+   }
+   const handleFocusChange = (names: string[]) => {
+     const validNames = new Set(allItems.map((item) => item.name))
+@@ -433,34 +404,16 @@ export default function ModePanel({
+   const handleDelete = async () => {
+     const deleteNames = batchCheckedNames.length
+       ? [...batchCheckedNames]
+-      : selectedItem ? [selectedItem.name] : [];
+-
+-    if (!deleteNames.length) {
+-      return;
+-    }
++      : selectedItem ? [selectedItem.name] : []
+ 
++    if (!deleteNames.length || !stage) return
+     if (!await confirmDelete('Mode', deleteNames)) return
+ 
+-    if (activeTab === 'mode') {
+-      if (!stage) return
+-      try {
+-        await deleteVerificationModeCfg(stage, deleteNames)
+-      } catch (error) {
+-        message.error(error instanceof Error ? error.message : 'Mode 配置文件删除失败')
+-        return
+-      }
+-    } else {
+-      const result = updateSavedParamReferences(
+-        readSavedParams(stageConfig?.params),
+-        activeTab,
+-        deleteNames,
+-      )
+-      if (result.affectedAliases.length > 0) {
+-        if (!await handleSave({ params: result.params })) return
+-        message.warning(
+-          `删除影响了 ${result.affectedAliases.length} 个保存场景，已自动移除相关参数`,
+-        )
+-      }
++    try {
++      await deleteVerificationModeCfg(stage, deleteNames)
++    } catch (error) {
++      message.error(error instanceof Error ? error.message : 'Mode 配置文件删除失败')
++      return
+     }
+ 
+     crud.deleteItems(activeTab, deleteNames)
+@@ -491,6 +444,31 @@ export default function ModePanel({
+     run.openRun(item)
+   }
+ 
++  const handleRunStrategy = async (item: ModePanelItem) => {
++    if (activeTab !== 'mode' || !stage || !item.name) return
++
++    try {
++      const response = await executeLanderStrategy({ stage, modeName: item.name })
++      if (!response.success || !response.result) {
++        throw new Error(response.error || '策略执行请求失败')
++      }
++
++      const steps = response.result.steps
++      run.handleRun({
++        mode: { ...item },
++        stepRange: [0, Math.max(steps.length - 1, 0)],
++        stepNames: steps.map((step) => step.name),
++        stepIds: steps.map((step) => step.id),
++        steps,
++        rows: [],
++      })
++
++      message.success('策略任务已提交，可在右侧监控执行状态')
++    } catch (error) {
++      message.error(error instanceof Error ? error.message : '策略执行失败')
++    }
++  }
++
+   const handleStopItem = (item: ModePanelItem) => {
+     if (activeTab !== 'mode') {
+       return
+@@ -568,14 +546,6 @@ export default function ModePanel({
+         onCollapsedChange={setCollapsed}
+       />
+ 
+-      <div style={{ padding: '10px 12px 0' }}>
+-        <ModeTypeSwitcher
+-          activeTab={activeTab}
+-          accent={accentColor}
+-          onChange={setActiveTab}
+-        />
+-      </div>
+-
+       <div
+         style={{
+           minWidth: 0,
+@@ -618,6 +588,7 @@ export default function ModePanel({
+             }}
+             onCheckedChange={handleBatchCheckedChange}
+             onRun={handleRunItem}
++            onRunStrategy={(item) => void handleRunStrategy(item)}
+             onStop={handleStopItem}
+             openSelected={handleOpen}
+             duplicateSelected={handleCopy}
+@@ -658,9 +629,6 @@ export default function ModePanel({
+         open={run.runOpen}
+         mode={run.runMode}
+         stage={stage}
+-        groups={resources.group}
+-        tcs={resources.tc}
+-        subattrs={resources.subattr}
+         getLanderModePipelines={getLanderModePipelines}
+         stageConfig={stageConfig}
+         stageConfigLoading={stageConfigLoading}
+diff --git a/src/webview/components/verification/mode/ModePanel/resource.ts b/src/webview/components/verification/mode/ModePanel/resource.ts
+index 514230e..9813d27 100644
+--- a/src/webview/components/verification/mode/ModePanel/resource.ts
++++ b/src/webview/components/verification/mode/ModePanel/resource.ts
+@@ -1,4 +1,4 @@
+-import type { BaseConfigItem, ModeConfigItem, ResourceStore } from '../types'
++import type { ModeConfigItem, ResourceStore } from '../types'
+ 
+ const isRecord = (value: unknown): value is Record<string, unknown> =>
+   typeof value === 'object' && value !== null && !Array.isArray(value)
+@@ -22,53 +22,6 @@ const toNonEmptyString = (value: unknown): string | undefined => {
+  *   name: string
+  * }
+  */
+-export const normalizeBaseItems = (value: unknown): BaseConfigItem[] => {
+-  if (!Array.isArray(value)) {
+-    return []
+-  }
+-
+-  const items = value.flatMap((raw) => {
+-    if (typeof raw === 'string') {
+-      const name = raw.trim()
+-
+-      return name
+-        ? [
+-            {
+-              name,
+-            },
+-          ]
+-        : []
+-    }
+-
+-    if (!isRecord(raw)) {
+-      return []
+-    }
+-
+-    const name =
+-      toNonEmptyString(raw.name) ??
+-      toNonEmptyString(raw.label) ??
+-      toNonEmptyString(raw.value)
+-
+-    if (!name) {
+-      return []
+-    }
+-
+-    return [
+-      {
+-        name,
+-      },
+-    ]
+-  })
+-
+-  const seen = new Set<string>()
+-  return items.filter((item) => {
+-    const key = item.name
+-    if (seen.has(key)) return false
+-    seen.add(key)
+-    return true
+-  })
+-}
+-
+ /**
+  * 解析 Mode
+  *
+@@ -93,6 +46,7 @@ export const normalizeModeItems = (value: unknown): ModeConfigItem[] => {
+     return [
+       {
+         name,
++        filePath: toNonEmptyString(raw.filePath),
+       },
+     ]
+   })
+@@ -140,12 +94,6 @@ export const readResources = (
+     mode: modes,
+ 
+     focusModes: normalizeFocusModes(data?.focusModes, modes),
+-
+-    group: normalizeBaseItems(data?.groups ?? data?.group),
+-
+-    tc: normalizeBaseItems(data?.tcs ?? data?.tc),
+-
+-    subattr: normalizeBaseItems(data?.subattrs ?? data?.subattr),
+   }
+ }
+ 
+@@ -153,28 +101,12 @@ export const readResources = (
+  * ResourceStore -> 配置保存结构
+  */
+ export const createResourcePatch = (store: ResourceStore) => {
+-  const uniqueNames = (items: BaseConfigItem[]) => {
+-    const seen = new Set<string>()
+-    return items.flatMap((item) => {
+-      const name = item.name.trim()
+-      const key = name
+-      if (!name || seen.has(key)) return []
+-      seen.add(key)
+-      return [name]
+-    })
+-  }
+-
+   return {
+     modes: store.mode.map((item) => ({
+       name: item.name,
++      ...(item.filePath ? { filePath: item.filePath } : {}),
+     })),
+ 
+     focusModes: store.focusModes,
+-
+-    groups: uniqueNames(store.group),
+-
+-    tcs: uniqueNames(store.tc),
+-
+-    subattrs: uniqueNames(store.subattr),
+   }
+ }
+diff --git a/src/webview/components/verification/mode/RunModal.tsx b/src/webview/components/verification/mode/RunModal.tsx
+index b5096b5..a5ac219 100644
+--- a/src/webview/components/verification/mode/RunModal.tsx
++++ b/src/webview/components/verification/mode/RunModal.tsx
+@@ -1,17 +1,18 @@
+ import { useEffect, useMemo, useRef, useState } from 'react'
+ 
+-import { Button, Checkbox, Empty, Input, Modal, Popconfirm, Select, Space, message, Typography } from 'antd'
++import { Button, Descriptions, Empty, Input, Modal, Popconfirm, Select, Space, Spin, Tag, message, Typography } from 'antd'
++import { EyeOutlined } from '@ant-design/icons'
+ 
+ import type {
+-  BaseConfigItem,
+   GetLanderModePipelines,
++  LanderModeParameters,
+   LanderStep,
+   ModeConfigItem,
+   ModeRunPayload,
+   RunParamRow,
+ } from './types'
+ 
+-import StepSelector, { VERIFICATION_STEP_PRESETS } from './StepSelector'
++import StepSelector from './StepSelector'
+ import ParamTable from './ParamTable'
+ import { readSavedParams, type SavedParams } from './savedParamUtils'
+ 
+@@ -20,10 +21,6 @@ interface RunModalProps {
+   mode?: ModeConfigItem
+   stage?: string
+ 
+-  groups: BaseConfigItem[]
+-  tcs: BaseConfigItem[]
+-  subattrs: BaseConfigItem[]
+-
+   stageConfig: Record<string, unknown> | null
+   stageConfigLoading: boolean
+   handleSave: (data: Record<string, unknown>) => Promise<boolean>
+@@ -63,13 +60,47 @@ const cloneRows = (rows: RunParamRow[]): RunParamRow[] => {
+ 
+ const cloneRow = (row: RunParamRow): RunParamRow => cloneRows([row])[0]
+ 
++const renderNames = (names: string[]) => names.length > 0
++  ? (
++    <Space direction="vertical" size={6} style={{ width: '100%' }}>
++      <Typography.Text type="secondary">已选 {names.length} 项</Typography.Text>
++      <div
++        style={{
++          display: 'flex',
++          flexWrap: 'wrap',
++          gap: 4,
++          maxHeight: 120,
++          overflowY: 'auto',
++          padding: 6,
++          border: '1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.2))',
++          borderRadius: 4,
++          background: 'var(--vscode-editor-background, rgba(127, 127, 127, 0.04))',
++        }}
++      >
++        {names.map((name) => (
++          <Tag
++            key={name}
++            title={name}
++            style={{
++              maxWidth: '100%',
++              margin: 0,
++              overflow: 'hidden',
++              textOverflow: 'ellipsis',
++              whiteSpace: 'nowrap',
++            }}
++          >
++            {name}
++          </Tag>
++        ))}
++      </div>
++    </Space>
++  )
++  : <Typography.Text type="secondary">未选择</Typography.Text>
++
+ export default function RunModal({
+   open,
+   mode,
+   stage,
+-  groups,
+-  tcs,
+-  subattrs,
+   stageConfig,
+   stageConfigLoading,
+   handleSave,
+@@ -80,12 +111,13 @@ export default function RunModal({
+ }: RunModalProps) {
+   const [loading, setLoading] = useState(false)
+   const loadRequestRef = useRef(0)
+-  const [init, setInit] = useState(false)
+-  const [dialogStep, setDialogStep] = useState<'options' | 'transition' | 'run'>('options')
++  // Keep this non-interactive until Lander exposes a source such as mode.cfg.
++  const init = false
+ 
+   const [loadedSteps, setLoadedSteps] = useState<{
+     optionsKey: string
+     steps: LanderStep[]
++    parameters: LanderModeParameters
+   }>()
+ 
+   const [range, setRange] = useState<[number, number]>([0, 0])
+@@ -93,6 +125,7 @@ export default function RunModal({
+   const [rows, setRows] = useState<RunParamRow[]>([createRunParamRow()])
+   const [scenarioAlias, setScenarioAlias] = useState('')
+   const [selectedAlias, setSelectedAlias] = useState<string>()
++  const [previewAlias, setPreviewAlias] = useState<string>()
+   const [savedParams, setSavedParams] = useState<SavedParams>({})
+   const [savingParams, setSavingParams] = useState(false)
+ 
+@@ -105,8 +138,7 @@ export default function RunModal({
+       setRows([createRunParamRow()])
+       setScenarioAlias('')
+       setSelectedAlias(undefined)
+-      setInit(false)
+-      setDialogStep('options')
++      setPreviewAlias(undefined)
+     }
+   }, [open, mode?.name, stage])
+ 
+@@ -118,7 +150,11 @@ export default function RunModal({
+ 
+   const optionsKey = mode && stage ? `${stage}\u0000${mode.name}\u0000${init}` : ''
+   const steps = loadedSteps?.optionsKey === optionsKey ? loadedSteps.steps : []
++  const parameters = loadedSteps?.optionsKey === optionsKey
++    ? loadedSteps.parameters
++    : { groups: [], tcs: [], subattrs: [] }
+   const runDialogReady = loadedSteps?.optionsKey === optionsKey
++  const previewRow = previewAlias ? savedParams[previewAlias] : undefined
+ 
+   const confirmRunOptions = async () => {
+     if (!mode || loading) {
+@@ -152,11 +188,12 @@ export default function RunModal({
+         return
+       }
+ 
+-      setLoadedSteps({ optionsKey: requestedOptionsKey, steps: result.steps })
++      setLoadedSteps({
++        optionsKey: requestedOptionsKey,
++        steps: result.steps,
++        parameters: result.parameters ?? { groups: [], tcs: [], subattrs: [] },
++      })
+       setRange(result.steps.length > 0 ? [0, result.steps.length - 1] : [0, 0])
+-      // Close the compact options dialog first. Its after-close callback opens
+-      // the full run dialog, so the two modal animations and masks never overlap.
+-      setDialogStep('transition')
+     } catch (error) {
+       if (requestId !== loadRequestRef.current) {
+         return
+@@ -170,6 +207,15 @@ export default function RunModal({
+     }
+   }
+ 
++  useEffect(() => {
++    if (open && mode) {
++      void confirmRunOptions()
++    }
++    // The request is intentionally keyed only by the selected mode and stage.
++    // init is fixed to false until it has a non-interactive source such as CFG.
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [open, mode?.name, stage])
++
+   const selectedSteps = useMemo(() => {
+     return steps.slice(range[0], range[1] + 1)
+   }, [steps, range])
+@@ -228,6 +274,7 @@ export default function RunModal({
+       if (await handleSave({ params: nextParams })) {
+         setSavedParams(nextParams)
+         setSelectedAlias(undefined)
++        setPreviewAlias(undefined)
+         setScenarioAlias('')
+       }
+     } finally {
+@@ -238,6 +285,7 @@ export default function RunModal({
+   const clearRunParams = () => {
+     setRows([createRunParamRow()])
+     setSelectedAlias(undefined)
++    setPreviewAlias(undefined)
+     setScenarioAlias('')
+   }
+ 
+@@ -247,14 +295,13 @@ export default function RunModal({
+   }
+ 
+   const resetSession = () => {
+-    setDialogStep('options')
+     setLoading(false)
+     setLoadedSteps(undefined)
+     setRange([0, 0])
+     setRows([createRunParamRow()])
+     setScenarioAlias('')
+     setSelectedAlias(undefined)
+-    setInit(false)
++    setPreviewAlias(undefined)
+   }
+ 
+   const finishDialogClose = () => {
+@@ -291,35 +338,8 @@ export default function RunModal({
+   }
+ 
+   return (
+-    <>
+-      <Modal
+-        open={open && dialogStep === 'options'}
+-        title={mode ? `运行 ${mode.name}` : '运行'}
+-        width={520}
+-        confirmLoading={loading}
+-        okText="下一步"
+-        cancelText="取消"
+-        onCancel={closeModal}
+-        onOk={() => void confirmRunOptions()}
+-        afterOpenChange={(visible) => {
+-          if (!visible) {
+-            if (open && dialogStep === 'transition' && runDialogReady) {
+-              setDialogStep('run')
+-              return
+-            }
+-
+-            finishDialogClose()
+-          }
+-        }}
+-        destroyOnHidden
+-      >
+-        <Checkbox checked={init} onChange={(event) => setInit(event.target.checked)}>
+-          init/flatMode
+-        </Checkbox>
+-      </Modal>
+-
+-      <Modal
+-        open={open && dialogStep === 'run' && runDialogReady}
++    <Modal
++        open={open}
+         title={mode ? `运行 ${mode.name}` : '运行'}
+         width={1000}
+         footer={null}
+@@ -341,11 +361,14 @@ export default function RunModal({
+           <div>
+             <Typography.Text strong>Step 选择</Typography.Text>
+ 
+-            {steps.length ? (
++            {loading ? (
++              <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
++                <Spin />
++              </div>
++            ) : steps.length ? (
+               <StepSelector
+                 steps={steps}
+                 range={range}
+-                presets={VERIFICATION_STEP_PRESETS}
+                 onChange={setRange}
+               />
+             ) : (
+@@ -380,6 +403,12 @@ export default function RunModal({
+                 onChange={(event) => setScenarioAlias(event.target.value)}
+                 onPressEnter={() => void saveCurrentParams()}
+               />
++              <Button
++                disabled={!selectedAlias || !savedParams[selectedAlias]}
++                onClick={() => setPreviewAlias(selectedAlias)}
++              >
++                预览
++              </Button>
+               <Button
+                 type="primary"
+                 loading={savingParams}
+@@ -403,9 +432,9 @@ export default function RunModal({
+ 
+             <ParamTable
+               rows={rows}
+-              groups={groups}
+-              tcs={tcs}
+-              subattrs={subattrs}
++              groups={parameters.groups.map((name) => ({ name }))}
++              tcs={parameters.tcs.map((name) => ({ name }))}
++              subattrs={parameters.subattrs.map((name) => ({ name }))}
+               onChange={(nextRows) => setRows(nextRows.slice(0, 1))}
+             />
+           </div>
+@@ -428,7 +457,51 @@ export default function RunModal({
+             </Button>
+           </div>
+         </Space>
+-      </Modal>
+-    </>
++
++        <Modal
++          open={Boolean(previewAlias && previewRow)}
++          title={previewAlias ? `场景预览：${previewAlias}` : '场景预览'}
++          width={720}
++          footer={null}
++          styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
++          onCancel={() => setPreviewAlias(undefined)}
++        >
++          {previewRow && (
++            <Descriptions bordered size="small" column={1}>
++              <Descriptions.Item label="Group">
++                {renderNames(previewRow.groupNames)}
++              </Descriptions.Item>
++              <Descriptions.Item label="TC">
++                {renderNames(previewRow.tcNames)}
++              </Descriptions.Item>
++              <Descriptions.Item label="SubAttr">
++                {renderNames(previewRow.subattrNames)}
++              </Descriptions.Item>
++              <Descriptions.Item label="Extra Arg">
++                {previewRow.extraArg || <Typography.Text type="secondary">未配置</Typography.Text>}
++              </Descriptions.Item>
++              <Descriptions.Item label="Tools">
++                {previewRow.tools.length > 0
++                  ? (
++                    <Space direction="vertical" size={4}>
++                      {previewRow.tools.map((tool) => (
++                        <Typography.Text key={tool.id}>
++                          {tool.name}: {tool.type === 'version' ? tool.version : tool.path}
++                        </Typography.Text>
++                      ))}
++                    </Space>
++                  )
++                  : <Typography.Text type="secondary">未配置</Typography.Text>}
++              </Descriptions.Item>
++              <Descriptions.Item label="Donau">
++                {Object.entries(previewRow.donau)
++                  .filter(([, value]) => Boolean(value))
++                  .map(([key, value]) => `${key}: ${value}`)
++                  .join('，') || <Typography.Text type="secondary">未配置</Typography.Text>}
++              </Descriptions.Item>
++            </Descriptions>
++          )}
++        </Modal>
++    </Modal>
+   )
+ }
+diff --git a/src/webview/components/verification/mode/StepSelector.tsx b/src/webview/components/verification/mode/StepSelector.tsx
+index 15d7fde..59b4b3c 100644
+--- a/src/webview/components/verification/mode/StepSelector.tsx
++++ b/src/webview/components/verification/mode/StepSelector.tsx
+@@ -1,20 +1,17 @@
+-import { useMemo } from 'react'
++import { useMemo, useState } from 'react'
+ import type { CSSProperties, ReactNode } from 'react'
+ 
+-import { Button, Empty, message, Slider, Space, Tooltip } from 'antd'
++import { Empty, Slider, Tooltip } from 'antd'
+ 
+ export interface StepSelectorStep {
+   id: string
+   name: string
+ }
+ 
+-export type StepSelectorPresets = Record<string, string[]>
+-
+ interface StepSelectorProps {
+   steps: StepSelectorStep[]
+   range: [number, number]
+   onChange: (range: [number, number]) => void
+-  presets?: StepSelectorPresets
+ }
+ 
+ interface SliderMark {
+@@ -22,21 +19,6 @@ interface SliderMark {
+   style: CSSProperties
+ }
+ 
+-export const VERIFICATION_STEP_PRESETS: StepSelectorPresets = {
+-  Plan: ['gen_plan_env', 'release_plan', 'gen_atpg_setting', 'gen_pdl_env'],
+-  Env: [
+-    'gen_atpg_env_pre',
+-    'gen_atpg_env',
+-    'gen_crg_env',
+-    'run_crg_gen',
+-    'run_atpg',
+-    'gen_all_scan_env',
+-    'run_all_scan',
+-    'delivery_data',
+-  ],
+-  Sim: ['sed_3d_tb', 'gen_sim_env', 'run_sim'],
+-}
+-
+ const normalizeRange = (
+   range: [number, number],
+   maxIndex: number,
+@@ -46,32 +28,12 @@ const normalizeRange = (
+   return start <= end ? [start, end] : [end, start]
+ }
+ 
+-const findContinuousRange = (
+-  steps: StepSelectorStep[],
+-  names: string[],
+-): [number, number] | undefined => {
+-  if (!names.length) {
+-    return undefined
+-  }
+-
+-  for (let start = 0; start <= steps.length - names.length; start++) {
+-    const matched = names.every(
+-      (name, offset) => steps[start + offset]?.name === name,
+-    )
+-    if (matched) {
+-      return [start, start + names.length - 1]
+-    }
+-  }
+-
+-  return undefined
+-}
+-
+ export default function StepSelector({
+   steps,
+   range,
+   onChange,
+-  presets,
+ }: StepSelectorProps) {
++  const [hoveredStepIndex, setHoveredStepIndex] = useState<number>()
+   const maxIndex = Math.max(steps.length - 1, 0)
+   const safeRange = useMemo(
+     () => normalizeRange(range, maxIndex),
+@@ -86,7 +48,11 @@ export default function StepSelector({
+           pointerEvents: 'none',
+         },
+         label: (
+-          <Tooltip title={step.name} placement="top" mouseEnterDelay={0}>
++          <Tooltip
++            title={step.name}
++            placement="top"
++            open={hoveredStepIndex === index}
++          >
+             <span
+               style={{
+                 position: 'relative',
+@@ -106,43 +72,29 @@ export default function StepSelector({
+       }
+       return result
+     }, {})
+-  }, [steps])
+-
+-  const applyPreset = (name: string, stepNames?: string[]) => {
+-    if (!stepNames?.length) {
+-      message.warning(`${name} 未配置 Step`)
+-      return
+-    }
+-
+-    const result = findContinuousRange(steps, stepNames)
+-    if (!result) {
+-      message.warning(`${name} 预设不满足当前 Step 顺序`)
+-      return
+-    }
+-
+-    onChange(result)
+-  }
++  }, [hoveredStepIndex, steps])
+ 
+   if (!steps.length) {
+     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 Step" />
+   }
+ 
+   return (
+-    <Space direction="vertical" size={14} style={{ width: '100%' }}>
+-      {presets && (
+-        <Space wrap>
+-          {Object.entries(presets).map(([name, value]) => (
+-            <Button
+-              key={name}
+-              size="small"
+-              onClick={() => applyPreset(name, value)}
+-            >
+-              {name}
+-            </Button>
+-          ))}
+-        </Space>
+-      )}
+-
++    <div
++      onPointerMove={(event) => {
++        const bounds = event.currentTarget.getBoundingClientRect()
++        const stepWidth = maxIndex > 0 ? bounds.width / maxIndex : bounds.width
++        const nearestIndex = maxIndex > 0
++          ? Math.round((event.clientX - bounds.left) / stepWidth)
++          : 0
++        const nodeX = bounds.left + nearestIndex * stepWidth
++        const nextIndex = Math.abs(event.clientX - nodeX) <= 14
++          ? Math.max(0, Math.min(nearestIndex, maxIndex))
++          : undefined
++
++        setHoveredStepIndex((current) => current === nextIndex ? current : nextIndex)
++      }}
++      onPointerLeave={() => setHoveredStepIndex(undefined)}
++    >
+       <Slider
+         range={{ draggableTrack: true }}
+         dots
+@@ -164,6 +116,6 @@ export default function StepSelector({
+           }
+         }}
+       />
+-    </Space>
++    </div>
+   )
+ }
+diff --git a/src/webview/components/verification/mode/savedParamUtils.ts b/src/webview/components/verification/mode/savedParamUtils.ts
+index 29d49d8..8eb949e 100644
+--- a/src/webview/components/verification/mode/savedParamUtils.ts
++++ b/src/webview/components/verification/mode/savedParamUtils.ts
+@@ -1,13 +1,7 @@
+-import type { ResourceStore, RunParamRow, SelectorField } from './types'
++import type { RunParamRow } from './types'
+ 
+ export type SavedParams = Record<string, RunParamRow>
+ 
+-const RESOURCE_FIELD: Record<Exclude<keyof ResourceStore, 'mode' | 'focusModes'>, SelectorField> = {
+-  group: 'groupNames',
+-  tc: 'tcNames',
+-  subattr: 'subattrNames',
+-}
+-
+ export const readSavedParams = (value: unknown): SavedParams => {
+   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+ 
+@@ -18,27 +12,3 @@ export const readSavedParams = (value: unknown): SavedParams => {
+       : []
+   }))
+ }
+-
+-export function updateSavedParamReferences(
+-  params: SavedParams,
+-  resource: keyof typeof RESOURCE_FIELD,
+-  names: string[],
+-  replacement?: string,
+-): { params: SavedParams; affectedAliases: string[] } {
+-  const field = RESOURCE_FIELD[resource]
+-  const targets = new Set(names)
+-  const affectedAliases: string[] = []
+-
+-  const next = Object.fromEntries(Object.entries(params).map(([alias, row]) => {
+-    const current = Array.isArray(row[field]) ? row[field] : []
+-    if (!current.some((name) => targets.has(name))) return [alias, row]
+-
+-    affectedAliases.push(alias)
+-    const values = current.flatMap((name) => (
+-      targets.has(name) ? (replacement ? [replacement] : []) : [name]
+-    ))
+-    return [alias, { ...row, [field]: Array.from(new Set(values)) }]
+-  }))
+-
+-  return { params: next, affectedAliases }
+-}
+diff --git a/src/webview/components/verification/mode/types.ts b/src/webview/components/verification/mode/types.ts
+index 529c73a..880d2d7 100644
+--- a/src/webview/components/verification/mode/types.ts
++++ b/src/webview/components/verification/mode/types.ts
+@@ -1,4 +1,4 @@
+-export type ModePanelTab = 'mode' | 'group' | 'tc' | 'subattr'
++export type ModePanelTab = 'mode'
+ 
+ export interface BaseConfigItem {
+   name: string
+@@ -64,9 +64,17 @@ export interface GetLanderModePipelinesResult {
+ 
+   steps: LanderStep[]
+ 
++  parameters: LanderModeParameters
++
+   error?: string
+ }
+ 
++export interface LanderModeParameters {
++  groups: string[]
++  tcs: string[]
++  subattrs: string[]
++}
++
+ export type GetLanderModePipelines = (options?: {
+   stage?: string
+   modeName?: string
+@@ -76,8 +84,6 @@ export type GetLanderModePipelines = (options?: {
+ export interface ModePanelProps {
+   accent: string
+ 
+-  initialTab?: ModePanelTab
+-
+   title?: string
+ 
+   initialCollapsed?: boolean
+@@ -101,11 +107,6 @@ export interface ResourceStore {
+    */
+   focusModes: string[]
+ 
+-  group: BaseConfigItem[]
+-
+-  tc: BaseConfigItem[]
+-
+-  subattr: BaseConfigItem[]
+ }
+ 
+ /**
+diff --git a/src/webview/flows/VerificationFlow.tsx b/src/webview/flows/VerificationFlow.tsx
+index 9f6872f..0101861 100644
+--- a/src/webview/flows/VerificationFlow.tsx
++++ b/src/webview/flows/VerificationFlow.tsx
+@@ -123,7 +123,6 @@ const VerificationFlow: React.FC = () => {
+           <ModePanel
+             key="execution-sidebar"
+             accent="#059669"
+-            initialTab="mode"
+             initialCollapsed={false}
+             title="模式与参数配置"
+             onSelect={handleSelect}
+diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
+index a53e8be..da10bfa 100644
+--- a/src/webview/utils/ipc.ts
++++ b/src/webview/utils/ipc.ts
+@@ -1246,6 +1246,12 @@ export interface GetLanderModePipelinesResult extends Record<string, unknown> {
+ 
+   steps: LanderStep[]
+ 
++  parameters: {
++    groups: string[]
++    tcs: string[]
++    subattrs: string[]
++  }
++
+   error?: string
+ }
+ 
+@@ -1257,6 +1263,57 @@ export async function getLanderModePipelines(options: {
+   return ipcRequest<GetLanderModePipelinesResult>('getLanderModePipelines', options)
+ }
+ 
++export interface LanderModeConfigInfo {
++  atpgStage: string
++  atpgMode: string
++  parameters: {
++    groups: string[]
++    tcs: string[]
++    subattrs: string[]
++  }
++}
++
++export interface GetLanderModeConfigInfoResult extends Record<string, unknown> {
++  success: boolean
++  info: LanderModeConfigInfo
++  error?: string
++}
++
++export async function getLanderModeConfigInfo(options: {
++  stage?: string
++  modeName: string
++}): Promise<GetLanderModeConfigInfoResult> {
++  return ipcRequest<GetLanderModeConfigInfoResult>('getLanderModeConfigInfo', options)
++}
++
++export interface ExecuteLanderStrategyResult extends Record<string, unknown> {
++  success: boolean
++  result?: {
++    implemented: boolean
++    cfgPath: string
++    outputDirectory: string
++    outputPath: string
++    sourceExtensions: readonly string[]
++    steps: Array<{
++      id: string
++      name: string
++      command: string
++      description: string
++      enableGroup: boolean
++      enableTC: boolean
++      enableSubAttr: boolean
++    }>
++  }
++  error?: string
++}
++
++export async function executeLanderStrategy(options: {
++  stage: string
++  modeName: string
++}): Promise<ExecuteLanderStrategyResult> {
++  return ipcRequest<ExecuteLanderStrategyResult>('executeLanderStrategy', options)
++}
++
+ export async function getModules(
+   flow: 'hibist' | 'sailor'
+ ): Promise<{ success: boolean; modules: string[]; error?: string }> {
+diff --git a/tests/landerPipelineService.spec.ts b/tests/landerPipelineService.spec.ts
+new file mode 100644
+index 0000000..954a577
+--- /dev/null
++++ b/tests/landerPipelineService.spec.ts
+@@ -0,0 +1,40 @@
++import { describe, expect, it } from 'vitest'
++
++import { parseLanderModeConfigInfo, parseLanderModeParameters } from '../src/services/landerPipelineService'
++
++describe('Lander mode parameter parsing', () => {
++  it('collects Group, TC and SubAttr choices from the selected mode content', () => {
++    const content = [
++      'define_project_info -mode atpg',
++      'define_atpg_info \\',
++      '  -stage scan \\',
++      '  -mode stuck_at \\',
++      '  -group {group_a group_b} \\',
++      '  -tc tc_1,tc_2 \\',
++      '  -subattr "slow fast"',
++    ].join('\n')
++
++    expect(parseLanderModeParameters(content)).toEqual({
++      groups: ['group_a', 'group_b'],
++      tcs: ['tc_1', 'tc_2'],
++      subattrs: ['slow', 'fast'],
++    })
++  })
++
++  it('deduplicates aliases and includes parameters in config info', () => {
++    const content = [
++      'define_atpg_info -stage scan -mode transition -group g1 -groups {g1 g2}',
++      'set_runtime_info -tcs {tc_a;tc_b} -subattrs s1,s1',
++    ].join('\n')
++
++    expect(parseLanderModeConfigInfo(content)).toEqual({
++      atpgStage: 'scan',
++      atpgMode: 'transition',
++      parameters: {
++        groups: ['g1', 'g2'],
++        tcs: ['tc_a', 'tc_b'],
++        subattrs: ['s1'],
++      },
++    })
++  })
++})
+diff --git a/tests/landerStrategyService.spec.ts b/tests/landerStrategyService.spec.ts
+new file mode 100644
+index 0000000..6ac4225
+--- /dev/null
++++ b/tests/landerStrategyService.spec.ts
+@@ -0,0 +1,36 @@
++import * as path from 'path'
++import { describe, expect, it } from 'vitest'
++
++import {
++  executeLanderStrategy,
++  LANDER_STRATEGY_SOURCE_EXTENSIONS,
++} from '../src/services/landerStrategyService'
++
++describe('landerStrategyService', () => {
++  it('reserves the CFG-derived strategy output contract without writing files', async () => {
++    const repoRoot = path.join('workspace', 'demo_verification')
++    const stage = 'stage_a'
++    const modeName = 'scan_mode'
++    const cfgPath = path.join(repoRoot, stage, 'lander_env', 'lander_cfg', `${modeName}.cfg`)
++
++    const result = await executeLanderStrategy({ repoRoot, stage, modeName, cfgPath })
++
++    const outputDirectory = path.join(repoRoot, stage, 'lander_env', 'lander_strategy')
++    expect(result).toEqual({
++      implemented: false,
++      cfgPath,
++      outputDirectory,
++      outputPath: path.join(outputDirectory, `${modeName}.json`),
++      sourceExtensions: LANDER_STRATEGY_SOURCE_EXTENSIONS,
++      steps: [{
++        id: 'lander-strategy',
++        name: 'lander-strategy',
++        command: `run_flow_lander ${result.steps[0].name}`,
++        description: '预留任务：后续由 Mode CFG 解析结果提供实际执行步骤',
++        enableGroup: false,
++        enableTC: false,
++        enableSubAttr: false,
++      }],
++    })
++  })
++})
