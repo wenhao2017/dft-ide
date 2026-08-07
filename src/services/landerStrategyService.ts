@@ -1,50 +1,61 @@
 import * as path from 'path'
 
+import type { LanderStep } from './landerPipelineService'
+
 export const LANDER_STRATEGY_SOURCE_EXTENSIONS = ['.json', '.xlsx', '.xls'] as const
+export const LANDER_STRATEGY_STEP_NAMES = [
+  'create_project',
+  'gen_design_info',
+  'gen_plan_env',
+  'release_plan',
+] as const
 
 export interface LanderStrategyExecutionContext {
   repoRoot: string
   stage: string
   modeName: string
   cfgPath: string
+  availableSteps: LanderStep[]
 }
 
 export interface LanderStrategyExecutionResult {
-  implemented: false
+  implemented: true
   cfgPath: string
   outputDirectory: string
   outputPath: string
   sourceExtensions: readonly string[]
-  steps: LanderStrategyStep[]
+  steps: LanderStep[]
 }
 
-export interface LanderStrategyStep {
-  id: string
-  name: string
-  command: string
-  description: string
-  enableGroup: boolean
-  enableTC: boolean
-  enableSubAttr: boolean
+function findStrategySteps(steps: LanderStep[]): LanderStep[] | undefined {
+  const strategyLength = LANDER_STRATEGY_STEP_NAMES.length
+  for (let start = 0; start <= steps.length - strategyLength; start += 1) {
+    const matches = LANDER_STRATEGY_STEP_NAMES.every(
+      (name, offset) => steps[start + offset].name === name,
+    )
+    if (matches) return steps.slice(start, start + strategyLength)
+  }
+  return undefined
 }
 
 /**
  * Reserved extension-host boundary for Lander strategy execution.
  *
  * Future implementation:
- * 1. Parse cfgPath to replace the reserved step below with the actual steps.
- * 2. Only after a successful execution, resolve the report directories from
- *    the CFG and discover JSON/XLSX/XLS result files there.
- * 3. Parse the discovered files and write one normalized JSON document to
- *    <verification repo>/<stage>/lander_env/lander_strategy/<cfg filename>.json.
  *
  * Keeping this in the extension host ensures that filesystem/process access
  * never leaks into the browser-only webview.
+ *
+ * Select the supported strategy from the steps produced by the regular Lander
+ * Run parser. A strategy only matches when all four required steps are
+ * adjacent and in the declared order.
  */
 export async function executeLanderStrategy(
   context: LanderStrategyExecutionContext,
 ): Promise<LanderStrategyExecutionResult> {
-  const strategyStepName = 'lander-strategy'
+  const steps = findStrategySteps(context.availableSteps)
+  if (!steps) throw new Error('没有对应策略')
+
   const outputDirectory = path.join(
     context.repoRoot,
     context.stage,
@@ -53,21 +64,11 @@ export async function executeLanderStrategy(
   )
 
   return {
-    implemented: false,
+    implemented: true,
     cfgPath: context.cfgPath,
     outputDirectory,
     outputPath: path.join(outputDirectory, `${context.modeName}.json`),
     sourceExtensions: LANDER_STRATEGY_SOURCE_EXTENSIONS,
-    // Keep strategy submission on the regular pipeline runtime path today.
-    // The CFG parser will replace this placeholder with its own execution plan.
-    steps: [{
-      id: 'lander-strategy',
-      name: strategyStepName,
-      command: `run_flow_lander ${strategyStepName}`,
-      description: '预留任务：后续由 Mode CFG 解析结果提供实际执行步骤',
-      enableGroup: false,
-      enableTC: false,
-      enableSubAttr: false,
-    }],
+    steps,
   }
 }

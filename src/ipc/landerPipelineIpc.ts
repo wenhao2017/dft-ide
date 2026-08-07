@@ -94,6 +94,7 @@ export async function handleGetLanderModePipelines(
 }
 
 export async function handleExecuteLanderStrategy(
+  context: vscode.ExtensionContext,
   panel: vscode.WebviewPanel | undefined,
   msg: { requestId?: unknown; stage?: unknown; modeName?: unknown },
 ): Promise<void> {
@@ -105,7 +106,16 @@ export async function handleExecuteLanderStrategy(
     const modeName = normalizeModeName(msg.modeName)
     const repoRoot = await resolveProjectRepoRoot('verification')
     const cfgPath = path.join(repoRoot, stage, 'lander_env', 'lander_cfg', `${modeName}.cfg`)
-    const result = await executeLanderStrategy({ repoRoot, stage, modeName, cfgPath })
+    // Reuse the exact parser used by Run so strategy matching always reflects
+    // the complete step sequence derived from the current mode.cfg.
+    const availableSteps = await getLanderModePipelines(context.extensionUri, cfgPath)
+    const result = await executeLanderStrategy({
+      repoRoot,
+      stage,
+      modeName,
+      cfgPath,
+      availableSteps,
+    })
 
     await panel.webview.postMessage({
       command: 'executeLanderStrategyResponse', requestId, success: true, result,

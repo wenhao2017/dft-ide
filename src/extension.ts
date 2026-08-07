@@ -2828,7 +2828,7 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
       }
 
       case 'executeLanderStrategy': {
-        await handleExecuteLanderStrategy(currentPanel, msg);
+        await handleExecuteLanderStrategy(context, currentPanel, msg);
         return;
       }
 
