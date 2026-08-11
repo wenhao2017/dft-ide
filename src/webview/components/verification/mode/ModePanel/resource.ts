@@ -47,6 +47,8 @@ export const normalizeModeItems = (value: unknown): ModeConfigItem[] => {
       {
         name,
         filePath: toNonEmptyString(raw.filePath),
+        versionPath: toNonEmptyString(raw.versionPath),
+        versions: [...(raw.versions ?? []) as string[]],
       },
     ]
   })
@@ -105,6 +107,8 @@ export const createResourcePatch = (store: ResourceStore) => {
     modes: store.mode.map((item) => ({
       name: item.name,
       ...(item.filePath ? { filePath: item.filePath } : {}),
+      ...(item.versionPath ? { versionPath: item.versionPath } : {}),
+      ...(item.versions ? { versions: [...item.versions] } : {}),
     })),
 
     focusModes: store.focusModes,

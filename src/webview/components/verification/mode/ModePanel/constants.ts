@@ -10,7 +10,7 @@ export const TAB_LABELS: Record<ModePanelTab, string> = {
 }
 
 export const INITIAL_NAMES: NameStore = {
-  mode: '',
+  mode: { key: '', name: '' },
 }
 
 export const INITIAL_NAME_LISTS: NameListStore = {

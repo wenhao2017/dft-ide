@@ -2,14 +2,14 @@ import { Badge, Space, Typography } from 'antd'
 
 import { BranchesOutlined } from '@ant-design/icons'
 
-import type { ModePanelItem, ModePanelTab } from '../../types'
+import type { ModeTreeNodeItem, ModePanelTab } from '../../types'
 
 const { Text } = Typography
 
 interface ModeFooterProps {
   tab: ModePanelTab
 
-  selectedItem?: ModePanelItem
+  selectedItem?: ModeTreeNodeItem
 
   totalCount: number
 

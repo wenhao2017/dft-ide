@@ -6,7 +6,7 @@ import { EditOutlined, PlusOutlined } from '@ant-design/icons'
 
 import type { ColumnsType } from 'antd/es/table'
 
-import type { BaseConfigItem, RunParamRow, SelectorField } from './types'
+import type { ModeTreeNodeItem, RunParamRow, SelectorField } from './types'
 
 import SelectorModal from './SelectorModal'
 import ToolsModal from './ToolsModal'
@@ -15,9 +15,9 @@ import DonauModal from './DonauModal'
 interface ParamTableProps {
   rows: RunParamRow[]
 
-  groups: BaseConfigItem[]
-  tcs: BaseConfigItem[]
-  subattrs: BaseConfigItem[]
+  groups: ModeTreeNodeItem[]
+  tcs: ModeTreeNodeItem[]
+  subattrs: ModeTreeNodeItem[]
 
   onChange: (rows: RunParamRow[]) => void
 }
@@ -81,7 +81,7 @@ export default function ParamTable({
     })
   }
 
-  const getSelectorItems = (field: SelectorField): BaseConfigItem[] => {
+  const getSelectorItems = (field: SelectorField): ModeTreeNodeItem[] => {
     if (field === 'groupNames') {
       return groups
     }

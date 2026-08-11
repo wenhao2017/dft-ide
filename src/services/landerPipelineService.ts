@@ -1,5 +1,7 @@
 import * as vscode from 'vscode'
+import * as path from 'path'
 
+import * as XLSX from 'xlsx'
 import yaml from 'yaml'
 import { z } from 'zod'
 
@@ -39,10 +41,31 @@ export interface LanderModeParameters {
   subattrs: string[]
 }
 
+export interface LanderParameterRelation {
+  group: string | null
+  tc: string | null
+  subattr: string | null
+}
+
+export interface LanderParameterSourcePaths {
+  workPath: string
+  tcFile: string
+}
+
 type CfgCommand = { name: string; options: Map<string, string> }
 
+/**
+ * Apply Tcl's line-continuation pre-pass. Tcl consumes only spaces and tabs
+ * following the escaped newline; a second newline still terminates the
+ * command. Using `\s*` here would incorrectly swallow blank separator lines
+ * and merge adjacent define_*_info commands.
+ */
+function normalizeTclLineContinuations(content: string): string {
+  return content.replace(/\\\r?\n[ \t]*/g, ' ')
+}
+
 function parseCfgCommands(content: string): CfgCommand[] {
-  const logicalLines = content.replace(/\\\r?\n\s*/g, ' ').split(/\r?\n/)
+  const logicalLines = normalizeTclLineContinuations(content).split(/\r?\n/)
   return logicalLines.flatMap((rawLine) => {
     const line = rawLine.replace(/\s+#.*$/, '').trim()
     if (!line || line.startsWith('#')) return []
@@ -84,12 +107,277 @@ function splitParameterValues(value: string): string[] {
     .filter(Boolean)
 }
 
+function option(commands: CfgCommand[], commandName: string, optionName: string): string {
+  return commands.find((command) => command.name === commandName)?.options.get(optionName) ?? ''
+}
+
+/**
+ * Build the TC source path used by Lander. Group-specific source files are
+ * intentionally ignored; Group/TC/SubAttr choices are all loaded from tcFile.
+ */
+export function resolveLanderParameterSourcePaths(
+  content: string,
+  verificationRepoRoot: string,
+  selectedStage: string,
+): LanderParameterSourcePaths {
+  const commands = parseCfgCommands(content)
+  const projectMode = option(commands, 'define_project_info', 'mode')
+  const planStage = option(commands, 'define_project_info', 'stage')
+  const version = option(commands, 'define_project_info', 'version')
+  const crg = option(commands, 'define_project_info', 'crg')
+  const workPath = path.join(
+    verificationRepoRoot,
+    selectedStage,
+    projectMode,
+    'lander_dir',
+  )
+  const releasePath = path.join(workPath, '01.plan', 'release', planStage, version)
+
+  let tcFile = ''
+
+  if (projectMode === 'atpg') {
+    const verificationMode = option(commands, 'define_atpg_info', 'mode').toUpperCase()
+    const groupMode = option(commands, 'define_atpg_info', 'top_mode')
+    const fault = option(commands, 'define_atpg_info', 'fault_type')
+    const fileStem = `${verificationMode}_GROUP_TC.${groupMode}.${fault}.cfg`
+    const sourceDirectory = crg === 'on' ? path.join(releasePath, 'crg') : releasePath
+    tcFile = path.join(sourceDirectory, `${fileStem}.tc.xlsx`)
+  } else if (projectMode === 'fml') {
+    const groupMode = option(commands, 'define_gml_info', 'top_mode')
+      || option(commands, 'define_fml_info', 'top_mode')
+    tcFile = path.join(releasePath, `FML_TC_PLAN.${groupMode}.xls`)
+  } else if (projectMode === 'ip' || projectMode === 'jtag') {
+    const prefix = projectMode.toUpperCase()
+    tcFile = path.join(releasePath, `${prefix}_TC_PLAN.xls`)
+  } else if (projectMode === 'mbist') {
+    const verificationMode = option(commands, 'define_mbist_info', 'mode')
+    const tcPlans = option(commands, 'define_incomming_info', 'tc_plans')
+    if (tcPlans === 'onlychk') {
+      tcFile = path.join(
+        workPath,
+        '96.wgl_check',
+        planStage,
+        version,
+        'mbist',
+        'MERGE_MBIST_TOP_TC_PLAN.json',
+      )
+    } else if (verificationMode === 'sub' || verificationMode === 'top') {
+      const modeUpper = verificationMode.toUpperCase()
+      tcFile = path.join(releasePath, `MBIST_${modeUpper}_TC_PLAN.json`)
+    } else if (verificationMode === 'top_repair') {
+      tcFile = path.join(releasePath, 'REPAIR_TC_PLAN.json')
+    }
+  }
+
+  return { workPath, tcFile }
+}
+
+const EMPTY_LANDER_MODE_PARAMETERS: LanderModeParameters = {
+  groups: [],
+  tcs: [],
+  subattrs: [],
+}
+
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values))
+}
+
+function cellText(value: unknown): string {
+  return value === null || value === undefined ? '' : String(value).trim()
+}
+
+function isEnabledRelationCell(value: unknown): boolean {
+  const normalized = cellText(value).toLowerCase()
+  return Boolean(normalized) && !['n', 'no', 'false', '0', '-'].includes(normalized)
+}
+
+/**
+ * Excel plans contain only Group and TC choices. A row above the real header
+ * may contain metadata (for example `dft2pr`), so only the row containing the
+ * `group` header and the data below it are interpreted. Older plans without a
+ * literal `group` header use the first non-empty row as their TC header.
+ */
+export function parseLanderWorkbookParameters(bytes: Uint8Array): LanderModeParameters {
+  return collectLanderModeParameters(parseLanderWorkbookRelations(bytes))
+}
+
+export function parseLanderWorkbookRelations(bytes: Uint8Array): LanderParameterRelation[] {
+  const workbook = XLSX.read(bytes, { type: 'array' })
+  const relations: LanderParameterRelation[] = []
+
+  for (const sheetName of workbook.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], {
+      header: 1,
+      defval: null,
+      raw: false,
+    })
+    if (!rows.length) continue
+
+    let headerIndex = rows.findIndex((row) => row.some(
+      (value) => cellText(value).toLowerCase() === 'group',
+    ))
+    if (headerIndex < 0) {
+      headerIndex = rows.findIndex((row) => row.some((value) => cellText(value)))
+    }
+    if (headerIndex < 0) continue
+
+    const header = rows[headerIndex]
+    const explicitGroupColumn = header.findIndex(
+      (value) => cellText(value).toLowerCase() === 'group',
+    )
+    const groupColumn = explicitGroupColumn >= 0
+      ? explicitGroupColumn
+      : Math.max(0, header.findIndex((value) => cellText(value)) - 1)
+
+    rows.slice(headerIndex + 1).forEach((row) => {
+      const group = cellText(row[groupColumn])
+      const relationCount = relations.length
+      header.forEach((value, column) => {
+        const tc = cellText(value)
+        if (column === groupColumn || !tc || !isEnabledRelationCell(row[column])) return
+        relations.push({ group: group || null, tc, subattr: null })
+      })
+      if (group && relations.length === relationCount) {
+        relations.push({ group, tc: null, subattr: null })
+      }
+    })
+  }
+
+  return uniqueRelations(relations)
+}
+
+/**
+ * JSON plans may additionally describe SubAttr choices. A TC key is exposed
+ * only when at least one detail row has a non-null value for that key.
+ */
+export function parseLanderJsonParameters(content: string): LanderModeParameters {
+  return collectLanderModeParameters(parseLanderJsonRelations(content))
+}
+
+export function parseLanderJsonRelations(content: string): LanderParameterRelation[] {
+  const parsed: unknown = JSON.parse(content)
+  const detail = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === 'object' && Array.isArray((parsed as { detail?: unknown }).detail)
+      ? (parsed as { detail: unknown[] }).detail
+      : []
+  const relations: LanderParameterRelation[] = []
+  const reservedKeys = new Set(['line_index', 'group', 'subattr'])
+
+  detail.forEach((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return
+    const row = item as Record<string, unknown>
+    const group = cellText(row.group)
+    const subattr = cellText(row.subattr)
+    const relationCount = relations.length
+    Object.entries(row).forEach(([key, value]) => {
+      if (!reservedKeys.has(key) && isEnabledRelationCell(value)) {
+        relations.push({
+          group: group || null,
+          tc: key,
+          subattr: subattr || null,
+        })
+      }
+    })
+    if ((group || subattr) && relations.length === relationCount) {
+      relations.push({ group: group || null, tc: null, subattr: subattr || null })
+    }
+  })
+
+  return uniqueRelations(relations)
+}
+
+function uniqueRelations(relations: LanderParameterRelation[]): LanderParameterRelation[] {
+  const seen = new Set<string>()
+  return relations.filter((relation) => {
+    const key = JSON.stringify([relation.group, relation.tc, relation.subattr])
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+export function collectLanderModeParameters(
+  relations: LanderParameterRelation[],
+): LanderModeParameters {
+  return {
+    groups: unique(relations.flatMap((item) => item.group ? [item.group] : [])),
+    tcs: unique(relations.flatMap((item) => item.tc ? [item.tc] : [])),
+    subattrs: unique(relations.flatMap((item) => item.subattr ? [item.subattr] : [])),
+  }
+}
+
+export function parseLanderParameterFile(
+  filePath: string,
+  bytes: Uint8Array,
+): LanderModeParameters {
+  const extension = path.extname(filePath).toLowerCase()
+  if (extension === '.json') {
+    return parseLanderJsonParameters(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+  }
+  if (extension === '.xls' || extension === '.xlsx') {
+    return parseLanderWorkbookParameters(bytes)
+  }
+  return { ...EMPTY_LANDER_MODE_PARAMETERS }
+}
+
+export function parseLanderParameterRelationsFile(
+  filePath: string,
+  bytes: Uint8Array,
+): LanderParameterRelation[] {
+  const extension = path.extname(filePath).toLowerCase()
+  if (extension === '.json') {
+    return parseLanderJsonRelations(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+  }
+  if (extension === '.xls' || extension === '.xlsx') {
+    return parseLanderWorkbookRelations(bytes)
+  }
+  return []
+}
+
+async function isFile(filePath: string): Promise<boolean> {
+  if (!filePath) return false
+  try {
+    const stat = await vscode.workspace.fs.stat(vscode.Uri.file(filePath))
+    return (stat.type & vscode.FileType.File) !== 0
+  } catch {
+    return false
+  }
+}
+
+async function loadLanderModeParametersFromFiles(
+  sources: LanderParameterSourcePaths,
+): Promise<LanderModeParameters> {
+  if (!await isFile(sources.tcFile)) return { ...EMPTY_LANDER_MODE_PARAMETERS }
+  try {
+    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(sources.tcFile))
+    return parseLanderParameterFile(sources.tcFile, bytes)
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`解析 Lander Group/TC/SubAttr 参数文件失败: ${sources.tcFile}: ${reason}`)
+  }
+}
+
+async function loadLanderParameterRelationsFromFiles(
+  sources: LanderParameterSourcePaths,
+): Promise<LanderParameterRelation[]> {
+  if (!await isFile(sources.tcFile)) {
+    throw new Error(`Lander Group/TC/SubAttr source file does not exist: ${sources.tcFile}`)
+  }
+  try {
+    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(sources.tcFile))
+    return parseLanderParameterRelationsFile(sources.tcFile, bytes)
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`Failed to parse Lander Group/TC/SubAttr source: ${sources.tcFile}: ${reason}`)
+  }
+}
+
 /**
  * Resolve the parameter choices owned by one mode.cfg.
  *
- * Today inline Group/TC/SubAttr options are supported. Keeping this loader on
- * the extension-host side gives xlsx/json-backed parameter sources a single
- * integration point without reintroducing those values as global resources.
+ * Inline parsing remains available for config-info callers. Runtime choices
+ * are loaded from the resolved JSON/XLS/XLSX plan by getLanderModeParameters.
  */
 export function parseLanderModeParameters(content: string): LanderModeParameters {
   const commands = parseCfgCommands(content)
@@ -130,8 +418,29 @@ export async function getLanderModeConfigInfo(
 
 export async function getLanderModeParameters(
   cfgPath: string,
+  sourceContext?: { verificationRepoRoot: string; selectedStage: string },
 ): Promise<LanderModeParameters> {
-  return parseLanderModeParameters(await readModeConfig(cfgPath))
+  const content = await readModeConfig(cfgPath)
+  if (!sourceContext) return parseLanderModeParameters(content)
+  const sources = resolveLanderParameterSourcePaths(
+    content,
+    sourceContext.verificationRepoRoot,
+    sourceContext.selectedStage,
+  )
+  return loadLanderModeParametersFromFiles(sources)
+}
+
+export async function getLanderModeParameterRelations(
+  cfgPath: string,
+  sourceContext: { verificationRepoRoot: string; selectedStage: string },
+): Promise<LanderParameterRelation[]> {
+  const content = await readModeConfig(cfgPath)
+  const sources = resolveLanderParameterSourcePaths(
+    content,
+    sourceContext.verificationRepoRoot,
+    sourceContext.selectedStage,
+  )
+  return loadLanderParameterRelationsFromFiles(sources)
 }
 
 function selectFlowNames(content: string, options: LanderFlowSelectionOptions): string[] {

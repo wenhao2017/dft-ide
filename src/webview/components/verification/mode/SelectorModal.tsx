@@ -11,7 +11,7 @@ import {
   Typography,
 } from 'antd'
 
-import type { BaseConfigItem } from './types'
+import type { ModeTreeNodeItem } from './types'
 
 const { Text } = Typography
 
@@ -19,7 +19,7 @@ interface SelectorModalProps {
   open: boolean
   title: string
 
-  items: BaseConfigItem[]
+  items: ModeTreeNodeItem[]
 
   value: string[]
 

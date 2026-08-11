@@ -1115,6 +1115,11 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
               throw new Error(`无效的 Mode 名称：${String(value)}`);
             }
             await vscode.workspace.fs.delete(vscode.Uri.file(path.join(cfgRoot, `${modeName}.cfg`)));
+
+            const versionPath = path.join(cfgRoot, 'version', `${modeName}.version.json`);
+            if (fs.existsSync(versionPath)) {
+              await vscode.workspace.fs.delete(vscode.Uri.file(versionPath));
+            }
           }
           currentPanel?.webview.postMessage({
             command: 'deleteVerificationModeCfgResponse', requestId, success: true,
@@ -1122,6 +1127,53 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
         } catch (err) {
           currentPanel?.webview.postMessage({
             command: 'deleteVerificationModeCfgResponse', requestId, success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+
+      case 'handleVerificationModeCfgVersion': {
+        const requestId: string = msg.requestId;
+        try {
+          const option: 'append' | 'rename' | 'delete' = msg.option;
+          const stage = normalizeStageName(msg.stage);
+          const modeName = msg.mode;
+          const version = msg.version;
+
+          const repoRoot = await resolveProjectRepoRoot('verification');
+          const cfgRoot = path.join(repoRoot, stage, 'lander_env', 'lander_cfg');
+          const versionPath = path.join(cfgRoot, "version", `${modeName}.version.json`);
+          const versionUri = vscode.Uri.file(versionPath);
+          await ensureLocalConfigDirectory(cfgRoot);
+
+          let content = '{}';
+          try {
+            const bytes = await vscode.workspace.fs.readFile(versionUri);
+            content = Buffer.from(bytes).toString('utf-8');
+          } catch {
+            content = '{}';
+          }
+          const versionObject = JSON.parse(content);
+
+          if (option === 'append') {
+            versionObject[version] = {};
+          } else if (option === 'rename') {
+            const targetVersion = msg.targetVersion;
+            versionObject[targetVersion] = versionObject[version];
+            delete versionObject[version];
+          } else if (option === 'delete') {
+            delete versionObject[version];
+          }
+          content = JSON.stringify(versionObject, null, 2);
+          await vscode.workspace.fs.writeFile(versionUri, Buffer.from(content, 'utf-8'));
+
+          currentPanel?.webview.postMessage({
+            command: 'handleVerificationModeCfgVersionResponse', requestId, success: true
+          });
+        } catch (err) {
+          currentPanel?.webview.postMessage({
+            command: 'handleVerificationModeCfgVersionResponse', requestId, success: false,
             error: err instanceof Error ? err.message : String(err),
           });
         }
@@ -2840,9 +2892,17 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
           const cfgRoot = path.join(repoRoot, stage, 'lander_env', 'lander_cfg');
           await ensureLocalConfigDirectory(cfgRoot);
           const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(cfgRoot));
-          const modes = entries.filter(([name, type]) => type === vscode.FileType.File && name.toLowerCase().endsWith('.cfg')).sort(([a], [b]) => a.localeCompare(b)).map(([fileName]) => {
+          const modes = entries.filter(([name, type]) => type === vscode.FileType.File && /^lander.*\.cfg$/i.test(name)).sort(([a], [b]) => a.localeCompare(b)).map(([fileName]) => {
             const cfgPath = path.join(cfgRoot, fileName);
-            return { name: path.basename(fileName, path.extname(fileName)), filePath: cfgPath };
+            const modeName = path.basename(fileName, path.extname(fileName));
+            const versionPath = path.join(cfgRoot,"version",`${modeName}.version.json`);
+            let versions: string[] = [];
+            try {
+              const fileContent = fs.readFileSync(versionPath, 'utf8');
+              const versionData = JSON.parse(fileContent);
+              versions = Object.keys(versionData);
+            } catch { }
+            return { name: modeName, filePath: cfgPath, versionPath, versions };
           });
           currentPanel?.webview.postMessage({ command: 'syncVerificationModesResponse', requestId, modes });
         } catch (err) {

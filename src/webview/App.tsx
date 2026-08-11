@@ -390,6 +390,29 @@ const App: React.FC = () => {
             flex-wrap: wrap;
           }
 
+          .dft-mode-tree .ant-tree-switcher,
+          .dft-mode-tree .ant-tree-switcher-leaf-icon {
+            align-self: center;
+            width: auto;
+            height: auto;
+            line-height: 1;
+          }
+
+          .dft-mode-tree .ant-tree-switcher:hover {
+            background: transparent;
+          }
+
+          .dft-mode-tree .ant-tree-treenode {
+            display: flex;
+            align-items: center;
+          }
+
+          .dft-mode-tree .ant-tree-node-content-wrapper {
+            margin: 0;
+            padding: 0;
+            min-width: 0;
+          }
+
           @media (max-width: 760px) {
             .dft-shell-header {
               padding: 6px 10px !important;

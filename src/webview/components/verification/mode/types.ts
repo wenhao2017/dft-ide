@@ -1,16 +1,17 @@
 export type ModePanelTab = 'mode'
 
-export interface BaseConfigItem {
-  name: string
-}
-
 export interface ModeConfigItem {
   name: string
-
   filePath?: string
+  versionPath?: string
+  versions?: string[]
 }
 
-export type ModePanelItem = BaseConfigItem | ModeConfigItem
+export interface ModeTreeNodeItem {
+  key: string
+  name: string
+  version?: string
+}
 
 export interface LanderStep {
   id: string
@@ -88,7 +89,7 @@ export interface ModePanelProps {
 
   initialCollapsed?: boolean
 
-  onSelect?: (tab: ModePanelTab, item?: ModePanelItem) => void
+  onSelect?: (tab: ModePanelTab, item?: ModeTreeNodeItem) => void
 
   onCheckedChange?: (tab: ModePanelTab, names: string[]) => void
 
@@ -112,7 +113,7 @@ export interface ResourceStore {
 /**
  * 当前选中项
  */
-export type NameStore = Record<ModePanelTab, string>
+export type NameStore = Record<ModePanelTab, ModeTreeNodeItem>
 
 /**
  * 勾选列表

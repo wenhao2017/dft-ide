@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 
 import type {
-  ModePanelItem,
+  ModeTreeNodeItem,
   ModePanelTab,
   ResourceStore,
   NameListStore,
@@ -9,6 +9,7 @@ import type {
 } from '../../types'
 
 import { INITIAL_NAME_LISTS, INITIAL_NAMES } from '../constants'
+import { toModeTreeNodeItem } from '../../../../../components/verification/mode/ModePanel/utils'
 
 interface UseModeSelectionProps {
   activeTab: ModePanelTab
@@ -23,7 +24,7 @@ interface UseModeSelectionProps {
    */
   onModeFocusChange: (names: string[]) => void
 
-  onSelect?: (tab: ModePanelTab, item?: ModePanelItem) => void
+  onSelect?: (tab: ModePanelTab, item?: ModeTreeNodeItem) => void
 
   onCheckedChange?: (tab: ModePanelTab, names: string[]) => void
 }
@@ -74,14 +75,18 @@ export function useModeSelection({
     return resources.mode.filter((item) => focusSet.has(item.name))
   }, [activeTab, activeCheckedNames, resources])
 
-  const storedSelectedName = selectedNames[activeTab]
+  const storedSelectedItem = selectedNames[activeTab]
 
   const selectedItem = useMemo(() => {
-    return (
-      activeItems.find((item) => item.name === storedSelectedName) ??
-      activeItems[0]
-    )
-  }, [activeItems, storedSelectedName])
+    const findItem = activeItems.find((item) => item.name === storedSelectedItem.name)
+    if (findItem) {
+      if (storedSelectedItem.version && findItem.versions?.includes(storedSelectedItem.version)) {
+        return storedSelectedItem
+      }
+      return toModeTreeNodeItem(findItem)
+    }
+    return toModeTreeNodeItem(activeItems[0])
+  }, [activeItems, storedSelectedItem])
 
   /**
    * 使用实际选中项名称。
@@ -105,12 +110,10 @@ export function useModeSelection({
     !allVisibleChecked
 
   const selectItem = useCallback(
-    (tab: ModePanelTab, item?: ModePanelItem) => {
-      const name = item?.name ?? ''
-
+    (tab: ModePanelTab, item?: ModeTreeNodeItem) => {
       setSelectedNames((current) => ({
         ...current,
-        [tab]: name,
+        [tab]: item ? item : { key: '', name: '' },
       }))
 
       onSelect?.(tab, item)

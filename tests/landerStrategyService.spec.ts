@@ -1,12 +1,16 @@
 import * as path from 'path'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
   executeLanderStrategy,
+  getLanderStrategyOutputPath,
   LANDER_STRATEGY_SOURCE_EXTENSIONS,
   LANDER_STRATEGY_STEP_NAMES,
+  materializeLanderStrategyParameters,
+  readLanderStrategyParameters,
 } from '../src/services/landerStrategyService'
 import type { LanderStep } from '../src/services/landerPipelineService'
+import { mockFilesystem, resetMockFilesystem } from './setup'
 
 function step(name: string): LanderStep {
   return {
@@ -34,6 +38,8 @@ function createContext(availableSteps: LanderStep[]) {
 }
 
 describe('landerStrategyService', () => {
+  beforeEach(() => resetMockFilesystem())
+
   it('executes the four-step strategy when the Run steps contain it consecutively', async () => {
     const strategySteps = LANDER_STRATEGY_STEP_NAMES.map(step)
     const context = createContext([
@@ -80,5 +86,68 @@ describe('landerStrategyService', () => {
     ])
 
     await expect(executeLanderStrategy(context)).rejects.toThrow('没有对应策略')
+  })
+
+  it('materializes related parameters and reads their universes', async () => {
+    const context = createContext(LANDER_STRATEGY_STEP_NAMES.map(step))
+    const sourcePath = path.join(
+      context.repoRoot,
+      context.stage,
+      'mbist',
+      'lander_dir',
+      '01.plan',
+      'release',
+      'POST',
+      'r1',
+      'MBIST_TOP_TC_PLAN.json',
+    )
+    mockFilesystem.set(path.resolve(context.cfgPath), [
+      'define_project_info -mode mbist -stage POST -version r1',
+      'define_mbist_info -mode top',
+    ].join('\n'))
+    mockFilesystem.set(path.resolve(sourcePath), JSON.stringify({
+      detail: [
+        { group: 'g1', subattr: null, tc1: 'Y', tc2: null },
+        { group: 'g1', subattr: 'subattr1', tc1: 'Y', tc2: 'Y' },
+        { group: 'g2', subattr: 'subattr2', tc1: null, tc2: 'Y' },
+      ],
+    }))
+
+    const result = await materializeLanderStrategyParameters(context)
+    const outputPath = getLanderStrategyOutputPath(
+      context.repoRoot,
+      context.stage,
+      context.modeName,
+    )
+
+    expect(result.outputPath).toBe(outputPath)
+    expect(result.parameters).toEqual([
+      { group: 'g1', tc: ['tc1'], subattr: null },
+      { group: 'g1', tc: ['tc1', 'tc2'], subattr: 'subattr1' },
+      { group: 'g2', tc: ['tc2'], subattr: 'subattr2' },
+    ])
+    expect(JSON.parse(mockFilesystem.get(path.resolve(outputPath)) ?? '')).toEqual([
+      { group: 'g1', tc: ['tc1'], subattr: null },
+      { group: 'g1', tc: ['tc1', 'tc2'], subattr: 'subattr1' },
+      { group: 'g2', tc: ['tc2'], subattr: 'subattr2' },
+    ])
+    await expect(readLanderStrategyParameters(
+      context.repoRoot,
+      context.stage,
+      context.modeName,
+    )).resolves.toEqual({
+      groups: ['g1', 'g2'],
+      tcs: ['tc1', 'tc2'],
+      subattrs: ['subattr1', 'subattr2'],
+    })
+  })
+
+  it('returns empty parameter universes when no strategy JSON exists', async () => {
+    const context = createContext([])
+    await expect(readLanderStrategyParameters(
+      context.repoRoot,
+      context.stage,
+      context.modeName,
+    )).resolves.toEqual({ groups: [], tcs: [], subattrs: [] })
   })
 })

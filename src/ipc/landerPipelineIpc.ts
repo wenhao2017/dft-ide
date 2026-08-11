@@ -1,8 +1,8 @@
 import * as vscode from 'vscode'
 import * as path from 'path'
 
-import { getLanderModeConfigInfo, getLanderModeParameters, getLanderModePipelines } from '../services/landerPipelineService'
-import { executeLanderStrategy } from '../services/landerStrategyService'
+import { getLanderModeConfigInfo, getLanderModePipelines } from '../services/landerPipelineService'
+import { executeLanderStrategy, readLanderStrategyParameters } from '../services/landerStrategyService'
 import { normalizeStageName, resolveProjectRepoRoot } from '../services/workspaceService'
 import type { LanderModeConfigInfo, LanderModeParameters, LanderStep } from '../services/landerPipelineService'
 
@@ -70,15 +70,24 @@ export async function handleGetLanderModePipelines(
 
   try {
     let cfgPath: string | undefined
+    let parameterContext: { repoRoot: string; stage: string; modeName: string } | undefined
     if (msg.modeName !== undefined) {
-      cfgPath = await resolveModeConfigPath(msg.stage, msg.modeName)
+      const selectedStage = normalizeStageName(msg.stage)
+      const verificationRepoRoot = await resolveProjectRepoRoot('verification')
+      const modeName = normalizeModeName(msg.modeName)
+      cfgPath = path.join(verificationRepoRoot, selectedStage, 'lander_env', 'lander_cfg', `${modeName}.cfg`)
+      parameterContext = { repoRoot: verificationRepoRoot, stage: selectedStage, modeName }
     }
     const [steps, parameters] = await Promise.all([
       getLanderModePipelines(context.extensionUri, cfgPath, {
         init: msg.init === true,
       }),
-      cfgPath
-        ? getLanderModeParameters(cfgPath)
+      parameterContext
+        ? readLanderStrategyParameters(
+          parameterContext.repoRoot,
+          parameterContext.stage,
+          parameterContext.modeName,
+        )
         : Promise.resolve({ groups: [], tcs: [], subattrs: [] }),
     ])
     await panel.webview.postMessage({

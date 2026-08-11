@@ -3,25 +3,24 @@ import { useCallback } from 'react'
 import { message } from 'antd'
 
 import type {
-  BaseConfigItem,
+  ModeTreeNodeItem,
   ModeConfigItem,
-  ModePanelItem,
   ModePanelTab,
   ResourceStore,
 } from '../../types'
 
-import { createCopyName, sameName } from '../utils'
+import { createCopyName, sameName, toModeTreeNodeItem, duplicateModeTreeNodeItem } from '../utils'
 
 interface UseModeCrudProps {
   resources: ResourceStore
 
   updateResources: (updater: (current: ResourceStore) => ResourceStore) => void
 
-  selectItem: (tab: ModePanelTab, item?: ModePanelItem) => void
+  selectItem: (tab: ModePanelTab, item?: ModeTreeNodeItem) => void
 
   checkedNames: Record<ModePanelTab, string[]>
 
-  selectedNames: Record<ModePanelTab, string>
+  selectedNames: Record<ModePanelTab, ModeTreeNodeItem>
 
   setCheckedNames: (tab: ModePanelTab, names: string[]) => void
 
@@ -37,6 +36,7 @@ export function useModeCrud({
   setCheckedNames,
   setRunningNames,
 }: UseModeCrudProps) {
+// -------------------------------------------- Mode -------------------------------------------------
   const ensureUniqueName = useCallback(
     (tab: ModePanelTab, name: string, ignoreName?: string) => {
       const duplicated = resources[tab].some((item) => {
@@ -88,9 +88,10 @@ export function useModeCrud({
           focusModes: Array.from(new Set([...current.focusModes, item.name])),
         }))
 
-        selectItem(tab, item)
+        selectItem(tab, toModeTreeNodeItem(item))
       } else {
-        const item: BaseConfigItem = {
+        const item: ModeTreeNodeItem = {
+          key: normalizedName,
           name: normalizedName,
         }
 
@@ -111,7 +112,7 @@ export function useModeCrud({
   )
 
   const duplicateItem = useCallback(
-    (item?: ModePanelItem, tab?: ModePanelTab, targetName?: string) => {
+    (item?: ModeTreeNodeItem, tab?: ModePanelTab, targetName?: string) => {
       if (!item) {
         return false
       }
@@ -120,7 +121,7 @@ export function useModeCrud({
 
       const duplicatedName = targetName ?? createCopyName(resources[targetTab], item.name)
 
-      const duplicated: ModePanelItem = {
+      const duplicated: ModeTreeNodeItem = {
         ...item,
 
         name: duplicatedName,
@@ -144,45 +145,13 @@ export function useModeCrud({
 
       message.success(`已复制 ${item.name}`)
 
-      return true
-    },
-    [resources, selectItem, updateResources],
-  )
-
-  const duplicateVersionItem = useCallback(
-    (item?: ModePanelItem, tab?: ModePanelTab, targetName?: string) => {
-      if (!item) {
-        return false
-      }
-
-      const targetTab = tab ?? 'mode'
-      const duplicatedName = targetName ?? ''
-      const duplicated: ModePanelItem = {
-        ...item,
-        name: duplicatedName,
-      }
-
-      updateResources((current) => ({
-        ...current,
-        [targetTab]: [...current[targetTab], duplicated],
-        ...(targetTab === 'mode'
-          ? {
-              focusModes: Array.from(
-                new Set([...current.focusModes, duplicated.name]),
-              ),
-            }
-          : {}),
-      }))
-
-      selectItem(targetTab, duplicated)
-      message.success(`已复制 ${item.name}`)
       return true
     },
     [resources, selectItem, updateResources],
   )
 
   const renameItem = useCallback(
-    (item: ModePanelItem, tab: ModePanelTab, nextName: string) => {
+    (item: ModeTreeNodeItem, tab: ModePanelTab, nextName: string) => {
       const name = nextName.trim()
 
       if (!name) {
@@ -199,7 +168,7 @@ export function useModeCrud({
         return false
       }
 
-      const renamed: ModePanelItem = {
+      const renamed: ModeTreeNodeItem = {
         ...item,
 
         name,
@@ -259,12 +228,12 @@ export function useModeCrud({
         )
       }
 
-      if (removeSet.has(selectedNames[tab])) {
+      if (removeSet.has(selectedNames[tab].name)) {
         const remain = resources[tab].filter(
           (item) => !removeSet.has(item.name),
         )
 
-        selectItem(tab, remain[0])
+        selectItem(tab, toModeTreeNodeItem(remain[0]))
       }
     },
     [
@@ -278,15 +247,97 @@ export function useModeCrud({
     ],
   )
 
+// -------------------------------------------- Version -------------------------------------------------
+  const appendVersion = useCallback(
+    (item: ModeTreeNodeItem, tab: ModePanelTab, version: string) => {
+      if (tab === 'mode') {
+        const findItem = resources.mode.find(m => m.name === item.name)
+        if (!findItem) return false
+
+        if (findItem.versions === undefined) {
+          findItem.versions = []
+        }
+        findItem.versions.push(version)
+
+        updateResources((current) => ({
+          ...current,
+          [tab]: current[tab].map((a) =>
+            sameName(a.name, item.name) ? findItem : a,
+          ),
+          focusModes: current.focusModes,
+        }))
+
+        selectItem(tab, duplicateModeTreeNodeItem(item, version))
+      }
+      return true
+    },
+    [resources, selectItem, updateResources],
+  )
+
+  const renameVersion = useCallback(
+    (item: ModeTreeNodeItem, tab: ModePanelTab, targetVersion: string) => {
+      if (tab === 'mode') {
+        const findItem = resources.mode.find(m => m.name === item.name)
+        if (!findItem) return false
+
+        if (findItem.versions === undefined) {
+          findItem.versions = []
+        }
+        const index = findItem.versions.indexOf(item.version!);
+        if (index !== -1) {
+          findItem.versions[index] = targetVersion;
+        }
+
+        updateResources((current) => ({
+          ...current,
+          [tab]: current[tab].map((a) =>
+            sameName(a.name, item.name) ? findItem : a,
+          ),
+          focusModes: current.focusModes,
+        }))
+
+        selectItem(tab, duplicateModeTreeNodeItem(item, targetVersion))
+      }
+      return true
+    },
+    [resources, selectItem, updateResources],
+  )
+
+  const deleteVersion = useCallback(
+    (item: ModeTreeNodeItem, tab: ModePanelTab) => {
+      if (tab === 'mode') {
+        if (!item.version) return false
+        const findItem = resources.mode.find(m => m.name === item.name)
+        if (!findItem) return false
+
+        if (findItem.versions === undefined) {
+          findItem.versions = []
+        }
+        findItem.versions = findItem.versions.filter(version => version !== item.version);
+
+        updateResources((current) => ({
+          ...current,
+          [tab]: current[tab].map((a) =>
+            sameName(a.name, item.name) ? findItem : a,
+          ),
+          focusModes: current.focusModes,
+        }))
+
+        selectItem(tab, duplicateModeTreeNodeItem(item))
+      }
+      return true
+    },
+    [resources, selectItem, updateResources],
+  )
+
   return {
     createItem,
-
-    duplicateVersionItem,
-
     duplicateItem,
-
     renameItem,
-
     deleteItems,
+
+    appendVersion,
+    renameVersion,
+    deleteVersion
   }
 }

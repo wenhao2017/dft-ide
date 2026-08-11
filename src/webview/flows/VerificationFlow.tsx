@@ -9,7 +9,7 @@ import FlowShell from '../components/shared/FlowShell'
 import ModePanel from '../components/verification/mode/ModePanel'
 
 import type {
-  ModePanelItem,
+  ModeTreeNodeItem,
   ModePanelTab,
   ModeRunPayload,
 } from '../components/verification/mode/types'
@@ -38,7 +38,7 @@ const VerificationFlow: React.FC = () => {
     setCurrentStep((prev) => Math.max(prev - 1, 0))
   }
 
-  const handleSelect = (tab: ModePanelTab, item?: ModePanelItem) => {
+  const handleSelect = (tab: ModePanelTab, item?: ModeTreeNodeItem) => {
     if (tab === 'mode') {
       setSelectedModule(item?.name ?? '')
     }

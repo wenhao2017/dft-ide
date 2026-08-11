@@ -17,6 +17,10 @@ import {
   type DonauSubmissionOverride,
 } from '../shared/clusterSubmission';
 import { inspectPipelineStepLogs } from './pipelineLogStatus';
+import {
+  isLanderStrategySteps,
+  materializeLanderStrategyParameters,
+} from './landerStrategyService';
 
 export type PipelineFlowKey = 'hibist' | 'sailor' | 'verification';
 export type PipelineRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
@@ -1523,15 +1527,55 @@ export class PipelineRuntimeService {
   }
 
   private completeRuntime(key: string, logPrefix: string): void {
+    const session = this.executionSessions.get(key);
     clearRuntimeTimers(key);
     this.disposeExecutionSession(key);
-    this.updateRuntime(key, (runtime) => {
+
+    const finish = () => this.updateRuntime(key, (runtime) => {
       const hasFailedTask = runtime.tasks.some((task) => task.status === 'failed');
       return {
         ...runtime,
         runState: hasFailedTask ? 'failed' : 'completed',
         finishedAt: nowStamp(),
       };
+    });
+
+    const stage = session?.flowKey === 'verification'
+      ? firstNonEmptyString(session.envConfig?.stage)
+      : '';
+    const repoRoot = session?.flowKey === 'verification'
+      ? resolveProjectPath('verification')
+      : undefined;
+    if (!session || !stage || !repoRoot || !isLanderStrategySteps(session.tasks)) {
+      finish();
+      return;
+    }
+
+    const cfgPath = path.join(
+      repoRoot,
+      stage,
+      'lander_env',
+      'lander_cfg',
+      `${session.moduleKey}.cfg`,
+    );
+    void materializeLanderStrategyParameters({
+      repoRoot,
+      stage,
+      modeName: session.moduleKey,
+      cfgPath,
+    }).then(() => {
+      finish();
+    }).catch((error) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.error(`[HiSalad] Failed to generate Lander strategy parameters: ${reason}`);
+      this.updateRuntime(key, (runtime) => ({
+        ...runtime,
+        runState: 'failed',
+        finishedAt: nowStamp(),
+        tasks: runtime.tasks.map((task, index) => index === runtime.tasks.length - 1
+          ? { ...task, status: 'failed', finishedAt: nowText() }
+          : task),
+      }));
     });
   }
 

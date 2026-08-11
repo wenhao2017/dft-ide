@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { message } from 'antd'
 import type {
   ModeConfigItem,
-  ModePanelItem,
+  ModeTreeNodeItem,
   ModePanelProps,
   ModePanelTab,
 } from '../types'
@@ -21,7 +21,7 @@ import { useModeSelection } from './hooks/useModeSelection'
 import { useModeCrud } from './hooks/useModeCrud'
 import { useModeRun } from './hooks/useModeRun'
 
-import { createCopyName, sameName } from './utils'
+import { createCopyName, sameName, toModeTreeNodeItem, createVersionName } from './utils'
 import {
   deleteVerificationModeCfg,
   duplicateVerificationModeCfg,
@@ -30,6 +30,9 @@ import {
   selectVerificationModeCfg,
   openFileInEditor,
   executeLanderStrategy,
+  appendVerificationModeCfgVersion,
+  deleteVerificationModeCfgVersion,
+  renameVerificationModeCfgVersion,
 } from '../../../../utils/ipc'
 import { confirmDelete } from '../../../../utils/confirmDelete'
 import { useVerificationStageConfig } from './hooks/useVerificationStageConfig'
@@ -62,7 +65,7 @@ export default function ModePanel({
   const [collapsed, setCollapsed] = useState(initialCollapsed)
 
   const [batchCheckedNamesByTab, setBatchCheckedNamesByTab] = useState<
-    Record<ModePanelTab, string[]>
+    Record<ModePanelTab, ModeTreeNodeItem[]>
   >({
     mode: [],
   })
@@ -130,7 +133,7 @@ export default function ModePanel({
 
   const [renameOpen, setRenameOpen] = useState(false)
 
-  const [renameItem, setRenameItem] = useState<ModePanelItem>()
+  const [renameItem, setRenameItem] = useState<ModeTreeNodeItem>()
 
   const [parsing, setParsing] = useState(false)
 
@@ -191,15 +194,15 @@ export default function ModePanel({
     const focusedNameSet = new Set(focusedNames)
 
     setBatchCheckedNamesByTab((current) => {
-      const currentNames = current[activeTab]
+      const currentItems = current[activeTab]
 
-      const nextNames = currentNames.filter(
-        (name) => validNames.has(name) && focusedNameSet.has(name),
+      const nextItems = currentItems.filter(
+        (item) => validNames.has(item.name) && focusedNameSet.has(item.name),
       )
 
       const unchanged =
-        nextNames.length === currentNames.length &&
-        nextNames.every((name, index) => name === currentNames[index])
+        nextItems.length === currentItems.length &&
+        nextItems.every((item, index) => item.key === currentItems[index].key)
 
       if (unchanged) {
         return current
@@ -207,7 +210,7 @@ export default function ModePanel({
 
       return {
         ...current,
-        [activeTab]: nextNames,
+        [activeTab]: nextItems,
       }
     })
   }, [activeTab, allItems, focusedNames])
@@ -260,7 +263,7 @@ export default function ModePanel({
     setCreateOpen(false)
   }
 
-  const openRename = (item: ModePanelItem) => {
+  const openRename = (item: ModeTreeNodeItem) => {
     setRenameItem(item)
     setRenameOpen(true)
   }
@@ -278,6 +281,30 @@ export default function ModePanel({
       message.warning('请输入名称')
       return
     }
+
+    if (renameItem.version) {
+      const findItem = resources.mode.find(item => item.name === renameItem.name)
+      if (!findItem) {
+        message.error(`Mode ${renameItem.name} 不存在`)
+        return
+      }
+      if (findItem.versions && findItem.versions.includes(nextName)) {
+        message.error(`版本名称 ${nextName} 已存在`)
+        return
+      }
+
+      try {
+        await renameVerificationModeCfgVersion(stage, renameItem.name, renameItem.version, nextName)
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '版本重命名失败')
+        return
+      }
+
+      if (crud.renameVersion(renameItem, activeTab, nextName)) closeRename()
+
+      return
+    }
+
     if (resources.mode.some((item) =>
       !sameName(item.name, renameItem.name) && sameName(item.name, nextName)
     )) {
@@ -312,7 +339,8 @@ export default function ModePanel({
       const addedItem = allItems.find((item) => item.name === addedName)
 
       if (addedItem) {
-        selection.selectItem(activeTab, addedItem)
+        const selectItem = toModeTreeNodeItem(addedItem)
+        selection.selectItem(activeTab, selectItem)
 
         return
       }
@@ -335,7 +363,8 @@ export default function ModePanel({
     const nextItem = allItems.find((item) => nextNames.includes(item.name))
 
     if (nextItem) {
-      selection.selectItem(activeTab, nextItem)
+      const selectItem = toModeTreeNodeItem(nextItem)
+      selection.selectItem(activeTab, selectItem)
 
       return
     }
@@ -350,14 +379,14 @@ export default function ModePanel({
 
     if (activeTab === 'mode') {
       if (!stage) return
-      // const targetName = createVersionName(resources.mode, selectedItem.name)
-      // try {
-      //   await duplicateVerificationModeCfg(stage, selectedItem.name, targetName)
-      // } catch (error) {
-      //   message.error(error instanceof Error ? error.message : 'Mode 配置文件新增版本失败')
-      //   return
-      // }
-      // crud.duplicateVersionItem(selectedItem, activeTab, targetName)
+      const version = createVersionName(resources.mode, selectedItem)
+      try {
+        await appendVerificationModeCfgVersion(stage, selectedItem.name, version)
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : 'Mode 新增版本失败')
+        return
+      }
+      crud.appendVersion(selectedItem, activeTab, version)
     }
   }
 
@@ -402,29 +431,55 @@ export default function ModePanel({
   }
 
   const handleDelete = async () => {
-    const deleteNames = batchCheckedNames.length
+    if (!stage) return
+
+    const deleteItems = batchCheckedNames.length
       ? [...batchCheckedNames]
-      : selectedItem ? [selectedItem.name] : []
+      : selectedItem ? [selectedItem] : []
 
-    if (!deleteNames.length || !stage) return
-    if (!await confirmDelete('Mode', deleteNames)) return
+    console.log(deleteItems)
 
-    try {
-      await deleteVerificationModeCfg(stage, deleteNames)
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Mode 配置文件删除失败')
-      return
+    const deleteNames = [...new Set(deleteItems.filter(item => !item.version).map(item => item.name))];
+    const deleteVersionItems = deleteItems.filter(item =>
+      item.version && !deleteNames.includes(item.name)
+    );
+
+    if (deleteNames.length) {
+      if (!await confirmDelete('Mode', deleteNames)) return
+
+      try {
+        await deleteVerificationModeCfg(stage, deleteNames)
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : 'Mode 配置文件删除失败')
+        return
+      }
+
+      crud.deleteItems(activeTab, deleteNames)
     }
 
-    crud.deleteItems(activeTab, deleteNames)
+    if (deleteVersionItems.length) {
+      try {
+        for (const deleteItem of deleteVersionItems) {
+          await deleteVerificationModeCfgVersion(stage, deleteItem.name, deleteItem.version!)
+        }
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : 'Mode 删除版本失败')
+        return
+      }
+
+      for (const deleteItem of deleteVersionItems) {
+        crud.deleteVersion(deleteItem, activeTab)
+      }
+    }
   }
-  const handleBatchCheckedChange = (name: string, checked: boolean) => {
+
+  const handleBatchCheckedChange = (item: ModeTreeNodeItem, checked: boolean) => {
     setBatchCheckedNamesByTab((current) => {
-      const currentNames = current[activeTab]
+      const currentItems = current[activeTab]
 
       const nextNames = checked
-        ? Array.from(new Set([...currentNames, name]))
-        : currentNames.filter((currentName) => currentName !== name)
+        ? Array.from(new Set([...currentItems, item]))
+        : currentItems.filter((currentItem) => currentItem.key !== item.key)
 
       return {
         ...current,
@@ -433,7 +488,7 @@ export default function ModePanel({
     })
   }
 
-  const handleRunItem = (item: ModePanelItem) => {
+  const handleRunItem = (item: ModeTreeNodeItem) => {
     if (
       activeTab !== 'mode' ||
       !item.name
@@ -441,11 +496,14 @@ export default function ModePanel({
       return
     }
 
+    selection.selectItem(activeTab, item)
     run.openRun(item)
   }
 
-  const handleRunStrategy = async (item: ModePanelItem) => {
+  const handleRunStrategy = async (item: ModeTreeNodeItem) => {
     if (activeTab !== 'mode' || !stage || !item.name) return
+
+    selection.selectItem(activeTab, item)
 
     try {
       const response = await executeLanderStrategy({ stage, modeName: item.name })
@@ -469,7 +527,7 @@ export default function ModePanel({
     }
   }
 
-  const handleStopItem = (item: ModePanelItem) => {
+  const handleStopItem = (item: ModeTreeNodeItem) => {
     if (activeTab !== 'mode') {
       return
     }
@@ -579,9 +637,9 @@ export default function ModePanel({
           <ModeList
             tab={activeTab}
             items={visibleItems}
-            selectedName={selectedItem?.name ?? ''}
-            checkedNames={batchCheckedNames}
-            runningNames={runningModeNames}
+            selectedItem={selectedItem ?? { key: '', name: '' }}
+            checkedItems={batchCheckedNames}
+            runningKeys={runningModeNames}
             accent={accentColor}
             onSelect={(item) => {
               selection.selectItem(activeTab, item)
@@ -619,7 +677,7 @@ export default function ModePanel({
 
       <RenameModal
         open={renameOpen}
-        value={renameItem?.name ?? ''}
+        value={renameItem?.version ?? renameItem?.name ?? ''}
         accent={accentColor}
         onCancel={closeRename}
         onConfirm={confirmRename}

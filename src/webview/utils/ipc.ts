@@ -240,9 +240,32 @@ export async function deleteVerificationModeCfg(stage: string, modeNames: string
   }
 }
 
+export async function appendVerificationModeCfgVersion(stage: string, mode: string, version: string): Promise<void> {
+  const res = await ipcRequest('handleVerificationModeCfgVersion', { option: 'append', stage, mode, version })
+  if (res.success !== true) {
+    throw new Error(typeof res.error === 'string' ? res.error : 'Mode 新增版本失败')
+  }
+}
+
+export async function renameVerificationModeCfgVersion(stage: string, mode: string, version: string, targetVersion: string): Promise<void> {
+  const res = await ipcRequest('handleVerificationModeCfgVersion', { option: 'rename', stage, mode, version, targetVersion })
+  if (res.success !== true) {
+    throw new Error(typeof res.error === 'string' ? res.error : 'Mode 修改版本失败')
+  }
+}
+
+export async function deleteVerificationModeCfgVersion(stage: string, mode: string, version: string): Promise<void> {
+  const res = await ipcRequest('handleVerificationModeCfgVersion', { option: 'delete', stage, mode, version })
+  if (res.success !== true) {
+    throw new Error(typeof res.error === 'string' ? res.error : 'Mode 删除版本失败')
+  }
+}
+
 export interface VerificationModeCfg {
   name: string
   filePath: string
+  versionPath: string
+  versions: string[]
 }
 
 export async function syncVerificationModes(stage: string): Promise<VerificationModeCfg[]> {
@@ -252,7 +275,10 @@ export async function syncVerificationModes(stage: string): Promise<Verification
     ? res.modes.filter((item): item is VerificationModeCfg =>
         typeof item === 'object' && item !== null &&
         typeof (item as VerificationModeCfg).name === 'string' &&
-        typeof (item as VerificationModeCfg).filePath === 'string')
+        typeof (item as VerificationModeCfg).filePath === 'string' &&
+        typeof (item as VerificationModeCfg).versionPath === 'string' &&
+        Array.isArray((item as VerificationModeCfg).versions) &&
+        (item as VerificationModeCfg).versions.every(version => typeof version === 'string'))
     : []
 }
 

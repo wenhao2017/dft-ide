@@ -432,9 +432,9 @@ export default function RunModal({
 
             <ParamTable
               rows={rows}
-              groups={parameters.groups.map((name) => ({ name }))}
-              tcs={parameters.tcs.map((name) => ({ name }))}
-              subattrs={parameters.subattrs.map((name) => ({ name }))}
+              groups={parameters.groups.map((name) => ({ key: name, name }))}
+              tcs={parameters.tcs.map((name) => ({ key: name, name }))}
+              subattrs={parameters.subattrs.map((name) => ({ key: name, name }))}
               onChange={(nextRows) => setRows(nextRows.slice(0, 1))}
             />
           </div>
