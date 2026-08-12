@@ -81,25 +81,13 @@ export const sameName = (left: string, right: string): boolean => {
   return left.trim().toLowerCase() === right.trim().toLowerCase()
 }
 
-export const sameModeTreeNodeItem = (left: ModeTreeNodeItem, right: ModeTreeNodeItem): boolean => {
-  return left.name?.trim().toLowerCase() === right.name?.trim().toLowerCase() &&
-    left.version?.trim().toLowerCase() === right.version?.trim().toLowerCase()
-}
-
-export const hasModeTreeNodeItem = (items: ModeTreeNodeItem[], item: ModeTreeNodeItem): boolean => {
-  return items.some((a) => sameModeTreeNodeItem(a, item))
-}
-
-export const toModeTreeNodeItemKey = (item: ModeTreeNodeItem): string => {
-  if (item.version) {
-    return `${item.name}@${item.version}`;
-  }
-  return item.name;
+export const toModeTreeNodeItemKey = (name: string, version?: string): string => {
+  return version ? `${name}@${version}` : name;
 };
 
 export const toModePanelItemKeys = (items: ModeTreeNodeItem[]): string[] => {
   return items.map(item => {
-    return toModeTreeNodeItemKey(item);
+    return toModeTreeNodeItemKey(item.name, item.version);
   });
 };
 
@@ -108,7 +96,7 @@ export const toModeTreeNodeItem = (config: ModeConfigItem, version?: string): Mo
     return { key: '', name: '' };
   }
 
-  const key = version ? `${config.name}@${version}` : config.name;
+  const key = toModeTreeNodeItemKey(config.name, version);
   return {
     key,
     name: config.name,
@@ -121,10 +109,21 @@ export const duplicateModeTreeNodeItem = (item: ModeTreeNodeItem, version?: stri
     return { key: '', name: '' };
   }
 
-  const key = version ? `${item.name}@${version}` : item.name;
+  const key = toModeTreeNodeItemKey(item.name, version);
   return {
     key,
     name: item.name,
     version
   };
 };
+
+export function getVersionFromModuleKey(moduleKey: string): string[] {
+  let oriModuleKey = '';
+  let version = '';
+  if (moduleKey.includes('@')) {
+    const lastAtPos = moduleKey.lastIndexOf('@');
+    oriModuleKey = moduleKey.slice(0, lastAtPos).trim();
+    version = moduleKey.slice(lastAtPos + 1).trim();
+  }
+  return [oriModuleKey, version];
+}

@@ -2,7 +2,12 @@ import * as vscode from 'vscode'
 import * as path from 'path'
 
 import { getLanderModeConfigInfo, getLanderModePipelines } from '../services/landerPipelineService'
-import { executeLanderStrategy, readLanderStrategyParameters } from '../services/landerStrategyService'
+import {
+  executeLanderStrategy,
+  getLanderRunStartStepIndex,
+  hasLanderStrategyOutput,
+  readLanderStrategyParameters,
+} from '../services/landerStrategyService'
 import { normalizeStageName, resolveProjectRepoRoot } from '../services/workspaceService'
 import type { LanderModeConfigInfo, LanderModeParameters, LanderStep } from '../services/landerPipelineService'
 
@@ -18,6 +23,7 @@ export interface GetLanderModePipelinesResponse {
   requestId: string
   success: boolean
   steps: LanderStep[]
+  defaultStartStepIndex: number
   parameters: LanderModeParameters
   error?: string
 }
@@ -78,7 +84,7 @@ export async function handleGetLanderModePipelines(
       cfgPath = path.join(verificationRepoRoot, selectedStage, 'lander_env', 'lander_cfg', `${modeName}.cfg`)
       parameterContext = { repoRoot: verificationRepoRoot, stage: selectedStage, modeName }
     }
-    const [steps, parameters] = await Promise.all([
+    const [availableSteps, parameters, strategyOutputExists] = await Promise.all([
       getLanderModePipelines(context.extensionUri, cfgPath, {
         init: msg.init === true,
       }),
@@ -89,13 +95,26 @@ export async function handleGetLanderModePipelines(
           parameterContext.modeName,
         )
         : Promise.resolve({ groups: [], tcs: [], subattrs: [] }),
+      parameterContext
+        ? hasLanderStrategyOutput(
+          parameterContext.repoRoot,
+          parameterContext.stage,
+          parameterContext.modeName,
+        )
+        : Promise.resolve(false),
     ])
+    const defaultStartStepIndex = getLanderRunStartStepIndex(
+      availableSteps,
+      strategyOutputExists,
+    )
     await panel.webview.postMessage({
-      command: 'getLanderModePipelinesResponse', requestId, success: true, steps, parameters,
+      command: 'getLanderModePipelinesResponse', requestId, success: true,
+      steps: availableSteps, defaultStartStepIndex, parameters,
     })
   } catch (error) {
     await panel.webview.postMessage({
       command: 'getLanderModePipelinesResponse', requestId, success: false, steps: [],
+      defaultStartStepIndex: 0,
       parameters: { groups: [], tcs: [], subattrs: [] },
       error: error instanceof Error ? error.message : String(error),
     })

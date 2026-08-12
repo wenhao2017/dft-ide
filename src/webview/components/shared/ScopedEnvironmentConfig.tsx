@@ -1,6 +1,6 @@
-import { Alert, Empty, Segmented, Select, Space, Switch, Tag, Typography } from 'antd'
-import { ApartmentOutlined, SettingOutlined } from '@ant-design/icons'
-import { useEffect, useMemo, useState } from 'react'
+import { Alert, Button, Empty, Popconfirm, Segmented, Select, Space, Switch, Tag, Typography } from 'antd'
+import { ApartmentOutlined, DeleteOutlined, SettingOutlined } from '@ant-design/icons'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { ClusterSubmissionConfig } from '../../../shared/clusterSubmission'
 import type { RepoKey } from '../../utils/ipc'
@@ -42,6 +42,11 @@ export default function ScopedEnvironmentConfig({
 }: Props) {
   const [view, setView] = useState<'default' | 'special'>('default')
   const [scopeKey, setScopeKey] = useState('')
+  const overridesRef = useRef(overrides)
+  useEffect(() => {
+    overridesRef.current = overrides
+  }, [overrides])
+
   const availableKeys = useMemo(
     () => Array.from(new Set([...scopeKeys, ...Object.keys(overrides)])).filter(Boolean).sort(),
     [overrides, scopeKeys],
@@ -53,13 +58,24 @@ export default function ScopedEnvironmentConfig({
   }, [availableKeys, scopeKey])
 
   const current = overrides[scopeKey] ?? {}
+  const commitOverrides = (next: Record<string, ScopedEnvironmentOverride>) => {
+    overridesRef.current = next
+    onOverridesChange(next)
+  }
   const updateCurrent = (patch: ScopedEnvironmentOverride) => {
     if (!scopeKey) return
-    const nextValue = { ...current, ...patch }
-    const next = { ...overrides }
+    const latest = overridesRef.current
+    const nextValue = { ...(latest[scopeKey] ?? {}), ...patch }
+    const next = { ...latest }
     if (nextValue.tools === undefined && nextValue.cluster === undefined) delete next[scopeKey]
     else next[scopeKey] = nextValue
-    onOverridesChange(next)
+    commitOverrides(next)
+  }
+  const deleteCurrent = () => {
+    if (!scopeKey) return
+    const next = { ...overridesRef.current }
+    delete next[scopeKey]
+    commitOverrides(next)
   }
 
   const status = (key: string) => {
@@ -130,6 +146,18 @@ export default function ScopedEnvironmentConfig({
             <Tag color={current.tools !== undefined || current.cluster !== undefined ? 'processing' : 'default'}>
               {status(scopeKey)}
             </Tag>
+            {current.tools !== undefined || current.cluster !== undefined ? (
+              <Popconfirm
+                title={`删除 ${scopeKey} 的特殊配置？`}
+                description="删除后，工具和集群都将继承默认配置。"
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                onConfirm={deleteCurrent}
+              >
+                <Button danger icon={<DeleteOutlined />}>删除特殊配置</Button>
+              </Popconfirm>
+            ) : null}
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

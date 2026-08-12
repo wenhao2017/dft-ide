@@ -12,6 +12,7 @@ import {
 import { resolveProjectPath, resolveProjectRoot } from './workspaceService';
 import { getExecutionTerminalCapabilities, registerExecutionTerminalMonitor, stopExecutionTerminal } from './terminalService';
 import { formatTime } from '../utils';
+import { getVersionFromModuleKey } from '../webview/components/verification/mode/ModePanel/utils'
 import {
   applyDsubCommandOverrides,
   type DonauSubmissionOverride,
@@ -414,12 +415,12 @@ function buildStepCommands(
   const customConfig = getRuntimeTaskConfig(envConfig, taskConfig);
 
   if (index === 0) {
-    // const [oriModuleKey, version] = getVersionFromModuleName(moduleKey);
-    // if (version) {
-    //   commands.push(`setenv DFT_IDE_MODULE_ORI "${oriModuleKey}"`);
-    //   commands.push(`setenv DFT_IDE_VERSION "${version}"`);
-    //   commands.push(`setenv VERSION "${version}"`);
-    // }
+    const [oriModuleKey, version] = getVersionFromModuleKey(moduleKey);
+    if (version) {
+      moduleKey = oriModuleKey;
+      commands.push(`setenv DFT_IDE_VERSION "${version}"`);
+      commands.push(`setenv VERSION "${version}"`);
+    }
     const moduleEnvName = flowKey === 'verification' ? 'DFT_IDE_MODE' : 'DFT_IDE_MODULE';
     commands.push(`setenv ${moduleEnvName} "${moduleKey}"`);
     if (projectPath) {
@@ -1116,12 +1117,12 @@ export class PipelineRuntimeService {
       `setenv DFT_IDE_HISTORY ${quoteCshArgument(runId)}`,
       `setenv DFT_IDE_MARKER_TASK_ID ${quoteCshArgument(task.id)}`,
     ];
-    // const [oriModuleKey, version] = getVersionFromModuleName(moduleKey);
-    // if (version) {
-    //   commands.push(`setenv DFT_IDE_MODULE_ORI ${quoteCshArgument(oriModuleKey)}`);
-    //   commands.push(`setenv DFT_IDE_VERSION ${quoteCshArgument(version)}`);
-    //   commands.push(`setenv VERSION ${quoteCshArgument(version)}`);
-    // }
+    const [oriModuleKey, version] = getVersionFromModuleKey(moduleKey);
+    if (version) {
+      moduleKey = oriModuleKey;
+      commands.push(`setenv DFT_IDE_VERSION ${quoteCshArgument(version)}`);
+      commands.push(`setenv VERSION ${quoteCshArgument(version)}`);
+    }
     commands.push(`setenv ${flowKey === 'verification' ? 'DFT_IDE_MODE' : 'DFT_IDE_MODULE'} ${quoteCshArgument(moduleKey)}`);
     const projectPath = resolveProjectPath(flowKey);
     if (projectPath) {

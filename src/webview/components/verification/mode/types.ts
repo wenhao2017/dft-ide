@@ -3,7 +3,6 @@ export type ModePanelTab = 'mode'
 export interface ModeConfigItem {
   name: string
   filePath?: string
-  versionPath?: string
   versions?: string[]
 }
 
@@ -47,7 +46,7 @@ export interface RunParamRow {
 }
 
 export interface ModeRunPayload {
-  mode: ModeConfigItem
+  mode: ModeTreeNodeItem
 
   stepRange: [number, number]
 
@@ -64,6 +63,8 @@ export interface GetLanderModePipelinesResult {
   success: boolean
 
   steps: LanderStep[]
+
+  defaultStartStepIndex: number
 
   parameters: LanderModeParameters
 

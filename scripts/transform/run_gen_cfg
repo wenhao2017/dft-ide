@@ -16,7 +16,7 @@ if ($#argv == 3) then
     set module = "$3"
     set cfg_args = "-modules $module"
 else
-    set cfg_args = "-all"
+    set cfg_args = ""
 endif
 
 foreach script ($design_script $dft_script $cfg_script)

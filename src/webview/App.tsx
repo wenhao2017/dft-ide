@@ -398,8 +398,8 @@ const App: React.FC = () => {
             line-height: 1;
           }
 
-          .dft-mode-tree .ant-tree-switcher:hover {
-            background: transparent;
+          .dft-mode-tree .ant-tree-switcher::before {
+            background: transparent !important;
           }
 
           .dft-mode-tree .ant-tree-treenode {

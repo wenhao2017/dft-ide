@@ -21,7 +21,7 @@ import { useModeSelection } from './hooks/useModeSelection'
 import { useModeCrud } from './hooks/useModeCrud'
 import { useModeRun } from './hooks/useModeRun'
 
-import { createCopyName, sameName, toModeTreeNodeItem, createVersionName } from './utils'
+import { createCopyName, sameName, toModeTreeNodeItem, createVersionName, toModeTreeNodeItemKey } from './utils'
 import {
   deleteVerificationModeCfg,
   duplicateVerificationModeCfg,
@@ -30,9 +30,6 @@ import {
   selectVerificationModeCfg,
   openFileInEditor,
   executeLanderStrategy,
-  appendVerificationModeCfgVersion,
-  deleteVerificationModeCfgVersion,
-  renameVerificationModeCfgVersion,
 } from '../../../../utils/ipc'
 import { confirmDelete } from '../../../../utils/confirmDelete'
 import { useVerificationStageConfig } from './hooks/useVerificationStageConfig'
@@ -152,7 +149,19 @@ export default function ModePanel({
    * focus selector during the current session.
    */
   useEffect(() => {
-    onCheckedChange?.('mode', resources.focusModes)
+    const moduleKeys: string[] = []
+    for (const modeName of resources.focusModes) {
+      moduleKeys.push(modeName)
+      const findItem = allItems.find(item => item.name === modeName)
+      if (findItem && findItem.versions) {
+        for (const version of findItem.versions) {
+          const key = toModeTreeNodeItemKey(modeName, version)
+          moduleKeys.push(key)
+        }
+      }
+    }
+
+    onCheckedChange?.('mode', moduleKeys)
   }, [onCheckedChange, resources.focusModes])
 
   useEffect(() => {
@@ -293,13 +302,6 @@ export default function ModePanel({
         return
       }
 
-      try {
-        await renameVerificationModeCfgVersion(stage, renameItem.name, renameItem.version, nextName)
-      } catch (error) {
-        message.error(error instanceof Error ? error.message : '版本重命名失败')
-        return
-      }
-
       if (crud.renameVersion(renameItem, activeTab, nextName)) closeRename()
 
       return
@@ -380,12 +382,6 @@ export default function ModePanel({
     if (activeTab === 'mode') {
       if (!stage) return
       const version = createVersionName(resources.mode, selectedItem)
-      try {
-        await appendVerificationModeCfgVersion(stage, selectedItem.name, version)
-      } catch (error) {
-        message.error(error instanceof Error ? error.message : 'Mode 新增版本失败')
-        return
-      }
       crud.appendVersion(selectedItem, activeTab, version)
     }
   }
@@ -437,8 +433,6 @@ export default function ModePanel({
       ? [...batchCheckedNames]
       : selectedItem ? [selectedItem] : []
 
-    console.log(deleteItems)
-
     const deleteNames = [...new Set(deleteItems.filter(item => !item.version).map(item => item.name))];
     const deleteVersionItems = deleteItems.filter(item =>
       item.version && !deleteNames.includes(item.name)
@@ -458,15 +452,6 @@ export default function ModePanel({
     }
 
     if (deleteVersionItems.length) {
-      try {
-        for (const deleteItem of deleteVersionItems) {
-          await deleteVerificationModeCfgVersion(stage, deleteItem.name, deleteItem.version!)
-        }
-      } catch (error) {
-        message.error(error instanceof Error ? error.message : 'Mode 删除版本失败')
-        return
-      }
-
       for (const deleteItem of deleteVersionItems) {
         crud.deleteVersion(deleteItem, activeTab)
       }
@@ -532,7 +517,7 @@ export default function ModePanel({
       return
     }
 
-    void run.stopModes([item.name])
+    void run.stopModes([item.key])
   }
 
   /**

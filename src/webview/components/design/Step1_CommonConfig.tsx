@@ -138,7 +138,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) => 
     setGenerating(true);
     try {
       const isAllSelected = moduleOptions.every(val => selectedModules.includes(val.value));
-      const result = await generateDefaultFlowConfigs(flowKey, domainKey, selectedModules.join('; '), isAllSelected);
+      const result = await generateDefaultFlowConfigs(flowKey, domainKey, selectedModules.join(';'), isAllSelected);
       if (!result.success) {
         throw new Error(result.error ?? '转换失败');
       }

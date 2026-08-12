@@ -264,7 +264,6 @@ export async function deleteVerificationModeCfgVersion(stage: string, mode: stri
 export interface VerificationModeCfg {
   name: string
   filePath: string
-  versionPath: string
   versions: string[]
 }
 
@@ -276,7 +275,6 @@ export async function syncVerificationModes(stage: string): Promise<Verification
         typeof item === 'object' && item !== null &&
         typeof (item as VerificationModeCfg).name === 'string' &&
         typeof (item as VerificationModeCfg).filePath === 'string' &&
-        typeof (item as VerificationModeCfg).versionPath === 'string' &&
         Array.isArray((item as VerificationModeCfg).versions) &&
         (item as VerificationModeCfg).versions.every(version => typeof version === 'string'))
     : []
@@ -1271,6 +1269,8 @@ export interface GetLanderModePipelinesResult extends Record<string, unknown> {
   success: boolean
 
   steps: LanderStep[]
+
+  defaultStartStepIndex: number
 
   parameters: {
     groups: string[]

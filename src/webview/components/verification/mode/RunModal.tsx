@@ -7,7 +7,7 @@ import type {
   GetLanderModePipelines,
   LanderModeParameters,
   LanderStep,
-  ModeConfigItem,
+  ModeTreeNodeItem,
   ModeRunPayload,
   RunParamRow,
 } from './types'
@@ -18,7 +18,7 @@ import { readSavedParams, type SavedParams } from './savedParamUtils'
 
 interface RunModalProps {
   open: boolean
-  mode?: ModeConfigItem
+  mode?: ModeTreeNodeItem
   stage?: string
 
   stageConfig: Record<string, unknown> | null
@@ -193,7 +193,14 @@ export default function RunModal({
         steps: result.steps,
         parameters: result.parameters ?? { groups: [], tcs: [], subattrs: [] },
       })
-      setRange(result.steps.length > 0 ? [0, result.steps.length - 1] : [0, 0])
+      const maxStepIndex = Math.max(result.steps.length - 1, 0)
+      const defaultStartStepIndex = Math.min(
+        Math.max(result.defaultStartStepIndex ?? 0, 0),
+        maxStepIndex,
+      )
+      setRange(result.steps.length > 0
+        ? [defaultStartStepIndex, maxStepIndex]
+        : [0, 0])
     } catch (error) {
       if (requestId !== loadRequestRef.current) {
         return

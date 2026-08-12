@@ -52,17 +52,17 @@ const VerificationFlow: React.FC = () => {
 
   const handleRun = (payload: ModeRunPayload) => {
     setLastRunPayload(payload)
-    setSelectedModule(payload.mode.name)
+    setSelectedModule(payload.mode.key)
     setExecutionModuleKeys((current) => (
-      current.includes(payload.mode.name) ? current : [...current, payload.mode.name]
+      current.includes(payload.mode.key) ? current : [...current, payload.mode.key]
     ))
 
     startRuntime(
       'verification',
-      payload.mode.name,
+      payload.mode.key,
       runtimeLabel,
       payload.stepIds,
-      moduleWorkDirs[payload.mode.name],
+      moduleWorkDirs[payload.mode.key],
       payload.steps,
       payload.rows,
     )

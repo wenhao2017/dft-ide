@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 
-import type { ModeConfigItem, ModeRunPayload } from '../../types'
+import type { ModeConfigItem, ModeRunPayload, ModeTreeNodeItem } from '../../types'
 
 interface UseModeRunProps {
   onRun?: (payload: ModeRunPayload) => void
@@ -11,11 +11,11 @@ interface UseModeRunProps {
 export function useModeRun({ onRun, onStop }: UseModeRunProps) {
   const [runOpen, setRunOpen] = useState(false)
 
-  const [runMode, setRunMode] = useState<ModeConfigItem>()
+  const [runMode, setRunMode] = useState<ModeTreeNodeItem>()
 
   const [runningNames, setRunningNames] = useState<string[]>([])
 
-  const openRun = useCallback((mode: ModeConfigItem) => {
+  const openRun = useCallback((mode: ModeTreeNodeItem) => {
     if (!mode.name) {
       return
     }
@@ -34,7 +34,7 @@ export function useModeRun({ onRun, onStop }: UseModeRunProps) {
 
   const handleRun = useCallback(
     (payload: ModeRunPayload) => {
-      const modeName = payload.mode?.name
+      const modeName = payload.mode?.key
 
       if (!modeName) {
         return

@@ -47,15 +47,23 @@ export interface LanderStrategyParameterGroup {
   subattr: string | null
 }
 
-function findStrategySteps(steps: LanderStep[]): LanderStep[] | undefined {
+function findStrategyStepIndex(steps: Array<Pick<LanderStep, 'name'>>): number {
   const strategyLength = LANDER_STRATEGY_STEP_NAMES.length
   for (let start = 0; start <= steps.length - strategyLength; start += 1) {
     const matches = LANDER_STRATEGY_STEP_NAMES.every(
       (name, offset) => steps[start + offset].name === name,
     )
-    if (matches) return steps.slice(start, start + strategyLength)
+    if (matches) return start
   }
-  return undefined
+
+  return -1
+}
+
+function findStrategySteps(steps: LanderStep[]): LanderStep[] | undefined {
+  const start = findStrategyStepIndex(steps)
+  return start >= 0
+    ? steps.slice(start, start + LANDER_STRATEGY_STEP_NAMES.length)
+    : undefined
 }
 
 export function isLanderStrategySteps(steps: Array<Pick<LanderStep, 'name'>>): boolean {
@@ -69,6 +77,34 @@ export function getLanderStrategyOutputPath(
   modeName: string,
 ): string {
   return path.join(repoRoot, stage, 'lander_env', 'lander_strategy', `${modeName}.json`)
+}
+
+export async function hasLanderStrategyOutput(
+  repoRoot: string,
+  stage: string,
+  modeName: string,
+): Promise<boolean> {
+  try {
+    const stat = await vscode.workspace.fs.stat(vscode.Uri.file(
+      getLanderStrategyOutputPath(repoRoot, stage, modeName),
+    ))
+    return (stat.type & vscode.FileType.File) !== 0
+  } catch {
+    return false
+  }
+}
+
+/** Return the default Run selector start without removing any visible steps. */
+export function getLanderRunStartStepIndex(
+  steps: Array<Pick<LanderStep, 'name'>>,
+  strategyOutputExists: boolean,
+): number {
+  if (!strategyOutputExists) return 0
+
+  const strategyStart = findStrategyStepIndex(steps)
+  return strategyStart >= 0
+    ? strategyStart + LANDER_STRATEGY_STEP_NAMES.length
+    : 0
 }
 
 function groupStrategyParameters(

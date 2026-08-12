@@ -147,14 +147,16 @@ export async function attachResolvedClusterSubmission(
   const scopedOverride = scopedOverrides?.[scopeKey] && typeof scopedOverrides[scopeKey] === 'object'
     ? scopedOverrides[scopeKey] as Record<string, unknown>
     : undefined;
+  // New flow-level defaults are the source of truth. Per-module legacy data is
+  // only a fallback for projects that have not saved the new configuration yet.
+  const defaultTask = flowTask ?? legacyTask ?? {};
   const taskConfig = {
-    ...(flowTask ?? {}),
-    ...(legacyTask ?? {}),
+    ...defaultTask,
     ...(scopedOverride ?? {}),
   };
   const cluster = migrateLegacyClusterSubmission(scopedOverride)
-    ?? migrateLegacyClusterSubmission(legacyTask)
-    ?? migrateLegacyClusterSubmission(flowTask);
+    ?? migrateLegacyClusterSubmission(flowTask)
+    ?? migrateLegacyClusterSubmission(legacyTask);
   if (!cluster) {
     throw new Error('尚未配置 Donau 集群提交策略，请先进入“工具与集群”完成配置并保存，再运行流水线。');
   }

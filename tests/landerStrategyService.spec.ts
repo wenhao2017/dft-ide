@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
   executeLanderStrategy,
+  getLanderRunStartStepIndex,
   getLanderStrategyOutputPath,
+  hasLanderStrategyOutput,
   LANDER_STRATEGY_SOURCE_EXTENSIONS,
   LANDER_STRATEGY_STEP_NAMES,
   materializeLanderStrategyParameters,
@@ -149,5 +151,66 @@ describe('landerStrategyService', () => {
       context.stage,
       context.modeName,
     )).resolves.toEqual({ groups: [], tcs: [], subattrs: [] })
+  })
+
+  it('resumes Run after the strategy steps when the strategy JSON exists', async () => {
+    const context = createContext([])
+    const outputPath = getLanderStrategyOutputPath(
+      context.repoRoot,
+      context.stage,
+      context.modeName,
+    )
+    mockFilesystem.set(path.resolve(outputPath), '[]')
+    const steps = [
+      step('prepare'),
+      ...LANDER_STRATEGY_STEP_NAMES.map(step),
+      step('run_simulation'),
+      step('collect_result'),
+    ]
+
+    const outputExists = await hasLanderStrategyOutput(
+      context.repoRoot,
+      context.stage,
+      context.modeName,
+    )
+
+    expect(outputExists).toBe(true)
+    expect(getLanderRunStartStepIndex(steps, outputExists)).toBe(5)
+    expect(steps.map(({ name }) => name)).toEqual([
+      'prepare',
+      ...LANDER_STRATEGY_STEP_NAMES,
+      'run_simulation',
+      'collect_result',
+    ])
+  })
+
+  it('keeps all Run steps when the strategy JSON does not exist', async () => {
+    const context = createContext([])
+    const steps = [
+      ...LANDER_STRATEGY_STEP_NAMES.map(step),
+      step('run_simulation'),
+    ]
+
+    const outputExists = await hasLanderStrategyOutput(
+      context.repoRoot,
+      context.stage,
+      context.modeName,
+    )
+
+    expect(outputExists).toBe(false)
+    expect(getLanderRunStartStepIndex(steps, outputExists)).toBe(0)
+  })
+
+  it('keeps all Run steps when no complete strategy sequence is present', () => {
+    const steps = [
+      step('create_project'),
+      step('gen_design_info'),
+      step('other_step'),
+      step('gen_plan_env'),
+      step('release_plan'),
+      step('run_simulation'),
+    ]
+
+    expect(getLanderRunStartStepIndex(steps, true)).toBe(0)
   })
 })

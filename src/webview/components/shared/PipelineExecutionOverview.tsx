@@ -42,6 +42,7 @@ import {
   stopPipelineTaskEcoHook,
 } from '../../utils/ipc';
 import { useShallow } from 'zustand/react/shallow';
+import { getVersionFromModuleKey } from '../../components/verification/mode/ModePanel/utils'
 
 type OverviewRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
 
@@ -372,7 +373,9 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
   }, [defaultTasksByModule, flowKey, selectedModuleKeys, ensureRuntime, getFlowLabel]);
 
   const visibleRuns = useMemo(() => (
-    selectedModuleKeys.flatMap((moduleKey) => {
+    selectedModuleKeys
+    .filter(moduleKey => !moduleKey.includes('@') || Object.values(runtimes).some(runtime => runtime.moduleKey === moduleKey && runtime.runId))
+    .flatMap((moduleKey) => {
       const moduleRuntimes = Object.values(runtimes)
         .filter((runtime) => runtime.moduleKey === moduleKey && runtime.runId)
         .sort((left, right) => (right.startedAt ?? right.updatedAt) - (left.startedAt ?? left.updatedAt));
@@ -1055,6 +1058,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
                 : run.runState === 'stopped'
                   ? themeStyles.warning
                   : themeStyles.idle;
+            const [oriModuleKey, version] = getVersionFromModuleKey(run.moduleKey);
 
             return (
               <List.Item
@@ -1084,8 +1088,9 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
                     <Space size={6} style={{ minWidth: 0 }}>
                       <span style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor, flexShrink: 0 }} />
                       <span style={{ color: isSelected ? themeStyles.selectedFg : themeStyles.textPrimary, fontFamily: 'monospace', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>
-                        {run.moduleKey}
+                        {version ? oriModuleKey : run.moduleKey}
                       </span>
+                      {version && <Tag>{version}</Tag>}
                     </Space>
                     <Space size={4}>
                       {run.runId && (
