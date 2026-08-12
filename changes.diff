@@ -1,0 +1,743 @@
+diff --git a/scripts/transform/run_gen_cfg b/scripts/transform/run_gen_cfg
+index 7242dbd..7b84620 100644
+--- a/scripts/transform/run_gen_cfg
++++ b/scripts/transform/run_gen_cfg
+@@ -16,7 +16,7 @@ if ($#argv == 3) then
+     set module = "$3"
+     set cfg_args = "-modules $module"
+ else
+-    set cfg_args = "-all"
++    set cfg_args = ""
+ endif
+ 
+ foreach script ($design_script $dft_script $cfg_script)
+diff --git a/src/extension.ts b/src/extension.ts
+index b9af119..9582397 100644
+--- a/src/extension.ts
++++ b/src/extension.ts
+@@ -1115,11 +1115,6 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+               throw new Error(`无效的 Mode 名称：${String(value)}`);
+             }
+             await vscode.workspace.fs.delete(vscode.Uri.file(path.join(cfgRoot, `${modeName}.cfg`)));
+-
+-            const versionPath = path.join(cfgRoot, 'version', `${modeName}.version.json`);
+-            if (fs.existsSync(versionPath)) {
+-              await vscode.workspace.fs.delete(vscode.Uri.file(versionPath));
+-            }
+           }
+           currentPanel?.webview.postMessage({
+             command: 'deleteVerificationModeCfgResponse', requestId, success: true,
+@@ -2888,6 +2883,15 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+         const requestId: string = msg.requestId;
+         try {
+           const stage = normalizeStageName(msg.stage);
++          const stageConfigPath = resolveConfigPath(`verification/${stage}/${stage}`);
++          let stageConfig = {}
++          if (stageConfigPath) {
++            try {
++              const fileContent = fs.readFileSync(stageConfigPath, 'utf8');
++              stageConfig = JSON.parse(fileContent);
++            } catch { }
++          }
++
+           const repoRoot = await resolveProjectRepoRoot('verification');
+           const cfgRoot = path.join(repoRoot, stage, 'lander_env', 'lander_cfg');
+           await ensureLocalConfigDirectory(cfgRoot);
+@@ -2895,14 +2899,13 @@ async function openWebviewFlow(context: vscode.ExtensionContext, category?: stri
+           const modes = entries.filter(([name, type]) => type === vscode.FileType.File && /^lander.*\.cfg$/i.test(name)).sort(([a], [b]) => a.localeCompare(b)).map(([fileName]) => {
+             const cfgPath = path.join(cfgRoot, fileName);
+             const modeName = path.basename(fileName, path.extname(fileName));
+-            const versionPath = path.join(cfgRoot,"version",`${modeName}.version.json`);
+             let versions: string[] = [];
+-            try {
+-              const fileContent = fs.readFileSync(versionPath, 'utf8');
+-              const versionData = JSON.parse(fileContent);
+-              versions = Object.keys(versionData);
+-            } catch { }
+-            return { name: modeName, filePath: cfgPath, versionPath, versions };
++            const modesArray = Array.isArray((stageConfig as any).modes) ? (stageConfig as any).modes : [];
++            const modeItem = modesArray.find((m: any) => m && m.name === modeName);
++            if (modeItem && Array.isArray(modeItem.versions)) {
++              versions = modeItem.versions;
++            }
++            return { name: modeName, filePath: cfgPath, versions };
+           });
+           currentPanel?.webview.postMessage({ command: 'syncVerificationModesResponse', requestId, modes });
+         } catch (err) {
+diff --git a/src/ipc/landerPipelineIpc.ts b/src/ipc/landerPipelineIpc.ts
+index fdb9f0b..be53614 100644
+--- a/src/ipc/landerPipelineIpc.ts
++++ b/src/ipc/landerPipelineIpc.ts
+@@ -2,7 +2,12 @@ import * as vscode from 'vscode'
+ import * as path from 'path'
+ 
+ import { getLanderModeConfigInfo, getLanderModePipelines } from '../services/landerPipelineService'
+-import { executeLanderStrategy, readLanderStrategyParameters } from '../services/landerStrategyService'
++import {
++  executeLanderStrategy,
++  getLanderRunStartStepIndex,
++  hasLanderStrategyOutput,
++  readLanderStrategyParameters,
++} from '../services/landerStrategyService'
+ import { normalizeStageName, resolveProjectRepoRoot } from '../services/workspaceService'
+ import type { LanderModeConfigInfo, LanderModeParameters, LanderStep } from '../services/landerPipelineService'
+ 
+@@ -18,6 +23,7 @@ export interface GetLanderModePipelinesResponse {
+   requestId: string
+   success: boolean
+   steps: LanderStep[]
++  defaultStartStepIndex: number
+   parameters: LanderModeParameters
+   error?: string
+ }
+@@ -78,7 +84,7 @@ export async function handleGetLanderModePipelines(
+       cfgPath = path.join(verificationRepoRoot, selectedStage, 'lander_env', 'lander_cfg', `${modeName}.cfg`)
+       parameterContext = { repoRoot: verificationRepoRoot, stage: selectedStage, modeName }
+     }
+-    const [steps, parameters] = await Promise.all([
++    const [availableSteps, parameters, strategyOutputExists] = await Promise.all([
+       getLanderModePipelines(context.extensionUri, cfgPath, {
+         init: msg.init === true,
+       }),
+@@ -89,13 +95,26 @@ export async function handleGetLanderModePipelines(
+           parameterContext.modeName,
+         )
+         : Promise.resolve({ groups: [], tcs: [], subattrs: [] }),
++      parameterContext
++        ? hasLanderStrategyOutput(
++          parameterContext.repoRoot,
++          parameterContext.stage,
++          parameterContext.modeName,
++        )
++        : Promise.resolve(false),
+     ])
++    const defaultStartStepIndex = getLanderRunStartStepIndex(
++      availableSteps,
++      strategyOutputExists,
++    )
+     await panel.webview.postMessage({
+-      command: 'getLanderModePipelinesResponse', requestId, success: true, steps, parameters,
++      command: 'getLanderModePipelinesResponse', requestId, success: true,
++      steps: availableSteps, defaultStartStepIndex, parameters,
+     })
+   } catch (error) {
+     await panel.webview.postMessage({
+       command: 'getLanderModePipelinesResponse', requestId, success: false, steps: [],
++      defaultStartStepIndex: 0,
+       parameters: { groups: [], tcs: [], subattrs: [] },
+       error: error instanceof Error ? error.message : String(error),
+     })
+diff --git a/src/services/landerStrategyService.ts b/src/services/landerStrategyService.ts
+index 068d8d2..727c198 100644
+--- a/src/services/landerStrategyService.ts
++++ b/src/services/landerStrategyService.ts
+@@ -47,15 +47,23 @@ export interface LanderStrategyParameterGroup {
+   subattr: string | null
+ }
+ 
+-function findStrategySteps(steps: LanderStep[]): LanderStep[] | undefined {
++function findStrategyStepIndex(steps: Array<Pick<LanderStep, 'name'>>): number {
+   const strategyLength = LANDER_STRATEGY_STEP_NAMES.length
+   for (let start = 0; start <= steps.length - strategyLength; start += 1) {
+     const matches = LANDER_STRATEGY_STEP_NAMES.every(
+       (name, offset) => steps[start + offset].name === name,
+     )
+-    if (matches) return steps.slice(start, start + strategyLength)
++    if (matches) return start
+   }
+-  return undefined
++
++  return -1
++}
++
++function findStrategySteps(steps: LanderStep[]): LanderStep[] | undefined {
++  const start = findStrategyStepIndex(steps)
++  return start >= 0
++    ? steps.slice(start, start + LANDER_STRATEGY_STEP_NAMES.length)
++    : undefined
+ }
+ 
+ export function isLanderStrategySteps(steps: Array<Pick<LanderStep, 'name'>>): boolean {
+@@ -71,6 +79,34 @@ export function getLanderStrategyOutputPath(
+   return path.join(repoRoot, stage, 'lander_env', 'lander_strategy', `${modeName}.json`)
+ }
+ 
++export async function hasLanderStrategyOutput(
++  repoRoot: string,
++  stage: string,
++  modeName: string,
++): Promise<boolean> {
++  try {
++    const stat = await vscode.workspace.fs.stat(vscode.Uri.file(
++      getLanderStrategyOutputPath(repoRoot, stage, modeName),
++    ))
++    return (stat.type & vscode.FileType.File) !== 0
++  } catch {
++    return false
++  }
++}
++
++/** Return the default Run selector start without removing any visible steps. */
++export function getLanderRunStartStepIndex(
++  steps: Array<Pick<LanderStep, 'name'>>,
++  strategyOutputExists: boolean,
++): number {
++  if (!strategyOutputExists) return 0
++
++  const strategyStart = findStrategyStepIndex(steps)
++  return strategyStart >= 0
++    ? strategyStart + LANDER_STRATEGY_STEP_NAMES.length
++    : 0
++}
++
+ function groupStrategyParameters(
+   relations: LanderParameterRelation[],
+ ): LanderStrategyParameterGroup[] {
+diff --git a/src/services/pipelineRuntimeService.ts b/src/services/pipelineRuntimeService.ts
+index 764b919..acbd3bb 100644
+--- a/src/services/pipelineRuntimeService.ts
++++ b/src/services/pipelineRuntimeService.ts
+@@ -12,6 +12,7 @@ import {
+ import { resolveProjectPath, resolveProjectRoot } from './workspaceService';
+ import { getExecutionTerminalCapabilities, registerExecutionTerminalMonitor, stopExecutionTerminal } from './terminalService';
+ import { formatTime } from '../utils';
++import { getVersionFromModuleKey } from '../webview/components/verification/mode/ModePanel/utils'
+ import {
+   applyDsubCommandOverrides,
+   type DonauSubmissionOverride,
+@@ -414,12 +415,12 @@ function buildStepCommands(
+   const customConfig = getRuntimeTaskConfig(envConfig, taskConfig);
+ 
+   if (index === 0) {
+-    // const [oriModuleKey, version] = getVersionFromModuleName(moduleKey);
+-    // if (version) {
+-    //   commands.push(`setenv DFT_IDE_MODULE_ORI "${oriModuleKey}"`);
+-    //   commands.push(`setenv DFT_IDE_VERSION "${version}"`);
+-    //   commands.push(`setenv VERSION "${version}"`);
+-    // }
++    const [oriModuleKey, version] = getVersionFromModuleKey(moduleKey);
++    if (version) {
++      moduleKey = oriModuleKey;
++      commands.push(`setenv DFT_IDE_VERSION "${version}"`);
++      commands.push(`setenv VERSION "${version}"`);
++    }
+     const moduleEnvName = flowKey === 'verification' ? 'DFT_IDE_MODE' : 'DFT_IDE_MODULE';
+     commands.push(`setenv ${moduleEnvName} "${moduleKey}"`);
+     if (projectPath) {
+@@ -1116,12 +1117,12 @@ export class PipelineRuntimeService {
+       `setenv DFT_IDE_HISTORY ${quoteCshArgument(runId)}`,
+       `setenv DFT_IDE_MARKER_TASK_ID ${quoteCshArgument(task.id)}`,
+     ];
+-    // const [oriModuleKey, version] = getVersionFromModuleName(moduleKey);
+-    // if (version) {
+-    //   commands.push(`setenv DFT_IDE_MODULE_ORI ${quoteCshArgument(oriModuleKey)}`);
+-    //   commands.push(`setenv DFT_IDE_VERSION ${quoteCshArgument(version)}`);
+-    //   commands.push(`setenv VERSION ${quoteCshArgument(version)}`);
+-    // }
++    const [oriModuleKey, version] = getVersionFromModuleKey(moduleKey);
++    if (version) {
++      moduleKey = oriModuleKey;
++      commands.push(`setenv DFT_IDE_VERSION ${quoteCshArgument(version)}`);
++      commands.push(`setenv VERSION ${quoteCshArgument(version)}`);
++    }
+     commands.push(`setenv ${flowKey === 'verification' ? 'DFT_IDE_MODE' : 'DFT_IDE_MODULE'} ${quoteCshArgument(moduleKey)}`);
+     const projectPath = resolveProjectPath(flowKey);
+     if (projectPath) {
+diff --git a/src/webview/App.tsx b/src/webview/App.tsx
+index 563a1f8..f39cf32 100644
+--- a/src/webview/App.tsx
++++ b/src/webview/App.tsx
+@@ -398,8 +398,8 @@ const App: React.FC = () => {
+             line-height: 1;
+           }
+ 
+-          .dft-mode-tree .ant-tree-switcher:hover {
+-            background: transparent;
++          .dft-mode-tree .ant-tree-switcher::before {
++            background: transparent !important;
+           }
+ 
+           .dft-mode-tree .ant-tree-treenode {
+diff --git a/src/webview/components/design/Step1_CommonConfig.tsx b/src/webview/components/design/Step1_CommonConfig.tsx
+index 8d55fe7..97fab44 100644
+--- a/src/webview/components/design/Step1_CommonConfig.tsx
++++ b/src/webview/components/design/Step1_CommonConfig.tsx
+@@ -138,7 +138,7 @@ const Step1CommonConfig: React.FC<Props> = ({ onNext, moduleKey, category }) =>
+     setGenerating(true);
+     try {
+       const isAllSelected = moduleOptions.every(val => selectedModules.includes(val.value));
+-      const result = await generateDefaultFlowConfigs(flowKey, domainKey, selectedModules.join('; '), isAllSelected);
++      const result = await generateDefaultFlowConfigs(flowKey, domainKey, selectedModules.join(';'), isAllSelected);
+       if (!result.success) {
+         throw new Error(result.error ?? '转换失败');
+       }
+diff --git a/src/webview/components/shared/PipelineExecutionOverview.tsx b/src/webview/components/shared/PipelineExecutionOverview.tsx
+index 0f06bf1..98e96ae 100644
+--- a/src/webview/components/shared/PipelineExecutionOverview.tsx
++++ b/src/webview/components/shared/PipelineExecutionOverview.tsx
+@@ -42,6 +42,7 @@ import {
+   stopPipelineTaskEcoHook,
+ } from '../../utils/ipc';
+ import { useShallow } from 'zustand/react/shallow';
++import { getVersionFromModuleKey } from '../../components/verification/mode/ModePanel/utils'
+ 
+ type OverviewRunState = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
+ 
+@@ -372,7 +373,9 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+   }, [defaultTasksByModule, flowKey, selectedModuleKeys, ensureRuntime, getFlowLabel]);
+ 
+   const visibleRuns = useMemo(() => (
+-    selectedModuleKeys.flatMap((moduleKey) => {
++    selectedModuleKeys
++    .filter(moduleKey => !moduleKey.includes('@') || Object.values(runtimes).some(runtime => runtime.moduleKey === moduleKey && runtime.runId))
++    .flatMap((moduleKey) => {
+       const moduleRuntimes = Object.values(runtimes)
+         .filter((runtime) => runtime.moduleKey === moduleKey && runtime.runId)
+         .sort((left, right) => (right.startedAt ?? right.updatedAt) - (left.startedAt ?? left.updatedAt));
+@@ -1055,6 +1058,7 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+                 : run.runState === 'stopped'
+                   ? themeStyles.warning
+                   : themeStyles.idle;
++            const [oriModuleKey, version] = getVersionFromModuleKey(run.moduleKey);
+ 
+             return (
+               <List.Item
+@@ -1084,8 +1088,9 @@ const PipelineExecutionOverview: React.FC<PipelineExecutionOverviewProps> = ({
+                     <Space size={6} style={{ minWidth: 0 }}>
+                       <span style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor, flexShrink: 0 }} />
+                       <span style={{ color: isSelected ? themeStyles.selectedFg : themeStyles.textPrimary, fontFamily: 'monospace', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>
+-                        {run.moduleKey}
++                        {version ? oriModuleKey : run.moduleKey}
+                       </span>
++                      {version && <Tag>{version}</Tag>}
+                     </Space>
+                     <Space size={4}>
+                       {run.runId && (
+diff --git a/src/webview/components/verification/mode/ModePanel/hooks/useModeRun.ts b/src/webview/components/verification/mode/ModePanel/hooks/useModeRun.ts
+index 343548c..9b801ae 100644
+--- a/src/webview/components/verification/mode/ModePanel/hooks/useModeRun.ts
++++ b/src/webview/components/verification/mode/ModePanel/hooks/useModeRun.ts
+@@ -1,6 +1,6 @@
+ import { useCallback, useState } from 'react'
+ 
+-import type { ModeConfigItem, ModeRunPayload } from '../../types'
++import type { ModeConfigItem, ModeRunPayload, ModeTreeNodeItem } from '../../types'
+ 
+ interface UseModeRunProps {
+   onRun?: (payload: ModeRunPayload) => void
+@@ -11,11 +11,11 @@ interface UseModeRunProps {
+ export function useModeRun({ onRun, onStop }: UseModeRunProps) {
+   const [runOpen, setRunOpen] = useState(false)
+ 
+-  const [runMode, setRunMode] = useState<ModeConfigItem>()
++  const [runMode, setRunMode] = useState<ModeTreeNodeItem>()
+ 
+   const [runningNames, setRunningNames] = useState<string[]>([])
+ 
+-  const openRun = useCallback((mode: ModeConfigItem) => {
++  const openRun = useCallback((mode: ModeTreeNodeItem) => {
+     if (!mode.name) {
+       return
+     }
+@@ -34,7 +34,7 @@ export function useModeRun({ onRun, onStop }: UseModeRunProps) {
+ 
+   const handleRun = useCallback(
+     (payload: ModeRunPayload) => {
+-      const modeName = payload.mode?.name
++      const modeName = payload.mode?.key
+ 
+       if (!modeName) {
+         return
+diff --git a/src/webview/components/verification/mode/ModePanel/index.tsx b/src/webview/components/verification/mode/ModePanel/index.tsx
+index 593cc62..85a3bbd 100644
+--- a/src/webview/components/verification/mode/ModePanel/index.tsx
++++ b/src/webview/components/verification/mode/ModePanel/index.tsx
+@@ -21,7 +21,7 @@ import { useModeSelection } from './hooks/useModeSelection'
+ import { useModeCrud } from './hooks/useModeCrud'
+ import { useModeRun } from './hooks/useModeRun'
+ 
+-import { createCopyName, sameName, toModeTreeNodeItem, createVersionName } from './utils'
++import { createCopyName, sameName, toModeTreeNodeItem, createVersionName, toModeTreeNodeItemKey } from './utils'
+ import {
+   deleteVerificationModeCfg,
+   duplicateVerificationModeCfg,
+@@ -30,9 +30,6 @@ import {
+   selectVerificationModeCfg,
+   openFileInEditor,
+   executeLanderStrategy,
+-  appendVerificationModeCfgVersion,
+-  deleteVerificationModeCfgVersion,
+-  renameVerificationModeCfgVersion,
+ } from '../../../../utils/ipc'
+ import { confirmDelete } from '../../../../utils/confirmDelete'
+ import { useVerificationStageConfig } from './hooks/useVerificationStageConfig'
+@@ -152,7 +149,19 @@ export default function ModePanel({
+    * focus selector during the current session.
+    */
+   useEffect(() => {
+-    onCheckedChange?.('mode', resources.focusModes)
++    const moduleKeys: string[] = []
++    for (const modeName of resources.focusModes) {
++      moduleKeys.push(modeName)
++      const findItem = allItems.find(item => item.name === modeName)
++      if (findItem && findItem.versions) {
++        for (const version of findItem.versions) {
++          const key = toModeTreeNodeItemKey(modeName, version)
++          moduleKeys.push(key)
++        }
++      }
++    }
++
++    onCheckedChange?.('mode', moduleKeys)
+   }, [onCheckedChange, resources.focusModes])
+ 
+   useEffect(() => {
+@@ -293,13 +302,6 @@ export default function ModePanel({
+         return
+       }
+ 
+-      try {
+-        await renameVerificationModeCfgVersion(stage, renameItem.name, renameItem.version, nextName)
+-      } catch (error) {
+-        message.error(error instanceof Error ? error.message : '版本重命名失败')
+-        return
+-      }
+-
+       if (crud.renameVersion(renameItem, activeTab, nextName)) closeRename()
+ 
+       return
+@@ -380,12 +382,6 @@ export default function ModePanel({
+     if (activeTab === 'mode') {
+       if (!stage) return
+       const version = createVersionName(resources.mode, selectedItem)
+-      try {
+-        await appendVerificationModeCfgVersion(stage, selectedItem.name, version)
+-      } catch (error) {
+-        message.error(error instanceof Error ? error.message : 'Mode 新增版本失败')
+-        return
+-      }
+       crud.appendVersion(selectedItem, activeTab, version)
+     }
+   }
+@@ -437,8 +433,6 @@ export default function ModePanel({
+       ? [...batchCheckedNames]
+       : selectedItem ? [selectedItem] : []
+ 
+-    console.log(deleteItems)
+-
+     const deleteNames = [...new Set(deleteItems.filter(item => !item.version).map(item => item.name))];
+     const deleteVersionItems = deleteItems.filter(item =>
+       item.version && !deleteNames.includes(item.name)
+@@ -458,15 +452,6 @@ export default function ModePanel({
+     }
+ 
+     if (deleteVersionItems.length) {
+-      try {
+-        for (const deleteItem of deleteVersionItems) {
+-          await deleteVerificationModeCfgVersion(stage, deleteItem.name, deleteItem.version!)
+-        }
+-      } catch (error) {
+-        message.error(error instanceof Error ? error.message : 'Mode 删除版本失败')
+-        return
+-      }
+-
+       for (const deleteItem of deleteVersionItems) {
+         crud.deleteVersion(deleteItem, activeTab)
+       }
+@@ -532,7 +517,7 @@ export default function ModePanel({
+       return
+     }
+ 
+-    void run.stopModes([item.name])
++    void run.stopModes([item.key])
+   }
+ 
+   /**
+diff --git a/src/webview/components/verification/mode/ModePanel/resource.ts b/src/webview/components/verification/mode/ModePanel/resource.ts
+index b0fb94b..daee120 100644
+--- a/src/webview/components/verification/mode/ModePanel/resource.ts
++++ b/src/webview/components/verification/mode/ModePanel/resource.ts
+@@ -47,7 +47,6 @@ export const normalizeModeItems = (value: unknown): ModeConfigItem[] => {
+       {
+         name,
+         filePath: toNonEmptyString(raw.filePath),
+-        versionPath: toNonEmptyString(raw.versionPath),
+         versions: [...(raw.versions ?? []) as string[]],
+       },
+     ]
+@@ -107,7 +106,6 @@ export const createResourcePatch = (store: ResourceStore) => {
+     modes: store.mode.map((item) => ({
+       name: item.name,
+       ...(item.filePath ? { filePath: item.filePath } : {}),
+-      ...(item.versionPath ? { versionPath: item.versionPath } : {}),
+       ...(item.versions ? { versions: [...item.versions] } : {}),
+     })),
+ 
+diff --git a/src/webview/components/verification/mode/ModePanel/utils.ts b/src/webview/components/verification/mode/ModePanel/utils.ts
+index ef4f1e4..317bf47 100644
+--- a/src/webview/components/verification/mode/ModePanel/utils.ts
++++ b/src/webview/components/verification/mode/ModePanel/utils.ts
+@@ -81,25 +81,13 @@ export const sameName = (left: string, right: string): boolean => {
+   return left.trim().toLowerCase() === right.trim().toLowerCase()
+ }
+ 
+-export const sameModeTreeNodeItem = (left: ModeTreeNodeItem, right: ModeTreeNodeItem): boolean => {
+-  return left.name?.trim().toLowerCase() === right.name?.trim().toLowerCase() &&
+-    left.version?.trim().toLowerCase() === right.version?.trim().toLowerCase()
+-}
+-
+-export const hasModeTreeNodeItem = (items: ModeTreeNodeItem[], item: ModeTreeNodeItem): boolean => {
+-  return items.some((a) => sameModeTreeNodeItem(a, item))
+-}
+-
+-export const toModeTreeNodeItemKey = (item: ModeTreeNodeItem): string => {
+-  if (item.version) {
+-    return `${item.name}@${item.version}`;
+-  }
+-  return item.name;
++export const toModeTreeNodeItemKey = (name: string, version?: string): string => {
++  return version ? `${name}@${version}` : name;
+ };
+ 
+ export const toModePanelItemKeys = (items: ModeTreeNodeItem[]): string[] => {
+   return items.map(item => {
+-    return toModeTreeNodeItemKey(item);
++    return toModeTreeNodeItemKey(item.name, item.version);
+   });
+ };
+ 
+@@ -108,7 +96,7 @@ export const toModeTreeNodeItem = (config: ModeConfigItem, version?: string): Mo
+     return { key: '', name: '' };
+   }
+ 
+-  const key = version ? `${config.name}@${version}` : config.name;
++  const key = toModeTreeNodeItemKey(config.name, version);
+   return {
+     key,
+     name: config.name,
+@@ -121,10 +109,21 @@ export const duplicateModeTreeNodeItem = (item: ModeTreeNodeItem, version?: stri
+     return { key: '', name: '' };
+   }
+ 
+-  const key = version ? `${item.name}@${version}` : item.name;
++  const key = toModeTreeNodeItemKey(item.name, version);
+   return {
+     key,
+     name: item.name,
+     version
+   };
+ };
++
++export function getVersionFromModuleKey(moduleKey: string): string[] {
++  let oriModuleKey = '';
++  let version = '';
++  if (moduleKey.includes('@')) {
++    const lastAtPos = moduleKey.lastIndexOf('@');
++    oriModuleKey = moduleKey.slice(0, lastAtPos).trim();
++    version = moduleKey.slice(lastAtPos + 1).trim();
++  }
++  return [oriModuleKey, version];
++}
+diff --git a/src/webview/components/verification/mode/RunModal.tsx b/src/webview/components/verification/mode/RunModal.tsx
+index 6f391c0..a62eefc 100644
+--- a/src/webview/components/verification/mode/RunModal.tsx
++++ b/src/webview/components/verification/mode/RunModal.tsx
+@@ -7,7 +7,7 @@ import type {
+   GetLanderModePipelines,
+   LanderModeParameters,
+   LanderStep,
+-  ModeConfigItem,
++  ModeTreeNodeItem,
+   ModeRunPayload,
+   RunParamRow,
+ } from './types'
+@@ -18,7 +18,7 @@ import { readSavedParams, type SavedParams } from './savedParamUtils'
+ 
+ interface RunModalProps {
+   open: boolean
+-  mode?: ModeConfigItem
++  mode?: ModeTreeNodeItem
+   stage?: string
+ 
+   stageConfig: Record<string, unknown> | null
+@@ -193,7 +193,14 @@ export default function RunModal({
+         steps: result.steps,
+         parameters: result.parameters ?? { groups: [], tcs: [], subattrs: [] },
+       })
+-      setRange(result.steps.length > 0 ? [0, result.steps.length - 1] : [0, 0])
++      const maxStepIndex = Math.max(result.steps.length - 1, 0)
++      const defaultStartStepIndex = Math.min(
++        Math.max(result.defaultStartStepIndex ?? 0, 0),
++        maxStepIndex,
++      )
++      setRange(result.steps.length > 0
++        ? [defaultStartStepIndex, maxStepIndex]
++        : [0, 0])
+     } catch (error) {
+       if (requestId !== loadRequestRef.current) {
+         return
+diff --git a/src/webview/components/verification/mode/types.ts b/src/webview/components/verification/mode/types.ts
+index ff62701..be41a28 100644
+--- a/src/webview/components/verification/mode/types.ts
++++ b/src/webview/components/verification/mode/types.ts
+@@ -3,7 +3,6 @@ export type ModePanelTab = 'mode'
+ export interface ModeConfigItem {
+   name: string
+   filePath?: string
+-  versionPath?: string
+   versions?: string[]
+ }
+ 
+@@ -47,7 +46,7 @@ export interface RunParamRow {
+ }
+ 
+ export interface ModeRunPayload {
+-  mode: ModeConfigItem
++  mode: ModeTreeNodeItem
+ 
+   stepRange: [number, number]
+ 
+@@ -65,6 +64,8 @@ export interface GetLanderModePipelinesResult {
+ 
+   steps: LanderStep[]
+ 
++  defaultStartStepIndex: number
++
+   parameters: LanderModeParameters
+ 
+   error?: string
+diff --git a/src/webview/flows/VerificationFlow.tsx b/src/webview/flows/VerificationFlow.tsx
+index 084ecb3..796f85a 100644
+--- a/src/webview/flows/VerificationFlow.tsx
++++ b/src/webview/flows/VerificationFlow.tsx
+@@ -52,17 +52,17 @@ const VerificationFlow: React.FC = () => {
+ 
+   const handleRun = (payload: ModeRunPayload) => {
+     setLastRunPayload(payload)
+-    setSelectedModule(payload.mode.name)
++    setSelectedModule(payload.mode.key)
+     setExecutionModuleKeys((current) => (
+-      current.includes(payload.mode.name) ? current : [...current, payload.mode.name]
++      current.includes(payload.mode.key) ? current : [...current, payload.mode.key]
+     ))
+ 
+     startRuntime(
+       'verification',
+-      payload.mode.name,
++      payload.mode.key,
+       runtimeLabel,
+       payload.stepIds,
+-      moduleWorkDirs[payload.mode.name],
++      moduleWorkDirs[payload.mode.key],
+       payload.steps,
+       payload.rows,
+     )
+diff --git a/src/webview/utils/ipc.ts b/src/webview/utils/ipc.ts
+index 8019edc..7712a65 100644
+--- a/src/webview/utils/ipc.ts
++++ b/src/webview/utils/ipc.ts
+@@ -264,7 +264,6 @@ export async function deleteVerificationModeCfgVersion(stage: string, mode: stri
+ export interface VerificationModeCfg {
+   name: string
+   filePath: string
+-  versionPath: string
+   versions: string[]
+ }
+ 
+@@ -276,7 +275,6 @@ export async function syncVerificationModes(stage: string): Promise<Verification
+         typeof item === 'object' && item !== null &&
+         typeof (item as VerificationModeCfg).name === 'string' &&
+         typeof (item as VerificationModeCfg).filePath === 'string' &&
+-        typeof (item as VerificationModeCfg).versionPath === 'string' &&
+         Array.isArray((item as VerificationModeCfg).versions) &&
+         (item as VerificationModeCfg).versions.every(version => typeof version === 'string'))
+     : []
+@@ -1272,6 +1270,8 @@ export interface GetLanderModePipelinesResult extends Record<string, unknown> {
+ 
+   steps: LanderStep[]
+ 
++  defaultStartStepIndex: number
++
+   parameters: {
+     groups: string[]
+     tcs: string[]
+diff --git a/tests/landerStrategyService.spec.ts b/tests/landerStrategyService.spec.ts
+index cbd3e8d..3edf682 100644
+--- a/tests/landerStrategyService.spec.ts
++++ b/tests/landerStrategyService.spec.ts
+@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
+ 
+ import {
+   executeLanderStrategy,
++  getLanderRunStartStepIndex,
+   getLanderStrategyOutputPath,
++  hasLanderStrategyOutput,
+   LANDER_STRATEGY_SOURCE_EXTENSIONS,
+   LANDER_STRATEGY_STEP_NAMES,
+   materializeLanderStrategyParameters,
+@@ -150,4 +152,65 @@ describe('landerStrategyService', () => {
+       context.modeName,
+     )).resolves.toEqual({ groups: [], tcs: [], subattrs: [] })
+   })
++
++  it('resumes Run after the strategy steps when the strategy JSON exists', async () => {
++    const context = createContext([])
++    const outputPath = getLanderStrategyOutputPath(
++      context.repoRoot,
++      context.stage,
++      context.modeName,
++    )
++    mockFilesystem.set(path.resolve(outputPath), '[]')
++    const steps = [
++      step('prepare'),
++      ...LANDER_STRATEGY_STEP_NAMES.map(step),
++      step('run_simulation'),
++      step('collect_result'),
++    ]
++
++    const outputExists = await hasLanderStrategyOutput(
++      context.repoRoot,
++      context.stage,
++      context.modeName,
++    )
++
++    expect(outputExists).toBe(true)
++    expect(getLanderRunStartStepIndex(steps, outputExists)).toBe(5)
++    expect(steps.map(({ name }) => name)).toEqual([
++      'prepare',
++      ...LANDER_STRATEGY_STEP_NAMES,
++      'run_simulation',
++      'collect_result',
++    ])
++  })
++
++  it('keeps all Run steps when the strategy JSON does not exist', async () => {
++    const context = createContext([])
++    const steps = [
++      ...LANDER_STRATEGY_STEP_NAMES.map(step),
++      step('run_simulation'),
++    ]
++
++    const outputExists = await hasLanderStrategyOutput(
++      context.repoRoot,
++      context.stage,
++      context.modeName,
++    )
++
++    expect(outputExists).toBe(false)
++    expect(getLanderRunStartStepIndex(steps, outputExists)).toBe(0)
++  })
++
++  it('keeps all Run steps when no complete strategy sequence is present', () => {
++    const steps = [
++      step('create_project'),
++      step('gen_design_info'),
++      step('other_step'),
++      step('gen_plan_env'),
++      step('release_plan'),
++      step('run_simulation'),
++    ]
++
++    expect(getLanderRunStartStepIndex(steps, true)).toBe(0)
++  })
+ })
